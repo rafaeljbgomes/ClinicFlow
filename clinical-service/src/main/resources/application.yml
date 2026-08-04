@@ -49,5 +49,11 @@ clinicflow:
   messaging:
     exchange: therapy.events.exchange
     dead-letter-exchange: therapy.events.dlx
+    dead-letter-routing-key: clinical.failed
     clinical-queue: clinical.appointment-events.queue
     clinical-dlq: clinical.appointment-events.dlq
+    retry:
+      max-attempts: 4
+      initial-interval: 1s
+      multiplier: 2
+      max-interval: 10s

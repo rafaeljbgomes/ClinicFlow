@@ -21,6 +21,7 @@ class RabbitConfigIT {
     private static final String DLX = "test.therapy.dlx";
     private static final String QUEUE = "test.clinical.queue";
     private static final String DLQ = "test.clinical.dlq";
+    private static final String FAILED_ROUTING_KEY = "clinical.failed";
 
     @Container
     static final RabbitMQContainer RABBITMQ =
@@ -37,10 +38,10 @@ class RabbitConfigIT {
         RabbitConfig config = new RabbitConfig();
         TopicExchange exchange = config.clinicflowExchange(EXCHANGE);
         TopicExchange dlx = config.deadLetterExchange(DLX);
-        Queue queue = config.clinicalQueue(QUEUE, DLX);
+        Queue queue = config.clinicalQueue(QUEUE, DLX, FAILED_ROUTING_KEY);
         Queue dlq = config.clinicalDlq(DLQ);
         Binding completed = config.clinicalCompletedBinding(queue, exchange);
-        Binding deadLetter = config.clinicalDeadLetterBinding(dlq, dlx);
+        Binding deadLetter = config.clinicalDeadLetterBinding(dlq, dlx, FAILED_ROUTING_KEY);
         RabbitAdmin admin = new RabbitAdmin(connectionFactory);
         admin.declareExchange(exchange);
         admin.declareExchange(dlx);
@@ -65,5 +66,14 @@ class RabbitConfigIT {
         Object message = rabbitTemplate.receiveAndConvert(QUEUE, 5000);
 
         assertThat(message).isEqualTo("completed");
+    }
+
+    @Test
+    void isolatesClinicalDeadLettersByExactRoutingKey() {
+        rabbitTemplate.convertAndSend(DLX, FAILED_ROUTING_KEY, "clinical-failure");
+        rabbitTemplate.convertAndSend(DLX, "notification.failed", "notification-failure");
+
+        assertThat(rabbitTemplate.receiveAndConvert(DLQ, 5000)).isEqualTo("clinical-failure");
+        assertThat(rabbitTemplate.receive(DLQ, 250)).isNull();
     }
 }
