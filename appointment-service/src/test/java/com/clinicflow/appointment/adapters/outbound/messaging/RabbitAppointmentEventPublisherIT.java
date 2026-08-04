@@ -39,7 +39,7 @@ class RabbitAppointmentEventPublisherIT {
 
     @Container
     static final RabbitMQContainer RABBITMQ =
-            new RabbitMQContainer("rabbitmq:4.1-alpine");
+            new RabbitMQContainer("rabbitmq:4.3.4-alpine");
 
     private static CachingConnectionFactory connectionFactory;
     private static RabbitTemplate rabbitTemplate;

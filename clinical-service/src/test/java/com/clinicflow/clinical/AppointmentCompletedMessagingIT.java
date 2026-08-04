@@ -35,7 +35,7 @@ class AppointmentCompletedMessagingIT {
 
     @Container
     @ServiceConnection
-    static final RabbitMQContainer RABBITMQ = new RabbitMQContainer("rabbitmq:4.1-alpine");
+    static final RabbitMQContainer RABBITMQ = new RabbitMQContainer("rabbitmq:4.3.4-alpine");
 
     @Autowired private RabbitTemplate rabbit;
     @Autowired private JdbcTemplate jdbc;

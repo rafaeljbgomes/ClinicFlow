@@ -31,13 +31,15 @@ services:
     restart: "no"
 
   rabbitmq:
-    image: rabbitmq:3.13-management-alpine
+    image: rabbitmq:4.3.4-management-alpine
     environment:
       RABBITMQ_DEFAULT_USER: clinicflow
       RABBITMQ_DEFAULT_PASS: clinicflow
     ports:
       - "${CLINICFLOW_RABBITMQ_PORT:-5672}:5672"
       - "${CLINICFLOW_RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
       interval: 10s
@@ -181,3 +183,4 @@ services:
 
 volumes:
   postgres-data:
+  rabbitmq-data:

@@ -30,7 +30,7 @@ postgres:
 rabbitmq:
   enabled: true
   name: rabbitmq
-  image: rabbitmq:3.13-management-alpine
+  image: rabbitmq:4.3.4-management-alpine
   username: clinicflow
   password: clinicflow
   existingSecret: ""
