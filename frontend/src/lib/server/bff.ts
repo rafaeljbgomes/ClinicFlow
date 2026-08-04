@@ -109,11 +109,14 @@ async function backendGetFromBaseUrl(baseUrl: string, path: string, token?: stri
       signal: AbortSignal.timeout(BACKEND_TIMEOUT_MS),
     });
     const latencyMs = Math.round(performance.now() - started);
+    const parsed = await readJsonResult(response);
     return {
       ok: response.ok,
       status: response.status,
       latencyMs,
-      data: await readJson(response),
+      data: parsed.data,
+      invalidJson: parsed.invalidJson,
+      unavailable: false,
     };
   } catch {
     return {
@@ -121,6 +124,8 @@ async function backendGetFromBaseUrl(baseUrl: string, path: string, token?: stri
       status: 503,
       latencyMs: Math.round(performance.now() - started),
       data: null,
+      invalidJson: false,
+      unavailable: true,
     };
   }
 }
@@ -156,14 +161,18 @@ async function normalizeBackendResponse(response: Response) {
 }
 
 async function readJson(response: Response) {
+  return (await readJsonResult(response)).data;
+}
+
+async function readJsonResult(response: Response) {
   const text = await response.text();
   if (!text) {
-    return null;
+    return { data: null, invalidJson: false };
   }
   try {
-    return JSON.parse(text);
+    return { data: JSON.parse(text) as unknown, invalidJson: false };
   } catch {
-    return null;
+    return { data: null, invalidJson: true };
   }
 }
 

@@ -1,5 +1,27 @@
 import { expect, test } from "@playwright/test";
 
+test("session routing remains safe for missing and stale cookies", async ({ context, page }) => {
+  await page.goto("/dashboard");
+  await expect(page).toHaveURL(/\/login$/);
+
+  await context.addCookies([
+    {
+      name: "clinicflow_access_token",
+      value: "stale-token",
+      url: "http://localhost:3000",
+      httpOnly: true,
+      sameSite: "Lax",
+    },
+  ]);
+
+  await page.goto("/login");
+  await expect(page).toHaveURL(/\/login$/);
+  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+
+  await page.goto("/dashboard");
+  await expect(page).toHaveURL(/\/login$/);
+});
+
 test("psychologist can run the main prototype workflow", async ({ page }) => {
   const stamp = Date.now();
   const email = `psychologist.${stamp}@example.com`;

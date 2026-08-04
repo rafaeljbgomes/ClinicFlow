@@ -1,22 +1,26 @@
 import "server-only";
 
+import { cache } from "react";
 import { redirect } from "next/navigation";
+import { classifySession, type SessionResult } from "@/lib/session-result";
 import { backendGet, readTokenCookie } from "@/lib/server/bff";
-import type { Role, UserView } from "@/lib/types";
+import type { Role } from "@/lib/types";
 
-export async function getCurrentUser(): Promise<UserView | null> {
+export const getCurrentSession = cache(async (): Promise<SessionResult> => {
   const token = await readTokenCookie();
-  if (!token) return null;
+  if (!token) return classifySession(token);
 
   const response = await backendGet("auth", "/users/me", token);
-  if (!response.ok || !isUserView(response.data)) return null;
-  return response.data;
-}
+  return classifySession(token, response);
+});
 
 export async function requireCurrentUser() {
-  const user = await getCurrentUser();
-  if (!user) redirect("/login");
-  return user;
+  const session = await getCurrentSession();
+  if (session.status === "anonymous") redirect("/login");
+  if (session.status !== "authenticated") {
+    throw new SessionResolutionError(session.status);
+  }
+  return session.user;
 }
 
 export async function requireDashboardRole(roles: Role[]) {
@@ -31,13 +35,9 @@ export function homeForRole(role: Role) {
   return "/dashboard";
 }
 
-function isUserView(value: unknown): value is UserView {
-  if (!value || typeof value !== "object") return false;
-  const user = value as Partial<UserView>;
-  return (
-    typeof user.id === "string" &&
-    typeof user.email === "string" &&
-    typeof user.fullName === "string" &&
-    ["ADMIN", "PSYCHOLOGIST", "PATIENT"].includes(user.role ?? "")
-  );
+export class SessionResolutionError extends Error {
+  constructor(readonly reason: "unavailable" | "invalid-response") {
+    super("The session could not be verified.");
+    this.name = "SessionResolutionError";
+  }
 }
