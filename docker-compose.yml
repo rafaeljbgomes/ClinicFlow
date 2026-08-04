@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: clinicflow
       POSTGRES_DB: clinicflow
     ports:
-      - "5432:5432"
+      - "${CLINICFLOW_POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
@@ -36,8 +36,8 @@ services:
       RABBITMQ_DEFAULT_USER: clinicflow
       RABBITMQ_DEFAULT_PASS: clinicflow
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "${CLINICFLOW_RABBITMQ_PORT:-5672}:5672"
+      - "${CLINICFLOW_RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
       interval: 10s
@@ -59,7 +59,7 @@ services:
     volumes:
       - ./secrets:/run/secrets/clinicflow:ro
     ports:
-      - "8081:8081"
+      - "${CLINICFLOW_AUTH_PORT:-8081}:8081"
     depends_on:
       postgres-bootstrap:
         condition: service_completed_successfully
@@ -81,7 +81,7 @@ services:
     volumes:
       - ./secrets:/run/secrets/clinicflow:ro
     ports:
-      - "8082:8082"
+      - "${CLINICFLOW_PATIENT_PORT:-8082}:8082"
     depends_on:
       postgres-bootstrap:
         condition: service_completed_successfully
@@ -105,7 +105,7 @@ services:
     volumes:
       - ./secrets:/run/secrets/clinicflow:ro
     ports:
-      - "8083:8083"
+      - "${CLINICFLOW_APPOINTMENT_PORT:-8083}:8083"
     depends_on:
       postgres-bootstrap:
         condition: service_completed_successfully
@@ -129,7 +129,7 @@ services:
     volumes:
       - ./secrets:/run/secrets/clinicflow:ro
     ports:
-      - "8085:8085"
+      - "${CLINICFLOW_CLINICAL_PORT:-8085}:8085"
     depends_on:
       postgres-bootstrap:
         condition: service_completed_successfully
@@ -153,7 +153,7 @@ services:
     volumes:
       - ./secrets:/run/secrets/clinicflow:ro
     ports:
-      - "8084:8084"
+      - "${CLINICFLOW_NOTIFICATION_PORT:-8084}:8084"
     depends_on:
       postgres-bootstrap:
         condition: service_completed_successfully
@@ -171,7 +171,7 @@ services:
       CLINICAL_SERVICE_URL: http://clinical-service:8085
       NOTIFICATION_SERVICE_URL: http://notification-service:8084
     ports:
-      - "3000:3000"
+      - "${CLINICFLOW_FRONTEND_PORT:-3000}:3000"
     depends_on:
       - auth-service
       - patient-service

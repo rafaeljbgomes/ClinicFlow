@@ -1,0 +1,73 @@
+jenkins:
+  systemMessage: "ClinicFlow local CI - configured exclusively through JCasC"
+  numExecutors: 0
+  mode: EXCLUSIVE
+  slaveAgentPort: -1
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: admin
+          name: Local Jenkins administrator
+          password: "${admin-password}"
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+  nodes:
+    - permanent:
+        name: clinicflow-local-agent
+        labelString: clinicflow-ci
+        mode: EXCLUSIVE
+        numExecutors: 1
+        remoteFS: /home/jenkins/agent
+        retentionStrategy: always
+        launcher:
+          ssh:
+            host: agent
+            port: 22
+            credentialsId: clinicflow-agent-ssh
+            javaPath: /opt/java/openjdk/bin/java
+            launchTimeoutSeconds: 60
+            maxNumRetries: 10
+            retryWaitTime: 5
+            sshHostKeyVerificationStrategy:
+              manuallyTrustedKeyVerificationStrategy:
+                requireInitialManualTrust: false
+
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+          - basicSSHUserPrivateKey:
+              scope: SYSTEM
+              id: clinicflow-agent-ssh
+              username: jenkins
+              description: Local controller-to-agent key
+              privateKeySource:
+                directEntry:
+                  privateKey: "${agent_ed25519}"
+
+unclassified:
+  location:
+    url: http://127.0.0.1:8080/
+  timestamper:
+    allPipelines: true
+
+jobs:
+  - script: >
+      pipelineJob('clinicflow-engineering-stabilization') {
+        description('Local engineering stabilization pipeline. Triggered manually.')
+        definition {
+          cpsScm {
+            scm {
+              git {
+                remote { url(System.getenv('CLINICFLOW_JENKINS_SCM_URL')) }
+                branch(System.getenv('CLINICFLOW_JENKINS_BRANCH'))
+                extensions { cloneOptions { timeout(10) } }
+              }
+            }
+            scriptPath('Jenkinsfile')
+            lightweight(false)
+          }
+        }
+      }

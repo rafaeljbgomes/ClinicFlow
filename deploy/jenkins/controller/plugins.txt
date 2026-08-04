@@ -1,0 +1,11 @@
+workflow-aggregator:608.v67378e9d3db_1
+configuration-as-code:2100.vb_fd699d2a_09c
+git:5.10.1
+job-dsl:3654.vdf58f53e2d15
+ssh-slaves:3.1097.v868116049892
+credentials-binding:728.v902a_273b_8947
+junit:1416.vd753e036de5e
+htmlpublisher:427.1
+pipeline-stage-view:2.41
+timestamper:1.30
+ws-cleanup:0.49
