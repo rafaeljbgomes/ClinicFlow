@@ -1,0 +1,10 @@
+apiVersion: v2
+name: clinicflow-observability
+description: ClinicFlow local observability stack based on kube-prometheus-stack
+type: application
+version: 0.1.0
+appVersion: "86.0.0"
+dependencies:
+  - name: kube-prometheus-stack
+    version: 86.0.0
+    repository: https://prometheus-community.github.io/helm-charts

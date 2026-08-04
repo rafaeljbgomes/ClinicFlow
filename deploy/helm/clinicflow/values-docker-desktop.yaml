@@ -1,0 +1,21 @@
+global:
+  imageTag: "0.1.0-local"
+  imagePullPolicy: IfNotPresent
+
+# Local development credentials only. Replace with existingSecret or managed
+# services before using this chart outside Docker Desktop Kubernetes.
+postgres:
+  username: clinicflow
+  password: clinicflow
+  storage:
+    size: 1Gi
+
+rabbitmq:
+  username: clinicflow
+  password: clinicflow
+  storage:
+    size: 1Gi
+
+security:
+  jwt:
+    existingSecret: clinicflow-jwt

@@ -1,0 +1,12 @@
+**/target/
+frontend/
+deploy/
+docs/
+docker/
+.git/
+.idea/
+.vscode/
+secrets/*.pem
+secrets/*.key
+secrets/*.crt
+*.log

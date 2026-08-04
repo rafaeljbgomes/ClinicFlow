@@ -1,0 +1,74 @@
+name: Backend tests
+
+on:
+  pull_request:
+    paths:
+      - "pom.xml"
+      - "*-service/**"
+      - "event-contracts/**"
+      - "coverage-report/**"
+      - ".github/workflows/backend-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "pom.xml"
+      - "*-service/**"
+      - "event-contracts/**"
+      - "coverage-report/**"
+      - ".github/workflows/backend-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  backend-fast:
+    name: backend-fast
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: Unit and Spring slice tests
+        run: mvn -B -ntp test
+      - name: Install shared contract fixtures for module-scoped mutation runs
+        run: mvn -B -ntp -pl event-contracts -am -DskipTests install
+      - name: Mutation tests for domain and application
+        run: mvn -B -ntp -Pmutation org.pitest:pitest-maven:mutationCoverage
+      - name: Upload fast-test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-fast-reports
+          path: |
+            **/target/surefire-reports/**
+            **/target/pit-reports/**
+          if-no-files-found: warn
+
+  backend-full:
+    name: backend-full
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: Integration, functional, messaging and contract verification
+        run: mvn -B -ntp clean verify
+      - name: Upload integration and coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-full-reports
+          path: |
+            **/target/surefire-reports/**
+            **/target/failsafe-reports/**
+            **/target/site/jacoco/**
+            coverage-report/target/site/jacoco-aggregate/**
+          if-no-files-found: warn
