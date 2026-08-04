@@ -51,8 +51,8 @@ class RabbitAppointmentEventPublisherIT {
         connectionFactory.setPassword(RABBITMQ.getAdminPassword());
         RabbitAdmin admin = new RabbitAdmin(connectionFactory);
         TopicExchange exchange = new TopicExchange(EXCHANGE, false, true);
-        Queue queue = new Queue(QUEUE, false, false, true);
-        Queue completedQueue = new Queue(COMPLETED_QUEUE, false, false, true);
+        Queue queue = new Queue(QUEUE, false, true, true);
+        Queue completedQueue = new Queue(COMPLETED_QUEUE, false, true, true);
         admin.declareExchange(exchange);
         admin.declareQueue(queue);
         admin.declareQueue(completedQueue);

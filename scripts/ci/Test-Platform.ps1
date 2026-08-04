@@ -11,14 +11,15 @@ Push-Location $RepositoryRoot
 try {
     & docker compose config --quiet
     if ($LASTEXITCODE -ne 0) { throw "Docker Compose validation failed." }
+    & docker compose --file docker-compose.yml --file docker-compose.ci.yml config --quiet
+    if ($LASTEXITCODE -ne 0) { throw "CI Docker Compose override validation failed." }
     & helm lint ./deploy/helm/clinicflow
     if ($LASTEXITCODE -ne 0) { throw "Helm lint failed." }
 
-    $RenderedDirectory = Join-Path $ReportsDirectory "rendered"
     $RenderedManifest = Join-Path $ReportsDirectory "clinicflow-rendered.yaml"
-    & helm template clinicflow ./deploy/helm/clinicflow --output-dir $RenderedDirectory
+    $RenderedManifestContent = & helm template clinicflow ./deploy/helm/clinicflow
     if ($LASTEXITCODE -ne 0) { throw "Helm template rendering failed." }
-    Get-ChildItem -Path $RenderedDirectory -Recurse -Filter *.yaml | Get-Content | Set-Content -Path $RenderedManifest
+    Set-Content -Path $RenderedManifest -Value $RenderedManifestContent
     & kubeconform -strict -summary -ignore-missing-schemas $RenderedManifest
     if ($LASTEXITCODE -ne 0) { throw "kubeconform validation failed." }
 }

@@ -47,7 +47,7 @@ class RabbitPatientEventPublisherIT {
         connectionFactory.setPassword(RABBITMQ.getAdminPassword());
         RabbitAdmin admin = new RabbitAdmin(connectionFactory);
         TopicExchange exchange = new TopicExchange(EXCHANGE, false, true);
-        Queue queue = new Queue(QUEUE, false, false, true);
+        Queue queue = new Queue(QUEUE, false, true, true);
         admin.declareExchange(exchange);
         admin.declareQueue(queue);
         admin.declareBinding(BindingBuilder.bind(queue).to(exchange).with("patient.created"));

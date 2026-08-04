@@ -10,7 +10,7 @@ Set-IsolatedPorts -RunId $RunId
 
 Push-Location $RepositoryRoot
 try {
-    & docker compose --project-name $ProjectName down --volumes --remove-orphans
+    & docker compose --file docker-compose.yml --file docker-compose.ci.yml --project-name $ProjectName down --volumes --remove-orphans
     if ($LASTEXITCODE -ne 0) { Write-Warning "Cleanup for $ProjectName returned exit code $LASTEXITCODE." }
 }
 finally { Pop-Location }

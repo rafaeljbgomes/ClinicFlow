@@ -20,7 +20,8 @@ services:
       - jenkins-home:/var/jenkins_home
       - ./casc:/var/jenkins_casc:ro
       - ./secrets/admin-password:/run/secrets/admin-password:ro
-      - ./secrets/agent_ed25519:/run/secrets/agent_ed25519:ro
+      - ./secrets/controller_agent_ed25519:/run/secrets/controller_agent_ed25519:ro
+      - ./secrets/agent-host-public-key:/run/secrets/agent-host-public-key:ro
       - ../..:/workspace/clinicflow:ro
     networks:
       - jenkins-internal
@@ -34,11 +35,15 @@ services:
     image: clinicflow/jenkins-agent:7.13.0
     restart: unless-stopped
     environment:
-      JENKINS_AGENT_SSH_PUBKEY_FILE: /run/secrets/agent_ed25519.pub
+      JENKINS_AGENT_SSH_PUBKEY_FILE: /run/secrets/controller_agent_ed25519.pub
+      JENKINS_AGENT_SSH_HOST_KEY_FILE: /run/secrets/agent_host_ed25519
+      TESTCONTAINERS_HOST_OVERRIDE: host.docker.internal
     group_add:
       - "${DOCKER_GID:-0}"
     volumes:
-      - ./secrets/agent_ed25519.pub:/run/secrets/agent_ed25519.pub:ro
+      - ./secrets/controller_agent_ed25519.pub:/run/secrets/controller_agent_ed25519.pub:ro
+      - ./secrets/agent_host_ed25519:/run/secrets/agent_host_ed25519:ro
+      - ./secrets/agent_host_ed25519.pub:/run/secrets/agent_host_ed25519.pub:ro
       - ../..:/workspace/clinicflow:ro
       - /var/run/docker.sock:/var/run/docker.sock
       - jenkins-agent-workspace:/home/jenkins/agent
@@ -50,7 +55,7 @@ services:
 
 networks:
   jenkins-internal:
-    internal: true
+    driver: bridge
 
 volumes:
   jenkins-home:

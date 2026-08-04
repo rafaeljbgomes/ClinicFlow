@@ -31,8 +31,8 @@ jenkins:
             maxNumRetries: 10
             retryWaitTime: 5
             sshHostKeyVerificationStrategy:
-              manuallyTrustedKeyVerificationStrategy:
-                requireInitialManualTrust: false
+              manuallyProvidedKeyVerificationStrategy:
+                key: "${agent-host-public-key}"
 
 credentials:
   system:
@@ -45,7 +45,7 @@ credentials:
               description: Local controller-to-agent key
               privateKeySource:
                 directEntry:
-                  privateKey: "${agent_ed25519}"
+                  privateKey: "${controller_agent_ed25519}"
 
 unclassified:
   location:
