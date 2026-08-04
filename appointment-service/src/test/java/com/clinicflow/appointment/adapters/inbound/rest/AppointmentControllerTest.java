@@ -115,7 +115,9 @@ class AppointmentControllerTest {
                                 }
                                 """.formatted(PATIENT_ID)))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.title").value("Invalid request"));
+                .andExpect(jsonPath("$.title").value("Validation failed"))
+                .andExpect(jsonPath("$.code").value("validation_failed"))
+                .andExpect(jsonPath("$.correlationId").isNotEmpty());
     }
 
     @Test
