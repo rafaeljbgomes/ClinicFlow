@@ -1,0 +1,50 @@
+name: service
+
+image:
+  repository: clinicflow/service
+  tag: "0.1.0-local"
+  digest: ""
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+port: 8080
+managementPort: 9000
+
+database:
+  name: clinicflow
+  host: postgres
+  port: 5432
+  secretName: clinicflow-platform-postgres
+
+rabbitmq:
+  enabled: false
+  host: rabbitmq
+  port: 5672
+  secretName: clinicflow-platform-rabbitmq
+
+jwt:
+  issuer: clinicflow-auth
+  secretName: clinicflow-jwt
+  publicKeyKey: jwt-public.pem
+  privateKeyKey: jwt-private.pem
+  privateKeyEnabled: false
+
+environment: {}
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 750m
+    memory: 768Mi
+
+serviceMonitor:
+  enabled: true
+  interval: 15s
+  scrapeTimeout: 10s
+
+networkPolicy:
+  enabled: true
+  frontendComponent: frontend
+  monitoringNamespace: monitoring

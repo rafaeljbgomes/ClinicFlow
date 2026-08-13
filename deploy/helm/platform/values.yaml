@@ -1,0 +1,45 @@
+postgres:
+  name: postgres
+  image: postgres:16-alpine
+  database: clinicflow
+  username: clinicflow
+  password: clinicflow
+  existingSecret: ""
+  storage:
+    size: 1Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+rabbitmq:
+  name: rabbitmq
+  image: rabbitmq:4.3.4-management-alpine
+  username: clinicflow
+  password: clinicflow
+  existingSecret: ""
+  storage:
+    size: 1Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+serviceMonitor:
+  enabled: true
+  interval: 15s
+  scrapeTimeout: 10s
+
+grafanaDashboards:
+  enabled: true
+  label: grafana_dashboard
+
+networkPolicy:
+  enabled: true
+  monitoringNamespace: monitoring

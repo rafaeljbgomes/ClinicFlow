@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["name", "image", "port", "database", "jwt"],
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "managementPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "image": {
+      "type": "object",
+      "required": ["repository", "tag", "digest", "pullPolicy"],
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "tag": { "type": "string" },
+        "digest": { "type": "string" },
+        "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "tag": { "minLength": 1, "not": { "const": "latest" } },
+            "digest": { "maxLength": 0 }
+          }
+        },
+        {
+          "properties": {
+            "tag": { "maxLength": 0 },
+            "digest": { "pattern": "^sha256:[a-fA-F0-9]{64}$" }
+          }
+        }
+      ]
+    },
+    "database": {
+      "type": "object",
+      "required": ["name", "host", "port", "secretName"]
+    },
+    "rabbitmq": {
+      "type": "object",
+      "required": ["enabled", "host", "port", "secretName"]
+    },
+    "jwt": {
+      "type": "object",
+      "required": ["issuer", "secretName", "publicKeyKey", "privateKeyKey", "privateKeyEnabled"]
+    }
+  }
+}

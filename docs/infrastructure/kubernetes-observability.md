@@ -6,18 +6,22 @@ learning and portfolio setup, not a production clinical deployment.
 
 ## Deployment Model
 
-The Kubernetes target is Docker Desktop Kubernetes. The project has two Helm
-releases:
+The Kubernetes target is Docker Desktop Kubernetes. Shared capabilities and
+application components have separate Helm releases:
 
 - `clinicflow-observability`, installed in `monitoring`, wraps
   `kube-prometheus-stack` version `86.0.0`.
-- `clinicflow`, installed in `clinicflow`, deploys the frontend, four Spring
-  services, local PostgreSQL, local RabbitMQ, ServiceMonitors, NetworkPolicies,
-  and Grafana dashboards.
+- `clinicflow-platform`, installed in `clinicflow`, owns local PostgreSQL,
+  RabbitMQ, their credentials, namespace-wide policy, RabbitMQ monitoring, and
+  shared Grafana dashboards.
+- `clinicflow-auth`, `clinicflow-patient`, `clinicflow-appointment`,
+  `clinicflow-clinical`, and `clinicflow-notification` each install the reusable
+  Spring-service chart with service-specific values.
+- `clinicflow-frontend` owns the Next.js frontend and BFF resources.
 
-The application chart uses local images tagged `0.1.0-local`. Docker Desktop
-Kubernetes can use those images directly because it shares the local Docker
-image store.
+Application releases use their own immutable image tag or digest. The local
+script derives a commit/timestamp tag by default. Docker Desktop Kubernetes can
+use those images directly because it shares the local Docker image store.
 
 ## Automated Deployment
 
@@ -27,11 +31,13 @@ From the repository root, deploy the complete local stack with:
 .\scripts\deploy-local-kubernetes.ps1
 ```
 
-Use `-SkipBuild` when the images have not changed and `-SkipObservability` when
-Prometheus and Grafana are already installed:
+Use `-Component` to build and upgrade only one application. Reusing an existing
+image with `-SkipBuild` requires its explicit immutable tag:
 
 ```powershell
-.\scripts\deploy-local-kubernetes.ps1 -SkipBuild -SkipObservability
+.\scripts\deploy-local-kubernetes.ps1 -Component Patient
+.\scripts\deploy-local-kubernetes.ps1 -Component Patient `
+  -SkipBuild -ImageTag git-<commit>-<timestamp>
 ```
 
 The remaining sections show the equivalent individual commands for validation
@@ -94,16 +100,44 @@ helm upgrade --install clinicflow-observability deploy/helm/observability `
   -f deploy/helm/observability/values-docker-desktop.yaml
 ```
 
-Install ClinicFlow:
+Validate and install the independently managed releases (replace the example
+tag with an image that exists locally):
 
 ```powershell
-helm lint deploy/helm/clinicflow
-helm template clinicflow deploy/helm/clinicflow `
-  -n clinicflow `
-  -f deploy/helm/clinicflow/values-docker-desktop.yaml
-helm upgrade --install clinicflow deploy/helm/clinicflow `
-  -n clinicflow `
-  -f deploy/helm/clinicflow/values-docker-desktop.yaml
+helm lint deploy/helm/platform -f deploy/helm/platform/values-docker-desktop.yaml
+helm upgrade --install clinicflow-platform deploy/helm/platform `
+  -n clinicflow -f deploy/helm/platform/values-docker-desktop.yaml `
+  --atomic --wait --timeout 5m
+
+$imageTag = "git-<commit>-<timestamp>"
+foreach ($service in "auth", "patient", "appointment", "clinical", "notification") {
+  helm lint deploy/helm/service -f "deploy/helm/services/$service.yaml"
+  helm upgrade --install "clinicflow-$service" deploy/helm/service `
+    -n clinicflow -f "deploy/helm/services/$service.yaml" `
+    --set-string "image.tag=$imageTag" --atomic --wait --timeout 5m
+}
+
+helm lint deploy/helm/frontend
+helm upgrade --install clinicflow-frontend deploy/helm/frontend `
+  -n clinicflow --set-string "image.tag=$imageTag" `
+  --atomic --wait --timeout 5m
+```
+
+Inspect and roll back only patient-service:
+
+```powershell
+helm status clinicflow-patient -n clinicflow
+helm history clinicflow-patient -n clinicflow
+helm rollback clinicflow-patient <revision> -n clinicflow --wait --timeout 5m
+```
+
+For a complete removal, uninstall applications before the shared platform:
+
+```powershell
+helm uninstall clinicflow-frontend clinicflow-notification clinicflow-clinical `
+  clinicflow-appointment clinicflow-patient clinicflow-auth -n clinicflow
+helm uninstall clinicflow-platform -n clinicflow
+helm uninstall clinicflow-observability -n monitoring
 ```
 
 Validate rollouts:
@@ -143,7 +177,7 @@ sum by (service, event_type, status) (rate(clinicflow_domain_events_consumed_tot
 rabbitmq_queue_messages_ready{namespace="clinicflow"}
 ```
 
-Grafana loads the `ClinicFlow Platform` dashboard from the application chart
+Grafana loads the `ClinicFlow Platform` dashboard from the platform chart
 through the dashboard sidecar configured in kube-prometheus-stack.
 
 ## Troubleshooting
@@ -158,8 +192,8 @@ through the dashboard sidecar configured in kube-prometheus-stack.
 - If Grafana does not show the dashboard, restart the Grafana pod or confirm the
   ConfigMap has label `grafana_dashboard=1`.
 - If NetworkPolicies block traffic in a CNI-enabled local cluster, inspect the
-  frontend, backend, PostgreSQL, RabbitMQ, and monitoring policies in
-  `deploy/helm/clinicflow/templates/networkpolicy.yaml`.
+  frontend and service charts plus PostgreSQL, RabbitMQ, and default-deny
+  policies in `deploy/helm/platform/templates/networkpolicy.yaml`.
 
 ## Future Production Direction
 

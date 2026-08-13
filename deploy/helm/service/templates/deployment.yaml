@@ -1,87 +1,66 @@
-{{- range $key, $service := .Values.backend.services }}
-apiVersion: v1
-kind: Service
-metadata:
-  name: {{ $service.name }}
-  labels:
-    {{- include "clinicflow.labels" $ | nindent 4 }}
-    app.kubernetes.io/component: {{ $service.name }}
-    clinicflow.io/metrics: spring
-spec:
-  ports:
-    - name: http
-      port: {{ $service.port }}
-      targetPort: http
-    - name: management
-      port: 9000
-      targetPort: management
-  selector:
-    app.kubernetes.io/component: {{ $service.name }}
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ $service.name }}
+  name: {{ .Values.name }}
   labels:
-    {{- include "clinicflow.labels" $ | nindent 4 }}
-    app.kubernetes.io/component: {{ $service.name }}
+    {{- include "clinicflow-service.labels" . | nindent 4 }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      app.kubernetes.io/component: {{ $service.name }}
+      {{- include "clinicflow-service.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "clinicflow.labels" $ | nindent 8 }}
-        app.kubernetes.io/component: {{ $service.name }}
+        {{- include "clinicflow-service.labels" . | nindent 8 }}
+        app.kubernetes.io/component: {{ .Values.name }}
     spec:
       containers:
-        - name: {{ $service.name }}
-          image: "{{ $service.image }}:{{ $.Values.global.imageTag }}"
-          imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
+        - name: {{ .Values.name }}
+          image: {{ include "clinicflow-service.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http
-              containerPort: {{ $service.port }}
+              containerPort: {{ .Values.port }}
             - name: management
-              containerPort: 9000
+              containerPort: {{ .Values.managementPort }}
           envFrom:
             - configMapRef:
-                name: {{ include "clinicflow.configName" $ }}
+                name: {{ include "clinicflow-service.configName" . }}
           env:
             - name: SPRING_PROFILES_ACTIVE
               value: kubernetes
             - name: SPRING_DATASOURCE_URL
-              value: "jdbc:postgresql://{{ $.Values.postgres.name }}:5432/{{ $service.database }}"
+              value: "jdbc:postgresql://{{ .Values.database.host }}:{{ .Values.database.port }}/{{ .Values.database.name }}"
             - name: SPRING_DATASOURCE_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "clinicflow.postgresSecretName" $ }}
+                  name: {{ .Values.database.secretName }}
                   key: username
             - name: SPRING_DATASOURCE_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "clinicflow.postgresSecretName" $ }}
+                  name: {{ .Values.database.secretName }}
                   key: password
-            {{- if $service.rabbitmq }}
+            {{- if .Values.rabbitmq.enabled }}
             - name: SPRING_RABBITMQ_HOST
-              value: {{ $.Values.rabbitmq.name | quote }}
+              value: {{ .Values.rabbitmq.host | quote }}
             - name: SPRING_RABBITMQ_PORT
-              value: "5672"
+              value: {{ .Values.rabbitmq.port | quote }}
             - name: SPRING_RABBITMQ_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "clinicflow.rabbitmqSecretName" $ }}
+                  name: {{ .Values.rabbitmq.secretName }}
                   key: username
             - name: SPRING_RABBITMQ_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "clinicflow.rabbitmqSecretName" $ }}
+                  name: {{ .Values.rabbitmq.secretName }}
                   key: password
             {{- end }}
             - name: CLINICFLOW_SECURITY_JWT_PUBLIC_KEY_PATH
               value: /run/secrets/clinicflow/jwt-public.pem
-            {{- if $service.jwtPrivateKey }}
+            {{- if .Values.jwt.privateKeyEnabled }}
             - name: CLINICFLOW_SECURITY_JWT_PRIVATE_KEY_PATH
               value: /run/secrets/clinicflow/jwt-private.pem
             {{- end }}
@@ -102,7 +81,7 @@ spec:
               port: management
             periodSeconds: 10
           resources:
-            {{- toYaml $.Values.backend.resources | nindent 12 }}
+            {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
             - name: jwt
               mountPath: /run/secrets/clinicflow
@@ -110,13 +89,11 @@ spec:
       volumes:
         - name: jwt
           secret:
-            secretName: {{ $.Values.security.jwt.existingSecret }}
+            secretName: {{ .Values.jwt.secretName }}
             items:
-              - key: {{ $.Values.security.jwt.publicKeyKey }}
+              - key: {{ .Values.jwt.publicKeyKey }}
                 path: jwt-public.pem
-              {{- if $service.jwtPrivateKey }}
-              - key: {{ $.Values.security.jwt.privateKeyKey }}
+              {{- if .Values.jwt.privateKeyEnabled }}
+              - key: {{ .Values.jwt.privateKeyKey }}
                 path: jwt-private.pem
               {{- end }}
----
-{{- end }}

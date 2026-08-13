@@ -1,0 +1,12 @@
+name: patient-service
+image:
+  repository: clinicflow/patient-service
+port: 8082
+database:
+  name: clinicflow_patient
+rabbitmq:
+  enabled: true
+environment:
+  CLINICFLOW_DEMO_BOOTSTRAP_ENABLED: "true"
+  CLINICFLOW_MESSAGING_EXCHANGE: therapy.events.exchange
+  CLINICFLOW_MESSAGING_DEAD_LETTER_EXCHANGE: therapy.events.dlx

@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "clinicflow-frontend.configName" . }}
+  labels:
+    {{- include "clinicflow-frontend.labels" . | nindent 4 }}
+data:
+  AUTH_SERVICE_URL: {{ .Values.services.auth.url | quote }}
+  PATIENT_SERVICE_URL: {{ .Values.services.patient.url | quote }}
+  APPOINTMENT_SERVICE_URL: {{ .Values.services.appointment.url | quote }}
+  CLINICAL_SERVICE_URL: {{ .Values.services.clinical.url | quote }}
+  NOTIFICATION_SERVICE_URL: {{ .Values.services.notification.url | quote }}
+  AUTH_SERVICE_HEALTH_URL: {{ .Values.services.auth.healthUrl | quote }}
+  PATIENT_SERVICE_HEALTH_URL: {{ .Values.services.patient.healthUrl | quote }}
+  APPOINTMENT_SERVICE_HEALTH_URL: {{ .Values.services.appointment.healthUrl | quote }}
+  CLINICAL_SERVICE_HEALTH_URL: {{ .Values.services.clinical.healthUrl | quote }}
+  NOTIFICATION_SERVICE_HEALTH_URL: {{ .Values.services.notification.healthUrl | quote }}

@@ -1,10 +1,9 @@
-{{- if .Values.postgres.enabled }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: postgres-init
   labels:
-    {{- include "clinicflow.labels" . | nindent 4 }}
+    {{- include "clinicflow-platform.labels" . | nindent 4 }}
     app.kubernetes.io/component: postgres
 data:
   01-create-databases.sql: |
@@ -19,7 +18,7 @@ kind: Service
 metadata:
   name: {{ .Values.postgres.name }}
   labels:
-    {{- include "clinicflow.labels" . | nindent 4 }}
+    {{- include "clinicflow-platform.labels" . | nindent 4 }}
     app.kubernetes.io/component: postgres
 spec:
   ports:
@@ -34,7 +33,7 @@ kind: StatefulSet
 metadata:
   name: {{ .Values.postgres.name }}
   labels:
-    {{- include "clinicflow.labels" . | nindent 4 }}
+    {{- include "clinicflow-platform.labels" . | nindent 4 }}
     app.kubernetes.io/component: postgres
 spec:
   serviceName: {{ .Values.postgres.name }}
@@ -45,7 +44,7 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "clinicflow.labels" . | nindent 8 }}
+        {{- include "clinicflow-platform.labels" . | nindent 8 }}
         app.kubernetes.io/component: postgres
     spec:
       containers:
@@ -59,12 +58,12 @@ spec:
             - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "clinicflow.postgresSecretName" . }}
+                  name: {{ include "clinicflow-platform.postgresSecretName" . }}
                   key: username
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "clinicflow.postgresSecretName" . }}
+                  name: {{ include "clinicflow-platform.postgresSecretName" . }}
                   key: password
             - name: POSTGRES_DB
               value: {{ .Values.postgres.database | quote }}
@@ -100,4 +99,3 @@ spec:
         resources:
           requests:
             storage: {{ .Values.postgres.storage.size | quote }}
-{{- end }}
