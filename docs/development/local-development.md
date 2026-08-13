@@ -148,6 +148,9 @@ same-origin API requests.
 
 Docker Compose remains the fastest development loop. Use Kubernetes when working
 on orchestration, probes, network policies, metrics, Prometheus, or Grafana.
+The supported CLI line is Helm 3.19.x, matching the version pinned in the
+Jenkins agent. The deployment script checks this before building images because
+the current observability dependency is not validated with Helm 4.
 
 Run the complete local deployment from the repository root:
 

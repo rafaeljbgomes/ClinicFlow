@@ -40,6 +40,17 @@ function Assert-Command {
     }
 }
 
+function Assert-HelmCompatibility {
+    $version = (& helm version --template '{{ .Version }}').Trim()
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to determine the Helm version."
+    }
+    if ($version -notmatch '^v?3\.19\.') {
+        throw "ClinicFlow local Kubernetes deployment supports Helm 3.19.x; found '$version'. Use the version pinned by deploy/jenkins/agent/Dockerfile."
+    }
+    Write-Host "Using supported Helm version $version."
+}
+
 function Invoke-Checked {
     param(
         [Parameter(Mandatory)][string]$Command,
@@ -57,6 +68,7 @@ try {
     Assert-Command docker
     Assert-Command kubectl
     Assert-Command helm
+    Assert-HelmCompatibility
 
     Write-Host "Checking Kubernetes cluster..."
     Invoke-Checked kubectl cluster-info

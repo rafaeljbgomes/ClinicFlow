@@ -9,6 +9,11 @@ learning and portfolio setup, not a production clinical deployment.
 The Kubernetes target is Docker Desktop Kubernetes. Shared capabilities and
 application components have separate Helm releases:
 
+The supported Helm CLI line is 3.19.x, matching
+`deploy/jenkins/agent/Dockerfile`. The local installer fails before image builds
+when another major/minor line is active; in particular, the current
+`kube-prometheus-stack` wrapper has not been validated with Helm 4.
+
 - `clinicflow-observability`, installed in `monitoring`, wraps
   `kube-prometheus-stack` version `86.0.0`.
 - `clinicflow-platform`, installed in `clinicflow`, owns local PostgreSQL,
