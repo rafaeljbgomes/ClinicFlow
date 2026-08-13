@@ -148,9 +148,13 @@ same-origin API requests.
 
 Docker Compose remains the fastest development loop. Use Kubernetes when working
 on orchestration, probes, network policies, metrics, Prometheus, or Grafana.
-The supported CLI line is Helm 3.19.x, matching the version pinned in the
-Jenkins agent. The deployment script checks this before building images because
-the current observability dependency is not validated with Helm 4.
+The supported CLI line is Helm 4.x. Jenkins pins the validated patch release,
+while the deployment script accepts Helm 4 patch updates and checks the major
+version before building images. During the Helm 4 migration, installs and
+upgrades explicitly retain client-side apply semantics.
+The observability release uses `--wait=legacy` for compatibility with the
+bundled kube-prometheus-stack admission hooks; the other releases use Helm 4's
+watcher strategy.
 
 Run the complete local deployment from the repository root:
 
@@ -206,21 +210,23 @@ Install observability, the platform, and the independent application releases:
 helm dependency update deploy/helm/observability
 helm upgrade --install clinicflow-observability deploy/helm/observability `
   -n monitoring --create-namespace `
-  -f deploy/helm/observability/values-docker-desktop.yaml
+  -f deploy/helm/observability/values-docker-desktop.yaml `
+  --rollback-on-failure --wait=legacy --server-side=false --timeout 5m
 
 helm upgrade --install clinicflow-platform deploy/helm/platform `
   -n clinicflow -f deploy/helm/platform/values-docker-desktop.yaml `
-  --atomic --wait --timeout 5m
+  --rollback-on-failure --wait=watcher --server-side=false --timeout 5m
 
 foreach ($service in "auth", "patient", "appointment", "clinical", "notification") {
   helm upgrade --install "clinicflow-$service" deploy/helm/service `
     -n clinicflow -f "deploy/helm/services/$service.yaml" `
-    --set-string "image.tag=$imageTag" --atomic --wait --timeout 5m
+    --set-string "image.tag=$imageTag" `
+    --rollback-on-failure --wait=watcher --server-side=false --timeout 5m
 }
 
 helm upgrade --install clinicflow-frontend deploy/helm/frontend `
   -n clinicflow --set-string "image.tag=$imageTag" `
-  --atomic --wait --timeout 5m
+  --rollback-on-failure --wait=watcher --server-side=false --timeout 5m
 ```
 
 Inspect or roll back one release without changing the others:
@@ -228,7 +234,8 @@ Inspect or roll back one release without changing the others:
 ```powershell
 helm status clinicflow-patient -n clinicflow
 helm history clinicflow-patient -n clinicflow
-helm rollback clinicflow-patient <revision> -n clinicflow --wait --timeout 5m
+helm rollback clinicflow-patient <revision> -n clinicflow `
+  --wait=watcher --server-side=false --timeout 5m
 ```
 
 Validate rollouts:

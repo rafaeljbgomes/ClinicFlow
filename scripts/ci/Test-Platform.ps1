@@ -23,6 +23,14 @@ try {
     }
     $renderedManifests = [System.Collections.Generic.List[string]]::new()
 
+    & helm lint ./deploy/helm/observability --values ./deploy/helm/observability/values-docker-desktop.yaml
+    if ($LASTEXITCODE -ne 0) { throw "Observability Helm lint failed." }
+    $observabilityManifest = & helm template clinicflow-observability ./deploy/helm/observability --namespace monitoring --values ./deploy/helm/observability/values-docker-desktop.yaml
+    if ($LASTEXITCODE -ne 0) { throw "Observability Helm rendering failed." }
+    $observabilityPath = Join-Path $ReportsDirectory "observability-rendered.yaml"
+    Set-Content -Path $observabilityPath -Value $observabilityManifest
+    $renderedManifests.Add($observabilityPath)
+
     & helm lint ./deploy/helm/platform --values ./deploy/helm/platform/values-docker-desktop.yaml
     if ($LASTEXITCODE -ne 0) { throw "Platform Helm lint failed." }
     $platformManifest = & helm template clinicflow-platform ./deploy/helm/platform --namespace clinicflow --values ./deploy/helm/platform/values-docker-desktop.yaml

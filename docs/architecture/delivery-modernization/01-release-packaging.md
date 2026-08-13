@@ -2,9 +2,9 @@
 
 GitHub tracking issue: [#1](https://github.com/rafaeljbgomes/ClinicFlow/issues/1)
 
-Implementation status: chart and local-orchestration implementation is tracked
-in issue #1. The issue remains open until static rendering and live independent
-upgrade/rollback evidence are recorded.
+Implementation status: completed in issue #1. The follow-up migration from
+Helm 3 to Helm 4 is tracked in
+[issue #2](https://github.com/rafaeljbgomes/ClinicFlow/issues/2).
 
 ## Problem
 

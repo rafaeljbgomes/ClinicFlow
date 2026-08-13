@@ -6,7 +6,8 @@ ARG NODE_VERSION=24.16.0
 ARG POWERSHELL_VERSION=7.5.4
 ARG DOCKER_VERSION=29.6.2
 ARG COMPOSE_VERSION=2.39.4
-ARG HELM_VERSION=3.19.0
+ARG HELM_VERSION=4.2.4
+ARG HELM_SHA256=c306b46f719b0a4da32d0f78ee21bf90ce8d602f15b22ab753f0674d1670a7f3
 ARG KUBECONFORM_VERSION=0.7.0
 ARG ACTIONLINT_VERSION=1.7.12
 ARG GITLEAKS_VERSION=8.28.0
@@ -38,7 +39,11 @@ RUN curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${
     && chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
 RUN curl -fsSL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz" \
-       | tar -xz --strip-components=1 -C /usr/local/bin linux-amd64/helm \
+       -o /tmp/helm-linux-amd64.tar.gz \
+    && echo "${HELM_SHA256}  /tmp/helm-linux-amd64.tar.gz" | sha256sum --check --strict \
+    && tar -xzf /tmp/helm-linux-amd64.tar.gz --strip-components=1 -C /usr/local/bin linux-amd64/helm \
+    && rm /tmp/helm-linux-amd64.tar.gz \
+    && helm version --short \
     && curl -fsSL "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
        | tar -xz -C /usr/local/bin kubeconform \
     && curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \

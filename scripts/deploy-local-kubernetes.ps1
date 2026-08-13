@@ -45,8 +45,8 @@ function Assert-HelmCompatibility {
     if ($LASTEXITCODE -ne 0) {
         throw "Unable to determine the Helm version."
     }
-    if ($version -notmatch '^v?3\.19\.') {
-        throw "ClinicFlow local Kubernetes deployment supports Helm 3.19.x; found '$version'. Use the version pinned by deploy/jenkins/agent/Dockerfile."
+    if ($version -notmatch '^v?4\.') {
+        throw "ClinicFlow local Kubernetes deployment requires Helm 4.x; found '$version'. Jenkins pins the validated patch in deploy/jenkins/agent/Dockerfile."
     }
     Write-Host "Using supported Helm version $version."
 }
@@ -144,7 +144,9 @@ try {
             --namespace $MonitoringNamespace `
             --create-namespace `
             --values $observabilityValues `
-            --wait `
+            --rollback-on-failure `
+            --wait=legacy `
+            --server-side=false `
             --timeout $Timeout
     }
 
@@ -153,8 +155,9 @@ try {
         Invoke-Checked helm upgrade --install clinicflow-platform $platformChart `
             --namespace $Namespace `
             --values $platformValues `
-            --atomic `
-            --wait `
+            --rollback-on-failure `
+            --wait=watcher `
+            --server-side=false `
             --timeout $Timeout
     }
     else {
@@ -170,7 +173,7 @@ try {
             "upgrade", "--install", $definition.Release, $definition.Chart,
             "--namespace", $Namespace,
             "--set-string", "image.tag=$ImageTag",
-            "--atomic", "--wait", "--timeout", $Timeout
+            "--rollback-on-failure", "--wait=watcher", "--server-side=false", "--timeout", $Timeout
         )
         if ($definition.Values) {
             $arguments += @("--values", (Join-Path $serviceValuesDirectory $definition.Values))

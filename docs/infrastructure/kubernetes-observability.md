@@ -9,10 +9,15 @@ learning and portfolio setup, not a production clinical deployment.
 The Kubernetes target is Docker Desktop Kubernetes. Shared capabilities and
 application components have separate Helm releases:
 
-The supported Helm CLI line is 3.19.x, matching
-`deploy/jenkins/agent/Dockerfile`. The local installer fails before image builds
-when another major/minor line is active; in particular, the current
-`kube-prometheus-stack` wrapper has not been validated with Helm 4.
+The supported Helm CLI line is 4.x. Jenkins pins the validated patch in
+`deploy/jenkins/agent/Dockerfile`, while the local installer accepts Helm 4
+patch updates. The migration explicitly uses client-side apply until
+server-side apply is evaluated independently. Progress and validation evidence
+are tracked in [GitHub issue #2](https://github.com/rafaeljbgomes/ClinicFlow/issues/2).
+Application and platform releases use Helm 4's watcher strategy. Observability
+uses the legacy strategy because the bundled kube-prometheus-stack admission
+hooks declare `before-hook-creation`; the watcher waits for nonexistent hook
+resources until the timeout before continuing a fresh installation.
 
 - `clinicflow-observability`, installed in `monitoring`, wraps
   `kube-prometheus-stack` version `86.0.0`.
@@ -102,7 +107,8 @@ Install observability:
 helm dependency update deploy/helm/observability
 helm upgrade --install clinicflow-observability deploy/helm/observability `
   -n monitoring --create-namespace `
-  -f deploy/helm/observability/values-docker-desktop.yaml
+  -f deploy/helm/observability/values-docker-desktop.yaml `
+  --rollback-on-failure --wait=legacy --server-side=false --timeout 5m
 ```
 
 Validate and install the independently managed releases (replace the example
@@ -112,20 +118,21 @@ tag with an image that exists locally):
 helm lint deploy/helm/platform -f deploy/helm/platform/values-docker-desktop.yaml
 helm upgrade --install clinicflow-platform deploy/helm/platform `
   -n clinicflow -f deploy/helm/platform/values-docker-desktop.yaml `
-  --atomic --wait --timeout 5m
+  --rollback-on-failure --wait=watcher --server-side=false --timeout 5m
 
 $imageTag = "git-<commit>-<timestamp>"
 foreach ($service in "auth", "patient", "appointment", "clinical", "notification") {
   helm lint deploy/helm/service -f "deploy/helm/services/$service.yaml"
   helm upgrade --install "clinicflow-$service" deploy/helm/service `
     -n clinicflow -f "deploy/helm/services/$service.yaml" `
-    --set-string "image.tag=$imageTag" --atomic --wait --timeout 5m
+    --set-string "image.tag=$imageTag" `
+    --rollback-on-failure --wait=watcher --server-side=false --timeout 5m
 }
 
 helm lint deploy/helm/frontend
 helm upgrade --install clinicflow-frontend deploy/helm/frontend `
   -n clinicflow --set-string "image.tag=$imageTag" `
-  --atomic --wait --timeout 5m
+  --rollback-on-failure --wait=watcher --server-side=false --timeout 5m
 ```
 
 Inspect and roll back only patient-service:
@@ -133,7 +140,8 @@ Inspect and roll back only patient-service:
 ```powershell
 helm status clinicflow-patient -n clinicflow
 helm history clinicflow-patient -n clinicflow
-helm rollback clinicflow-patient <revision> -n clinicflow --wait --timeout 5m
+helm rollback clinicflow-patient <revision> -n clinicflow `
+  --wait=watcher --server-side=false --timeout 5m
 ```
 
 For a complete removal, uninstall applications before the shared platform:
