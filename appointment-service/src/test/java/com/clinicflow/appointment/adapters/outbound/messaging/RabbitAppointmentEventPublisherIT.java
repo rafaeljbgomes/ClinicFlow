@@ -39,7 +39,9 @@ class RabbitAppointmentEventPublisherIT {
 
     @Container
     static final RabbitMQContainer RABBITMQ =
-            new RabbitMQContainer("rabbitmq:4.3.4-alpine");
+            new RabbitMQContainer(org.testcontainers.utility.DockerImageName
+                    .parse("rabbitmq:4.3.4-management-alpine@sha256:44bf7eb50fe1765885659e49ccfdc775f8e531964d979321aee380a071f49f94")
+                    .asCompatibleSubstituteFor("rabbitmq"));
 
     private static CachingConnectionFactory connectionFactory;
     private static RabbitTemplate rabbitTemplate;
