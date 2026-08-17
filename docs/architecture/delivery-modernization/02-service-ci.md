@@ -55,7 +55,6 @@ it is not one controller per service.
 - `deploy/jenkins/controller/plugins.txt`
 - `scripts/ci/**`
 - service directories and `frontend/`
-- `docs/engineering-stabilization.md`
 
 ## Decisions Required Before Implementation
 
