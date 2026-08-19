@@ -1,0 +1,70 @@
+pipeline {
+    agent { label 'clinicflow-ci' }
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '20', artifactNumToKeepStr: '10'))
+        disableConcurrentBuilds()
+        skipDefaultCheckout(true)
+        timeout(time: 60, unit: 'MINUTES')
+        timestamps()
+    }
+
+    environment {
+        COMPONENT = 'notification-service'
+        IMAGE_TAG = "clinicflow/notification-service:ci-${BUILD_NUMBER}"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps { checkout scm }
+        }
+        stage('Repository hygiene') {
+            steps { sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Test-RepositoryHygiene.ps1' }
+        }
+        stage('Build') {
+            steps { sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Invoke-ServiceBackend.ps1 -Service $COMPONENT -Phase Build' }
+        }
+        stage('Unit tests') {
+            steps { sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Invoke-ServiceBackend.ps1 -Service $COMPONENT -Phase Unit' }
+            post {
+                always {
+                    junit allowEmptyResults: true, testResults: "${COMPONENT}/target/surefire-reports/*.xml"
+                }
+            }
+        }
+        stage('Integration tests') {
+            steps { sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Invoke-ServiceBackend.ps1 -Service $COMPONENT -Phase Integration' }
+            post {
+                always {
+                    junit allowEmptyResults: true, testResults: "${COMPONENT}/target/failsafe-reports/*.xml"
+                }
+            }
+        }
+        stage('Mutation tests') {
+            steps { sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Invoke-ServiceBackend.ps1 -Service $COMPONENT -Phase Mutation' }
+            post {
+                always {
+                    archiveArtifacts allowEmptyArchive: true, artifacts: "${COMPONENT}/target/pit-reports/**", fingerprint: false
+                    publishHTML(target: [allowMissing: true, alwaysLinkToLastBuild: true, keepAll: true, reportDir: "${COMPONENT}/target/pit-reports", reportFiles: 'index.html', reportName: 'Notification PIT'])
+                }
+            }
+        }
+        stage('Package') {
+            steps {
+                sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Assert-ServicePackage.ps1 -Service $COMPONENT'
+                archiveArtifacts artifacts: "${COMPONENT}/target/${COMPONENT}-*.jar,${COMPONENT}/target/site/jacoco/**,${COMPONENT}/target/pit-reports/**", fingerprint: true
+                publishHTML(target: [allowMissing: false, alwaysLinkToLastBuild: true, keepAll: true, reportDir: "${COMPONENT}/target/site/jacoco", reportFiles: 'index.html', reportName: 'Notification JaCoCo'])
+            }
+        }
+        stage('Image build') {
+            steps { sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Build-ComponentImage.ps1 -Component $COMPONENT -Tag $IMAGE_TAG' }
+        }
+    }
+
+    post {
+        always {
+            sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Remove-ComponentImage.ps1 -Component $COMPONENT -Tag $IMAGE_TAG || true'
+            cleanWs(deleteDirs: true, disableDeferredWipeout: true, notFailBuild: true)
+        }
+    }
+}

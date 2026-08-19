@@ -1,0 +1,58 @@
+pipeline {
+    agent { label 'clinicflow-ci' }
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '20', artifactNumToKeepStr: '10'))
+        disableConcurrentBuilds()
+        skipDefaultCheckout(true)
+        timeout(time: 60, unit: 'MINUTES')
+        timestamps()
+    }
+
+    environment {
+        COMPONENT = 'frontend'
+        IMAGE_TAG = "clinicflow/frontend:ci-${BUILD_NUMBER}"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps { checkout scm }
+        }
+        stage('Repository hygiene') {
+            steps { sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Test-RepositoryHygiene.ps1' }
+        }
+        stage('Install dependencies') {
+            steps { sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Invoke-FrontendPhase.ps1 -Phase Install' }
+        }
+        stage('Unit tests') {
+            steps { sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Invoke-FrontendPhase.ps1 -Phase Unit' }
+            post {
+                always {
+                    junit allowEmptyResults: true, testResults: 'frontend/test-results/unit.xml'
+                }
+            }
+        }
+        stage('Static analysis') {
+            steps { sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Invoke-FrontendPhase.ps1 -Phase Quality' }
+        }
+        stage('Build') {
+            steps { sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Invoke-FrontendPhase.ps1 -Phase Build' }
+        }
+        stage('Package') {
+            steps {
+                sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Invoke-FrontendPhase.ps1 -Phase Package'
+                archiveArtifacts artifacts: 'reports/frontend/frontend-standalone.zip', fingerprint: true
+            }
+        }
+        stage('Image build') {
+            steps { sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Build-ComponentImage.ps1 -Component $COMPONENT -Tag $IMAGE_TAG' }
+        }
+    }
+
+    post {
+        always {
+            sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Remove-ComponentImage.ps1 -Component $COMPONENT -Tag $IMAGE_TAG || true'
+            cleanWs(deleteDirs: true, disableDeferredWipeout: true, notFailBuild: true)
+        }
+    }
+}
