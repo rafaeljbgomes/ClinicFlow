@@ -1,83 +1,154 @@
-# DM-02: Service-Scoped Jenkins CI
+# DM-02: Independent Service-Scoped Jenkins CI
+
+Tracked by [GitHub issue #6](https://github.com/rafaeljbgomes/ClinicFlow/issues/6).
 
 ## Problem
 
-The current root `Jenkinsfile` is a useful system-quality pipeline, but normal
+The legacy root `Jenkinsfile` is a useful system-quality pipeline, but normal
 service changes invoke full-repository backend, frontend, platform, container,
 Compose, and browser validation. It does not provide an independently owned CI
 path for a service.
 
 ## Outcome
 
-Each deployable component has one logical, source-controlled Jenkins pipeline
-that can test and package only that component and its declared build
-dependencies. Common delivery logic is reused through a versioned shared
-library or small repository scripts, not copied between Jenkinsfiles.
+Each deployable component has an independently executable, source-controlled
+Jenkins pipeline. Backend services own their build, unit, integration,
+mutation, package, coverage, reports, and local-image evidence. The frontend
+owns its dependency install, unit tests, static analysis, production build,
+standalone package, and local-image evidence. `Jenkinsfile.system` retains the
+cross-service Compose and Playwright journey.
 
-Suggested repository layout:
+The implementation uses these pipeline definitions:
 
 ```text
-auth-service/Jenkinsfile
-patient-service/Jenkinsfile
-appointment-service/Jenkinsfile
-clinical-service/Jenkinsfile
-notification-service/Jenkinsfile
-frontend/Jenkinsfile
+Jenkinsfile.auth
+Jenkinsfile.patient
+Jenkinsfile.appointment
+Jenkinsfile.clinical
+Jenkinsfile.notification
+Jenkinsfile.frontend
 Jenkinsfile.system
 ```
 
-The physical Jenkins architecture remains one controller with isolated agents;
-it is not one controller per service.
+The physical architecture remains one local controller and the existing
+`clinicflow-ci` agent. Pipeline independence does not mean one controller,
+machine, or cluster per service.
 
-## Scope
+## Backend Lifecycle Contract
 
-- Define each service pipeline's checkout, unit test, integration test,
-  package, image-build, test-result publishing, and artifact-retention stages.
-- Build Maven services with the smallest valid Maven reactor selection, such as
-  `-pl patient-service -am` when `event-contracts` is needed.
-- Create separate Jenkins multibranch jobs or equivalent jobs pointing to each
-  service Jenkinsfile.
-- Extract common non-domain build behavior into shared scripts or a versioned
-  Jenkins Shared Library.
-- Preserve the root workflow as `Jenkinsfile.system` for cross-service checks.
+Every backend pipeline exposes distinct Jenkins stages for Checkout,
+Repository hygiene, Build, Unit tests, Integration tests, Mutation tests,
+Package, and Image build.
+
+`scripts/ci/Invoke-ServiceBackend.ps1` accepts only the five service names and
+the phases `Build`, `Unit`, `Integration`, or `Mutation`:
+
+- Build runs `clean compile` for `-pl :<service> -am` without tests.
+- Unit runs `test` in the same workspace and publishes only the selected
+  service's Surefire XML.
+- Integration runs `verify -Dskip.unit.tests=true` without cleaning. The new
+  property skips Surefire only, so Failsafe runs the service-local
+  Testcontainers suites and JaCoCo merges the preserved unit and integration
+  execution data.
+- Mutation runs scoped PIT after `test-compile`, excludes `*IT`, and preserves
+  the 90% mutation-class coverage and 75% mutation-score thresholds.
+- Package validates and archives exactly one executable Spring Boot JAR plus
+  that service's JaCoCo and PIT reports; it does not invoke another build.
+- Image build uses only that component's Dockerfile, assigns a build-specific
+  local tag, never pushes it, and removes the tag in pipeline cleanup.
+
+Auth selects only the root POM and `auth-service`. Patient, appointment,
+clinical, and notification additionally select `event-contracts` through
+their declared Maven test dependency. No service pipeline selects another
+service or `coverage-report`.
+
+## Frontend Lifecycle Contract
+
+`Jenkinsfile.frontend` exposes Checkout, Repository hygiene, Install
+dependencies, Unit tests, Static analysis, Build, Package, and Image build as
+separate stages. `scripts/ci/Invoke-FrontendPhase.ps1` allow-lists `Install`,
+`Unit`, `Quality`, `Build`, and `Package`. Package creates a standalone archive
+containing the Next.js server, static output, and public assets. Playwright is
+not a component responsibility because it validates the composed system.
+
+## Jenkins Jobs and Triggers
+
+JCasC generates these fixed jobs from one component map:
+
+- `clinicflow-auth-ci`
+- `clinicflow-patient-ci`
+- `clinicflow-appointment-ci`
+- `clinicflow-clinical-ci`
+- `clinicflow-notification-ci`
+- `clinicflow-frontend-ci`
+- `clinicflow-system-ci`
+
+Each component pipeline has its own workspace, a 60-minute timeout, 20 retained
+builds, 10 retained artifact sets, component-only reports and artifacts, and
+no upstream or downstream service-job dependency. The system pipeline retains
+the broader 90-minute timeout required by Compose and browser validation.
+
+All seven jobs poll SCM every five minutes. Git PathRestriction allow-lists
+implement these boundaries:
+
+- Service source or its Jenkinsfile triggers that service only.
+- `event-contracts/**` triggers patient, appointment, clinical, notification,
+  and system as separate jobs.
+- Root Maven configuration and wrapper changes trigger every backend and
+  system job.
+- Frontend changes trigger frontend; BFF/API routes, server authentication,
+  Playwright assets, frontend build configuration, and the frontend Dockerfile
+  additionally trigger system.
+- A component Dockerfile triggers that component and system.
+- Shared backend/frontend CI mechanics and the agent toolchain trigger their
+  respective component set plus system.
+- Helm, Compose, Docker bootstrap, controller/JCasC, and system-script changes
+  trigger system.
+- Repository-hygiene logic triggers every job.
+
+Path restrictions apply to SCM polling only. A manual build always executes
+the selected job.
+
+## System Pipeline Boundary
+
+`Jenkinsfile.system` has distinct stages for Checkout, Repository hygiene,
+shared/backend unit validation, frontend unit validation, frontend quality and
+build, platform validation, shared/backend integration validation, system
+image build, Compose environment, and Playwright end-to-end tests. Mutation is
+absent because every backend service now owns it.
+
+The system job publishes platform and browser evidence only. It does not
+archive service JARs, service coverage, or service PIT reports, and ordinary
+service-source changes do not require it.
 
 ## Out of Scope
 
 - Pushing images, deployment, promotion, or rollback (DM-03).
 - Changing Helm release packaging (DM-01).
-- Creating a Jenkins controller, agent, or cloud account per service.
+- Adding a Jenkins plugin, Shared Library repository, registry, or deployment
+  credential.
+- Creating a controller, agent, or cloud account per service.
 - Eliminating full-stack CI coverage.
-
-## Touchpoints
-
-- `Jenkinsfile`
-- `deploy/jenkins/casc/jenkins.yaml`
-- `deploy/jenkins/controller/plugins.txt`
-- `scripts/ci/**`
-- service directories and `frontend/`
-
-## Decisions Required Before Implementation
-
-- Shared Library repository, or versioned shared code kept in this monorepo.
-- Path-change triggering policy, including mandatory full runs for root POM,
-  `event-contracts`, Docker, Helm, Compose, and shared-script changes.
-- Which Testcontainers checks are required per service on every pull request.
-- Whether the frontend has an independent build job but remains included in
-  system browser tests.
 
 ## Acceptance Criteria
 
-- A patient-only code change can execute a patient job without building the
-  frontend or unrelated service images.
-- Each service job publishes only its own test reports and build artifacts.
-- A change in `event-contracts` triggers affected service jobs and the system
-  validation job.
-- A change in Helm, Compose, or shared pipeline code triggers system validation.
-- The existing full Compose/Playwright scenario remains executable and reports
-  results as a system pipeline.
+- Every backend service independently passes build, unit, integration,
+  mutation, package, coverage, and image stages.
+- A patient-only change does not compile, test, mutate, package, or image
+  another service.
+- A contract change starts each affected service job independently.
+- Unit, integration, mutation, and browser tests remain separate Jenkins
+  stages with separate reports.
+- Every job publishes only artifacts and reports in its responsibility.
+- Frontend UI-only changes do not require system validation; BFF and routing
+  changes do.
+- The full Compose/Playwright journey remains available through system CI.
+- No pipeline pushes an image or changes a deployed environment.
 
-## Rollback Boundary
+## Activation and Rollback Boundary
 
-Keep the original root job runnable until every new job is configured through
-Jenkins Configuration as Code and has passed a clean checkout. Jenkinsfiles are
-CI definitions only; this work package must not deploy an environment.
+Keep `clinicflow-engineering-stabilization` and the root `Jenkinsfile` runnable
+until all seven replacement jobs pass from clean checkouts. Only then disable
+the legacy job and retire the root file in a final activation commit. Roll back
+by re-enabling the legacy job and reverting that activation commit; no registry
+or deployed environment is affected.
