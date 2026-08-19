@@ -20,7 +20,7 @@ hooks declare `before-hook-creation`; the watcher waits for nonexistent hook
 resources until the timeout before continuing a fresh installation.
 
 - `clinicflow-observability`, installed in `monitoring`, wraps
-  `kube-prometheus-stack` version `86.0.0`.
+  `kube-prometheus-stack` version `88.3.0`.
 - `clinicflow-platform`, installed in `clinicflow`, owns local PostgreSQL,
   RabbitMQ, their credentials, namespace-wide policy, RabbitMQ monitoring, and
   shared Grafana dashboards.

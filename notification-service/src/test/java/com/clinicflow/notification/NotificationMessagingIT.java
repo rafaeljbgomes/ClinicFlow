@@ -36,12 +36,18 @@ import static org.mockito.Mockito.verify;
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class NotificationMessagingIT {
     @Container
-    @ServiceConnection
-    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
+    @ServiceConnection(name = "postgres")
+    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(
+            org.testcontainers.utility.DockerImageName
+                    .parse("postgres:16.14-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777")
+                    .asCompatibleSubstituteFor("postgres"));
 
     @Container
-    @ServiceConnection
-    static final RabbitMQContainer RABBITMQ = new RabbitMQContainer("rabbitmq:4.3.4-alpine");
+    @ServiceConnection(name = "rabbitmq")
+    static final RabbitMQContainer RABBITMQ = new RabbitMQContainer(
+            org.testcontainers.utility.DockerImageName
+                    .parse("rabbitmq:4.3.4-management-alpine@sha256:44bf7eb50fe1765885659e49ccfdc775f8e531964d979321aee380a071f49f94")
+                    .asCompatibleSubstituteFor("rabbitmq"));
 
     @Autowired private RabbitTemplate rabbit;
     @Autowired private JdbcTemplate jdbc;

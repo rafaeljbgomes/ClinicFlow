@@ -36,8 +36,11 @@ class PatientApiIT {
     private static final UUID PSYCHOLOGIST_ID = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
 
     @Container
-    @ServiceConnection
-    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
+    @ServiceConnection(name = "postgres")
+    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(
+            org.testcontainers.utility.DockerImageName
+                    .parse("postgres:16.14-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777")
+                    .asCompatibleSubstituteFor("postgres"));
 
     @Autowired private TestRestTemplate http;
     @Autowired private JdbcTemplate jdbc;

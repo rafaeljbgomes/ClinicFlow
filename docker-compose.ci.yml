@@ -11,7 +11,7 @@ services:
     volumes: !override []
 
   jwt-secrets-bootstrap:
-    image: alpine/openssl:3.5.4
+    image: alpine/openssl:3.5.7@sha256:47f40fac08a77cbdfb02444e543808aa36b9e31e21a261f4d94ffaf0c5c73832
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |

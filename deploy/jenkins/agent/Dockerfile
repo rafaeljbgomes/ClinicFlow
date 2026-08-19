@@ -1,17 +1,24 @@
-FROM jenkins/ssh-agent:7.13.0-jdk21
+FROM jenkins/ssh-agent:8.9.0-jdk21@sha256:32cbd440e4d665a2cbe77b9f79f948156dbd606447f400940300e115b9d35cb6
 
 USER root
 
-ARG NODE_VERSION=24.16.0
-ARG POWERSHELL_VERSION=7.5.4
+ARG NODE_VERSION=24.19.0
+ARG NODE_SHA256=14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647
+ARG POWERSHELL_VERSION=7.6.4
+ARG POWERSHELL_SHA256=4471b5a36bfe86ec7af8525d36bb1cacba0128e7aac22d05cc064bc00e604721
 ARG DOCKER_VERSION=29.6.2
-ARG COMPOSE_VERSION=2.39.4
+ARG DOCKER_SHA256=d6204aea92238e2453d5445c885b9d2e5eb8f82915568ec50edf9dbe12a3ac74
+ARG COMPOSE_VERSION=5.4.0
+ARG COMPOSE_SHA256=837fd1d35bf6a494f41b5b5988269a7be79de337cf1a1a6ff0e45ab51bb4e9be
 ARG HELM_VERSION=4.2.4
 ARG HELM_SHA256=c306b46f719b0a4da32d0f78ee21bf90ce8d602f15b22ab753f0674d1670a7f3
-ARG KUBECONFORM_VERSION=0.7.0
+ARG KUBECONFORM_VERSION=0.8.0
+ARG KUBECONFORM_SHA256=9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
 ARG ACTIONLINT_VERSION=1.7.12
-ARG GITLEAKS_VERSION=8.28.0
-ARG PLAYWRIGHT_VERSION=1.60.0
+ARG ACTIONLINT_SHA256=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+ARG GITLEAKS_VERSION=8.30.1
+ARG GITLEAKS_SHA256=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+ARG PLAYWRIGHT_VERSION=1.62.1
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
@@ -19,23 +26,32 @@ RUN apt-get update \
     && apt-get install --no-install-recommends -y ca-certificates curl git git-lfs gnupg jq openssl procps tar unzip xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSLO "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
-    && tar -xJf "node-v${NODE_VERSION}-linux-x64.tar.xz" -C /usr/local --strip-components=1 \
-    && rm "node-v${NODE_VERSION}-linux-x64.tar.xz" \
+RUN curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
+       -o /tmp/node-linux-x64.tar.xz \
+    && echo "${NODE_SHA256}  /tmp/node-linux-x64.tar.xz" | sha256sum --check --strict \
+    && tar -xJf /tmp/node-linux-x64.tar.xz -C /usr/local --strip-components=1 \
+    && rm /tmp/node-linux-x64.tar.xz \
     && node --version \
     && npm --version
 
 RUN mkdir -p /opt/microsoft/powershell/7 \
     && curl -fsSL "https://github.com/PowerShell/PowerShell/releases/download/v${POWERSHELL_VERSION}/powershell-${POWERSHELL_VERSION}-linux-x64.tar.gz" \
-       | tar -xz -C /opt/microsoft/powershell/7 \
+       -o /tmp/powershell-linux-x64.tar.gz \
+    && echo "${POWERSHELL_SHA256}  /tmp/powershell-linux-x64.tar.gz" | sha256sum --check --strict \
+    && tar -xzf /tmp/powershell-linux-x64.tar.gz -C /opt/microsoft/powershell/7 \
+    && rm /tmp/powershell-linux-x64.tar.gz \
     && chmod +x /opt/microsoft/powershell/7/pwsh \
     && ln -s /opt/microsoft/powershell/7/pwsh /usr/local/bin/pwsh
 
 RUN curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_VERSION}.tgz" \
-       | tar -xz --strip-components=1 -C /usr/local/bin docker/docker \
+       -o /tmp/docker-linux-x86_64.tgz \
+    && echo "${DOCKER_SHA256}  /tmp/docker-linux-x86_64.tgz" | sha256sum --check --strict \
+    && tar -xzf /tmp/docker-linux-x86_64.tgz --strip-components=1 -C /usr/local/bin docker/docker \
+    && rm /tmp/docker-linux-x86_64.tgz \
     && mkdir -p /usr/local/lib/docker/cli-plugins \
     && curl -fsSL "https://github.com/docker/compose/releases/download/v${COMPOSE_VERSION}/docker-compose-linux-x86_64" \
        -o /usr/local/lib/docker/cli-plugins/docker-compose \
+    && echo "${COMPOSE_SHA256}  /usr/local/lib/docker/cli-plugins/docker-compose" | sha256sum --check --strict \
     && chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
 RUN curl -fsSL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz" \
@@ -45,11 +61,20 @@ RUN curl -fsSL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz" \
     && rm /tmp/helm-linux-amd64.tar.gz \
     && helm version --short \
     && curl -fsSL "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
-       | tar -xz -C /usr/local/bin kubeconform \
+       -o /tmp/kubeconform-linux-amd64.tar.gz \
+    && echo "${KUBECONFORM_SHA256}  /tmp/kubeconform-linux-amd64.tar.gz" | sha256sum --check --strict \
+    && tar -xzf /tmp/kubeconform-linux-amd64.tar.gz -C /usr/local/bin kubeconform \
+    && rm /tmp/kubeconform-linux-amd64.tar.gz \
     && curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
-       | tar -xz -C /usr/local/bin actionlint \
+       -o /tmp/actionlint-linux-amd64.tar.gz \
+    && echo "${ACTIONLINT_SHA256}  /tmp/actionlint-linux-amd64.tar.gz" | sha256sum --check --strict \
+    && tar -xzf /tmp/actionlint-linux-amd64.tar.gz -C /usr/local/bin actionlint \
+    && rm /tmp/actionlint-linux-amd64.tar.gz \
     && curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
-       | tar -xz -C /usr/local/bin gitleaks
+       -o /tmp/gitleaks-linux-x64.tar.gz \
+    && echo "${GITLEAKS_SHA256}  /tmp/gitleaks-linux-x64.tar.gz" | sha256sum --check --strict \
+    && tar -xzf /tmp/gitleaks-linux-x64.tar.gz -C /usr/local/bin gitleaks \
+    && rm /tmp/gitleaks-linux-x64.tar.gz
 
 RUN npx --yes "playwright@${PLAYWRIGHT_VERSION}" install --with-deps chromium \
     && chmod -R a+rX /ms-playwright \

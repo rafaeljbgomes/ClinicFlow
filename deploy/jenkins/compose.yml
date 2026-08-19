@@ -4,7 +4,7 @@ services:
   controller:
     build:
       context: ./controller
-    image: clinicflow/jenkins-controller:2.568.1
+    image: clinicflow/jenkins-controller:2.568.2
     restart: unless-stopped
     environment:
       CASC_JENKINS_CONFIG: /var/jenkins_casc/jenkins.yaml
@@ -32,7 +32,7 @@ services:
   agent:
     build:
       context: ./agent
-    image: clinicflow/jenkins-agent:7.13.0
+    image: clinicflow/jenkins-agent:8.9.0
     restart: unless-stopped
     environment:
       JENKINS_AGENT_SSH_PUBKEY_FILE: /run/secrets/controller_agent_ed25519.pub
@@ -49,7 +49,6 @@ services:
       - jenkins-agent-workspace:/home/jenkins/agent
       - maven-cache:/home/jenkins/.m2
       - npm-cache:/home/jenkins/.npm
-      - playwright-cache:/ms-playwright
     networks:
       - jenkins-internal
 
@@ -62,4 +61,3 @@ volumes:
   jenkins-agent-workspace:
   maven-cache:
   npm-cache:
-  playwright-cache:

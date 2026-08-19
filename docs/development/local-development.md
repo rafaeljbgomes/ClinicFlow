@@ -3,8 +3,8 @@
 ## Prerequisites
 
 - Java 21
-- Maven 3.9+
-- Node.js 24 and npm
+- Maven Wrapper 3.9.16 (the repository wrapper is authoritative)
+- Node.js 24.19.0 and npm 11 for host-side frontend work
 - Docker Desktop or Docker Engine
 - OpenSSL available in the shell path
 
@@ -24,13 +24,13 @@ The generated files are written under `secrets/` and ignored by Git.
 Run the fast unit and Spring MVC slice suites:
 
 ```powershell
-mvn test
+.\mvnw.cmd test
 ```
 
 Run the complete backend quality gate, including integration tests and coverage:
 
 ```powershell
-mvn verify
+.\mvnw.cmd verify
 ```
 
 Integration tests use Testcontainers with PostgreSQL and RabbitMQ and therefore
