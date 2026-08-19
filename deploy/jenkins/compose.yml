@@ -13,7 +13,7 @@ services:
         -Djenkins.install.runSetupWizard=false
         -Dhudson.plugins.git.GitSCM.ALLOW_LOCAL_CHECKOUT=true
       CLINICFLOW_JENKINS_SCM_URL: ${CLINICFLOW_JENKINS_SCM_URL:-file:///workspace/clinicflow}
-      CLINICFLOW_JENKINS_BRANCH: ${CLINICFLOW_JENKINS_BRANCH:-*/fix/engineering-stabilization}
+      CLINICFLOW_JENKINS_BRANCH: ${CLINICFLOW_JENKINS_BRANCH:-*/main}
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
