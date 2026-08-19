@@ -148,6 +148,13 @@ same-origin API requests.
 
 Docker Compose remains the fastest development loop. Use Kubernetes when working
 on orchestration, probes, network policies, metrics, Prometheus, or Grafana.
+The supported CLI line is Helm 4.x. Jenkins pins the validated patch release,
+while the deployment script accepts Helm 4 patch updates and checks the major
+version before building images. During the Helm 4 migration, installs and
+upgrades explicitly retain client-side apply semantics.
+The observability release uses `--wait=legacy` for compatibility with the
+bundled kube-prometheus-stack admission hooks; the other releases use Helm 4's
+watcher strategy.
 
 Run the complete local deployment from the repository root:
 
@@ -155,29 +162,36 @@ Run the complete local deployment from the repository root:
 .\scripts\deploy-local-kubernetes.ps1
 ```
 
-The script builds the local images, generates missing development JWT keys,
-creates or updates the Kubernetes Secret, installs observability, deploys
-ClinicFlow, and waits for the workloads to become ready.
+The script derives a commit/timestamp image tag, builds the local images,
+generates missing development JWT keys, creates or updates the Kubernetes
+Secret, installs observability and the shared platform, upgrades six independent
+application releases, and waits for the workloads to become ready.
 
-For faster repeat deployments, skip steps that have not changed:
+Upgrade only one application when working on it:
 
 ```powershell
-.\scripts\deploy-local-kubernetes.ps1 -SkipBuild
-.\scripts\deploy-local-kubernetes.ps1 -SkipObservability
-.\scripts\deploy-local-kubernetes.ps1 -SkipBuild -SkipObservability
+.\scripts\deploy-local-kubernetes.ps1 -Component Patient
+```
+
+When reusing an existing local image, pass its immutable tag explicitly:
+
+```powershell
+.\scripts\deploy-local-kubernetes.ps1 -Component Patient `
+  -SkipBuild -ImageTag git-<commit>-<timestamp>
 ```
 
 The equivalent manual commands are documented below for troubleshooting.
 
-Build the local images used by the Helm chart:
+Build the local images with one immutable tag:
 
 ```powershell
-docker build -t clinicflow/auth-service:0.1.0-local -f auth-service/Dockerfile .
-docker build -t clinicflow/patient-service:0.1.0-local -f patient-service/Dockerfile .
-docker build -t clinicflow/appointment-service:0.1.0-local -f appointment-service/Dockerfile .
-docker build -t clinicflow/clinical-service:0.1.0-local -f clinical-service/Dockerfile .
-docker build -t clinicflow/notification-service:0.1.0-local -f notification-service/Dockerfile .
-docker build -t clinicflow/frontend:0.1.0-local -f frontend/Dockerfile frontend
+$imageTag = "git-<commit>-<timestamp>"
+docker build -t "clinicflow/auth-service:$imageTag" -f auth-service/Dockerfile .
+docker build -t "clinicflow/patient-service:$imageTag" -f patient-service/Dockerfile .
+docker build -t "clinicflow/appointment-service:$imageTag" -f appointment-service/Dockerfile .
+docker build -t "clinicflow/clinical-service:$imageTag" -f clinical-service/Dockerfile .
+docker build -t "clinicflow/notification-service:$imageTag" -f notification-service/Dockerfile .
+docker build -t "clinicflow/frontend:$imageTag" -f frontend/Dockerfile frontend
 ```
 
 Create the JWT Secret from the local development keys:
@@ -190,17 +204,38 @@ kubectl create secret generic clinicflow-jwt `
   -n clinicflow
 ```
 
-Install observability first, then the application:
+Install observability, the platform, and the independent application releases:
 
 ```powershell
 helm dependency update deploy/helm/observability
 helm upgrade --install clinicflow-observability deploy/helm/observability `
   -n monitoring --create-namespace `
-  -f deploy/helm/observability/values-docker-desktop.yaml
+  -f deploy/helm/observability/values-docker-desktop.yaml `
+  --rollback-on-failure --wait=legacy --server-side=false --timeout 5m
 
-helm upgrade --install clinicflow deploy/helm/clinicflow `
-  -n clinicflow `
-  -f deploy/helm/clinicflow/values-docker-desktop.yaml
+helm upgrade --install clinicflow-platform deploy/helm/platform `
+  -n clinicflow -f deploy/helm/platform/values-docker-desktop.yaml `
+  --rollback-on-failure --wait=watcher --server-side=false --timeout 5m
+
+foreach ($service in "auth", "patient", "appointment", "clinical", "notification") {
+  helm upgrade --install "clinicflow-$service" deploy/helm/service `
+    -n clinicflow -f "deploy/helm/services/$service.yaml" `
+    --set-string "image.tag=$imageTag" `
+    --rollback-on-failure --wait=watcher --server-side=false --timeout 5m
+}
+
+helm upgrade --install clinicflow-frontend deploy/helm/frontend `
+  -n clinicflow --set-string "image.tag=$imageTag" `
+  --rollback-on-failure --wait=watcher --server-side=false --timeout 5m
+```
+
+Inspect or roll back one release without changing the others:
+
+```powershell
+helm status clinicflow-patient -n clinicflow
+helm history clinicflow-patient -n clinicflow
+helm rollback clinicflow-patient <revision> -n clinicflow `
+  --wait=watcher --server-side=false --timeout 5m
 ```
 
 Validate rollouts:

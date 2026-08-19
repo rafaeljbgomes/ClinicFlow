@@ -35,7 +35,7 @@ class RabbitPatientEventPublisherIT {
 
     @Container
     static final RabbitMQContainer RABBITMQ =
-            new RabbitMQContainer("rabbitmq:4.1-alpine");
+            new RabbitMQContainer("rabbitmq:4.3.4-alpine");
 
     private static CachingConnectionFactory connectionFactory;
     private static RabbitTemplate rabbitTemplate;
@@ -47,7 +47,7 @@ class RabbitPatientEventPublisherIT {
         connectionFactory.setPassword(RABBITMQ.getAdminPassword());
         RabbitAdmin admin = new RabbitAdmin(connectionFactory);
         TopicExchange exchange = new TopicExchange(EXCHANGE, false, true);
-        Queue queue = new Queue(QUEUE, false, false, true);
+        Queue queue = new Queue(QUEUE, false, true, true);
         admin.declareExchange(exchange);
         admin.declareQueue(queue);
         admin.declareBinding(BindingBuilder.bind(queue).to(exchange).with("patient.created"));

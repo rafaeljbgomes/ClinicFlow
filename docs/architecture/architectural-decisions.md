@@ -123,8 +123,10 @@ backend payloads to the UI.
 
 ## ADR-011: Helm for Application and Observability Packaging
 
-Decision: package the Kubernetes phase with Helm charts: one chart for the
-ClinicFlow application and one observability wrapper around kube-prometheus-stack.
+Decision: package the Kubernetes phase with independently managed Helm releases:
+one shared platform chart, one reusable Spring-service chart installed once per
+backend service, one frontend chart, and one observability wrapper around
+kube-prometheus-stack.
 
 Rationale: Helm keeps the local Kubernetes deployment repeatable while exposing
 the operational resources that matter for learning: Deployments, Services,
@@ -132,9 +134,12 @@ StatefulSets, Secrets, ConfigMaps, probes, NetworkPolicies, ServiceMonitors, and
 Grafana dashboards.
 
 Consequences: Docker Compose remains the fast local development path, while Helm
-is the canonical Kubernetes path. The observability chart requires
+is the canonical Kubernetes path. Application releases can be upgraded and
+rolled back independently; PostgreSQL, RabbitMQ, platform policy, and shared
+dashboards have a separate ownership boundary. The observability chart requires
 `helm dependency update` before installation because kube-prometheus-stack is a
-remote chart dependency.
+remote chart dependency. See ADR-017 and
+[DM-01](delivery-modernization/01-release-packaging.md).
 
 ## ADR-012: Docker Desktop Kubernetes as the Local Cluster Target
 
@@ -158,8 +163,9 @@ Rationale: ServiceMonitor is a Kubernetes-native scraping contract and better
 matches real platform practice than hand-written Prometheus scrape config.
 Grafana dashboards are provisioned from version-controlled ConfigMaps.
 
-Consequences: the application chart depends on the monitoring CRDs being
-installed first. Prometheus and Grafana are exposed locally through
+Consequences: application and platform charts render ServiceMonitor resources
+and therefore depend on the monitoring CRDs being installed first for live
+installation. Prometheus and Grafana are exposed locally through
 `kubectl port-forward`, not through NodePort or Ingress.
 
 ## ADR-014: Separate Management Port for Internal Metrics
@@ -205,3 +211,28 @@ Decision: treat the Next.js frontend as a role-aware BFF rather than a generic d
 Rationale: psychologists need a quiet clinical workspace, administrators need operational controls, and patient accounts must not fall through into clinician screens. A notification list shared by all psychologists would leak practice activity even if the visible UI hid technical fields.
 
 Consequences: psychologists only query notifications owned by their JWT user id; administrators retain the global delivery view. The BFF further projects psychologist messages to practice-safe fields. Legacy notification rows may have a null owner and remain visible only to administrators. Proxy checks remain optimistic and are never the authorization boundary.
+
+## ADR-017: Independent Service Delivery with Shared Platform Capabilities
+
+Decision: make each deployable application component independently buildable,
+releasable, deployable, observable, and rollbackable. Keep Jenkins,
+Kubernetes, observability, RabbitMQ, and the PostgreSQL hosting layer as shared
+platform capabilities, with explicit service-level access and ownership
+boundaries.
+
+Rationale: at decision time, ClinicFlow had separate application containers and
+Kubernetes Deployments, but its local workflow built all images and used one
+Helm release with one application-wide image tag. That made service
+revisions, promotion, and rollback coupled even where the business boundaries
+are separate. Requiring a separate Jenkins controller, cluster, or physical
+server per service would add operational cost without improving the delivery
+property that matters: a team must be able to change one service without
+releasing the rest.
+
+Consequences: delivery modernization is divided into the isolated work packages
+in `docs/architecture/delivery-modernization/`. The existing root Jenkins
+pipeline remains a system-validation pipeline rather than being deleted. A
+future service pipeline must publish an immutable image, deploy one service
+release, verify that release, and roll back only that release. Platform and
+cross-service changes remain subject to a system integration gate. DM-01 is
+tracked by [GitHub issue #1](https://github.com/rafaeljbgomes/ClinicFlow/issues/1).

@@ -1,0 +1,10 @@
+name: auth-service
+image:
+  repository: clinicflow/auth-service
+port: 8081
+database:
+  name: clinicflow_auth
+jwt:
+  privateKeyEnabled: true
+environment:
+  CLINICFLOW_DEMO_BOOTSTRAP_ENABLED: "true"

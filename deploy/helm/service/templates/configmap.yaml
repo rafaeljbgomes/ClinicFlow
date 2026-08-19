@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "clinicflow-service.configName" . }}
+  labels:
+    {{- include "clinicflow-service.labels" . | nindent 4 }}
+data:
+  CLINICFLOW_SECURITY_JWT_ISSUER: {{ .Values.jwt.issuer | quote }}
+  {{- range $name, $value := .Values.environment }}
+  {{ $name }}: {{ $value | quote }}
+  {{- end }}

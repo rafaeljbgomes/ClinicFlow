@@ -14,3 +14,7 @@ frontend/.env*.local
 frontend/tsconfig.tsbuildinfo
 frontend/playwright-report/
 frontend/test-results/
+frontend/coverage/
+reports/
+deploy/jenkins/.env
+deploy/jenkins/secrets/

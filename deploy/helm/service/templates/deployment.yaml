@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.name }}
+  labels:
+    {{- include "clinicflow-service.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "clinicflow-service.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "clinicflow-service.labels" . | nindent 8 }}
+        app.kubernetes.io/component: {{ .Values.name }}
+    spec:
+      containers:
+        - name: {{ .Values.name }}
+          image: {{ include "clinicflow-service.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.port }}
+            - name: management
+              containerPort: {{ .Values.managementPort }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "clinicflow-service.configName" . }}
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: kubernetes
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:postgresql://{{ .Values.database.host }}:{{ .Values.database.port }}/{{ .Values.database.name }}"
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.secretName }}
+                  key: username
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.secretName }}
+                  key: password
+            {{- if .Values.rabbitmq.enabled }}
+            - name: SPRING_RABBITMQ_HOST
+              value: {{ .Values.rabbitmq.host | quote }}
+            - name: SPRING_RABBITMQ_PORT
+              value: {{ .Values.rabbitmq.port | quote }}
+            - name: SPRING_RABBITMQ_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.rabbitmq.secretName }}
+                  key: username
+            - name: SPRING_RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.rabbitmq.secretName }}
+                  key: password
+            {{- end }}
+            - name: CLINICFLOW_SECURITY_JWT_PUBLIC_KEY_PATH
+              value: /run/secrets/clinicflow/jwt-public.pem
+            {{- if .Values.jwt.privateKeyEnabled }}
+            - name: CLINICFLOW_SECURITY_JWT_PRIVATE_KEY_PATH
+              value: /run/secrets/clinicflow/jwt-private.pem
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: management
+            failureThreshold: 30
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: management
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: management
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: jwt
+              mountPath: /run/secrets/clinicflow
+              readOnly: true
+      volumes:
+        - name: jwt
+          secret:
+            secretName: {{ .Values.jwt.secretName }}
+            items:
+              - key: {{ .Values.jwt.publicKeyKey }}
+                path: jwt-public.pem
+              {{- if .Values.jwt.privateKeyEnabled }}
+              - key: {{ .Values.jwt.privateKeyKey }}
+                path: jwt-private.pem
+              {{- end }}

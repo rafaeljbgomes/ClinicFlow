@@ -30,13 +30,18 @@ type ProxyOptions = {
 
 const BACKEND_TIMEOUT_MS = 10_000;
 
-type SafeError = {
-  message: string;
+export type ApiError = {
   status: number;
+  message: string;
+  code?: string;
+  correlationId?: string;
+  fieldErrors?: Record<string, string[]>;
 };
 
-export function jsonError(status: number, message: string) {
-  return NextResponse.json<SafeError>({ status, message }, { status });
+type SafeProblemFields = Omit<ApiError, "status" | "message">;
+
+export function jsonError(status: number, message: string, fields: SafeProblemFields = {}) {
+  return NextResponse.json<ApiError>({ status, message, ...fields }, { status });
 }
 
 export async function proxyRequest(
@@ -109,11 +114,14 @@ async function backendGetFromBaseUrl(baseUrl: string, path: string, token?: stri
       signal: AbortSignal.timeout(BACKEND_TIMEOUT_MS),
     });
     const latencyMs = Math.round(performance.now() - started);
+    const parsed = await readJsonResult(response);
     return {
       ok: response.ok,
       status: response.status,
       latencyMs,
-      data: await readJson(response),
+      data: parsed.data,
+      invalidJson: parsed.invalidJson,
+      unavailable: false,
     };
   } catch {
     return {
@@ -121,6 +129,8 @@ async function backendGetFromBaseUrl(baseUrl: string, path: string, token?: stri
       status: 503,
       latencyMs: Math.round(performance.now() - started),
       data: null,
+      invalidJson: false,
+      unavailable: true,
     };
   }
 }
@@ -147,7 +157,11 @@ function backendHeaders(request?: NextRequest, token?: string): HeadersInit {
 async function normalizeBackendResponse(response: Response) {
   const payload = await readJson(response);
   if (!response.ok) {
-    return jsonError(response.status, safeMessage(payload, response.status));
+    return jsonError(
+      response.status,
+      safeMessage(payload, response.status),
+      sanitizeProblemFields(payload)
+    );
   }
   if (response.status === 204) {
     return new NextResponse(null, { status: 204 });
@@ -156,14 +170,18 @@ async function normalizeBackendResponse(response: Response) {
 }
 
 async function readJson(response: Response) {
+  return (await readJsonResult(response)).data;
+}
+
+async function readJsonResult(response: Response) {
   const text = await response.text();
   if (!text) {
-    return null;
+    return { data: null, invalidJson: false };
   }
   try {
-    return JSON.parse(text);
+    return { data: JSON.parse(text) as unknown, invalidJson: false };
   } catch {
-    return null;
+    return { data: null, invalidJson: true };
   }
 }
 
@@ -187,6 +205,40 @@ function safeMessage(payload: unknown, status: number) {
     return "You are not allowed to perform this action";
   }
   return "The request could not be completed";
+}
+
+export function sanitizeProblemFields(payload: unknown): SafeProblemFields {
+  if (!payload || typeof payload !== "object") return {};
+  const problem = payload as Record<string, unknown>;
+  const fields: SafeProblemFields = {};
+
+  if (typeof problem.code === "string" && /^[a-z0-9_]{1,64}$/.test(problem.code)) {
+    fields.code = problem.code;
+  }
+  if (
+    typeof problem.correlationId === "string" &&
+    problem.correlationId.length > 0 &&
+    problem.correlationId.length <= 128
+  ) {
+    fields.correlationId = problem.correlationId;
+  }
+  const fieldErrors = safeFieldErrors(problem.fieldErrors);
+  if (fieldErrors) fields.fieldErrors = fieldErrors;
+  return fields;
+}
+
+function safeFieldErrors(value: unknown): Record<string, string[]> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const result: Record<string, string[]> = {};
+  for (const [field, messages] of Object.entries(value).slice(0, 50)) {
+    if (!/^[A-Za-z0-9_.\[\]-]{1,100}$/.test(field) || !Array.isArray(messages)) continue;
+    const safeMessages = messages
+      .filter((message): message is string => typeof message === "string")
+      .slice(0, 20)
+      .map((message) => message.slice(0, 500));
+    if (safeMessages.length > 0) result[field] = safeMessages;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 function isMutating(method: string) {

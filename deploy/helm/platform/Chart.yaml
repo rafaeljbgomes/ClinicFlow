@@ -1,0 +1,6 @@
+apiVersion: v2
+name: clinicflow-platform
+description: ClinicFlow local shared runtime platform
+type: application
+version: 0.1.0
+appVersion: "0.1.0-local"

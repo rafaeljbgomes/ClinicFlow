@@ -3,9 +3,13 @@
 export class ApiClientError extends Error {
   constructor(
     message: string,
-    public readonly status: number
+    public readonly status: number,
+    public readonly code?: string,
+    public readonly correlationId?: string,
+    public readonly fieldErrors?: Record<string, string[]>
   ) {
     super(message);
+    this.name = "ApiClientError";
   }
 }
 
@@ -48,7 +52,10 @@ export async function apiFetch<T>(
     }
     throw new ApiClientError(
       payload?.message ?? "The request could not be completed",
-      response.status
+      response.status,
+      payload?.code,
+      payload?.correlationId,
+      payload?.fieldErrors
     );
   }
 

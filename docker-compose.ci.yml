@@ -1,0 +1,69 @@
+services:
+  postgres:
+    volumes: !override
+      - postgres-data:/var/lib/postgresql/data
+
+  postgres-bootstrap:
+    build:
+      context: ./docker/postgres/bootstrap
+      dockerfile: Dockerfile
+    image: clinicflow/postgres-bootstrap:ci
+    volumes: !override []
+
+  jwt-secrets-bootstrap:
+    image: alpine/openssl:3.5.4
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        umask 077
+        if [ ! -s /secrets/jwt-private.pem ]; then
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /secrets/jwt-private.pem
+        fi
+        openssl pkey -in /secrets/jwt-private.pem -pubout -out /secrets/jwt-public.pem
+        chmod 600 /secrets/jwt-private.pem
+        chmod 644 /secrets/jwt-public.pem
+    volumes:
+      - jwt-secrets:/secrets
+    restart: "no"
+
+  auth-service:
+    volumes:
+      - jwt-secrets:/run/secrets/clinicflow:ro
+    depends_on:
+      jwt-secrets-bootstrap:
+        condition: service_completed_successfully
+
+  patient-service:
+    volumes:
+      - jwt-secrets:/run/secrets/clinicflow:ro
+    depends_on:
+      jwt-secrets-bootstrap:
+        condition: service_completed_successfully
+
+  appointment-service:
+    volumes:
+      - jwt-secrets:/run/secrets/clinicflow:ro
+    depends_on:
+      jwt-secrets-bootstrap:
+        condition: service_completed_successfully
+
+  clinical-service:
+    volumes:
+      - jwt-secrets:/run/secrets/clinicflow:ro
+    depends_on:
+      jwt-secrets-bootstrap:
+        condition: service_completed_successfully
+
+  notification-service:
+    volumes:
+      - jwt-secrets:/run/secrets/clinicflow:ro
+    depends_on:
+      jwt-secrets-bootstrap:
+        condition: service_completed_successfully
+
+  frontend:
+    environment:
+      CLINICFLOW_AUTH_COOKIE_SECURE: "false"
+
+volumes:
+  jwt-secrets:

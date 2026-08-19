@@ -25,10 +25,11 @@ class RabbitConfigIT {
     private static final String DLX = "test.therapy.events.dlx";
     private static final String QUEUE = "test.notification.events";
     private static final String DLQ = "test.notification.events.dlq";
+    private static final String FAILED_ROUTING_KEY = "notification.failed";
 
     @Container
     static final RabbitMQContainer RABBITMQ =
-            new RabbitMQContainer("rabbitmq:4.1-alpine");
+            new RabbitMQContainer("rabbitmq:4.3.4-alpine");
 
     private static CachingConnectionFactory connectionFactory;
     private static RabbitTemplate rabbitTemplate;
@@ -41,10 +42,10 @@ class RabbitConfigIT {
         RabbitConfig config = new RabbitConfig();
         TopicExchange exchange = config.clinicflowExchange(EXCHANGE);
         TopicExchange dlx = config.deadLetterExchange(DLX);
-        Queue queue = config.notificationQueue(QUEUE, DLX);
+        Queue queue = config.notificationQueue(QUEUE, DLX, FAILED_ROUTING_KEY);
         Queue dlq = config.notificationDlq(DLQ);
         Declarables bindings = config.notificationBindings(queue, exchange);
-        Binding deadLetterBinding = config.deadLetterBinding(dlq, dlx);
+        Binding deadLetterBinding = config.deadLetterBinding(dlq, dlx, FAILED_ROUTING_KEY);
         RabbitAdmin admin = new RabbitAdmin(connectionFactory);
         admin.declareExchange(exchange);
         admin.declareExchange(dlx);
@@ -84,11 +85,13 @@ class RabbitConfigIT {
 
     @Test
     void routesDeadLettersToDlq() {
-        rabbitTemplate.convertAndSend(DLX, "failed.notification", "failed-event");
+        rabbitTemplate.convertAndSend(DLX, FAILED_ROUTING_KEY, "failed-event");
+        rabbitTemplate.convertAndSend(DLX, "clinical.failed", "clinical-failure");
 
         Message message = rabbitTemplate.receive(DLQ, 5000);
         assertThat(message).isNotNull();
         assertThat(new String(message.getBody(), StandardCharsets.UTF_8)).isEqualTo("failed-event");
+        assertThat(rabbitTemplate.receive(DLQ, 250)).isNull();
     }
 
     private java.util.List<String> receivedBodies(int count) {

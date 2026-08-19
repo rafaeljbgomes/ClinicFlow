@@ -1,0 +1,14 @@
+name: clinical-service
+image:
+  repository: clinicflow/clinical-service
+port: 8085
+database:
+  name: clinicflow_clinical
+rabbitmq:
+  enabled: true
+environment:
+  CLINICFLOW_DEMO_BOOTSTRAP_ENABLED: "true"
+  CLINICFLOW_MESSAGING_EXCHANGE: therapy.events.exchange
+  CLINICFLOW_MESSAGING_DEAD_LETTER_EXCHANGE: therapy.events.dlx
+  CLINICFLOW_MESSAGING_CLINICAL_QUEUE: clinical.appointment-events.queue
+  CLINICFLOW_MESSAGING_CLINICAL_DLQ: clinical.appointment-events.dlq

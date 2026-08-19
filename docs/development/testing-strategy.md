@@ -126,11 +126,30 @@ intended for local investigation of uncovered lines and branches.
 
 ## Continuous integration
 
-`.github/workflows/backend-tests.yml` exposes two required checks:
+The root `Jenkinsfile` is the local CI entry point. It runs on the dedicated
+`clinicflow-ci` agent and publishes no images or deployments. The same gates can
+be run directly from the repository root with PowerShell 7:
 
-- `backend-fast`: unit tests, Spring slices, executable contracts and PIT.
-- `backend-full`: repository, functional and messaging integration tests plus
-  JaCoCo verification. Docker is required for this job.
+```powershell
+.\scripts\ci\Test-RepositoryHygiene.ps1
+.\scripts\ci\Invoke-BackendFast.ps1
+.\scripts\ci\Invoke-Frontend.ps1
+.\scripts\ci\Test-Platform.ps1
+.\scripts\ci\Invoke-BackendFull.ps1
+.\scripts\ci\Build-Images.ps1
+.\scripts\ci\Invoke-ComposePlaywright.ps1 -RunId local-full
+```
 
-Both jobs publish their reports even after failure so coverage gaps and failing
-test levels can be diagnosed independently.
+The Jenkins `FAST` level runs repository hygiene, backend-fast, frontend
+quality, and platform validation. `FULL` adds backend integration verification,
+image builds, and isolated Compose/Playwright validation. If an isolated run is
+interrupted, clean up only that run:
+
+```powershell
+.\scripts\ci\Stop-IsolatedCompose.ps1 -RunId local-full
+```
+
+The Compose-backed validation uses fresh named volumes and an isolated project
+name, so it does not target the developer's normal Compose environment. The
+Maven Wrapper and the committed frontend lockfile remain the authoritative
+build inputs for clean validation.

@@ -1,0 +1,9 @@
+# Local development credentials only. Use managed services and externally
+# provisioned Secrets before deploying outside Docker Desktop Kubernetes.
+postgres:
+  username: clinicflow
+  password: clinicflow
+
+rabbitmq:
+  username: clinicflow
+  password: clinicflow

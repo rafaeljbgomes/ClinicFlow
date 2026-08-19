@@ -1,0 +1,38 @@
+name: frontend
+
+image:
+  repository: clinicflow/frontend
+  tag: "0.1.0-local"
+  digest: ""
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+port: 3000
+
+services:
+  auth:
+    url: http://auth-service:8081
+    healthUrl: http://auth-service:9000
+  patient:
+    url: http://patient-service:8082
+    healthUrl: http://patient-service:9000
+  appointment:
+    url: http://appointment-service:8083
+    healthUrl: http://appointment-service:9000
+  clinical:
+    url: http://clinical-service:8085
+    healthUrl: http://clinical-service:9000
+  notification:
+    url: http://notification-service:8084
+    healthUrl: http://notification-service:9000
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+networkPolicy:
+  enabled: true

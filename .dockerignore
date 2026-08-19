@@ -3,6 +3,10 @@ frontend/
 deploy/
 docs/
 docker/
+.github/
+scripts/
+Jenkinsfile
+docker-compose*.yml
 .git/
 .idea/
 .vscode/

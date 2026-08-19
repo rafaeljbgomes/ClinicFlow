@@ -3,3 +3,9 @@ node_modules
 .git
 npm-debug.log
 .env*
+tests/
+test-results/
+playwright-report/
+coverage/
+playwright.config.ts
+vitest.config.*
