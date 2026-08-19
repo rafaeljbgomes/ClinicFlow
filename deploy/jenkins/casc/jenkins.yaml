@@ -99,8 +99,8 @@ jobs:
           scriptPath: 'Jenkinsfile.auth',
           includedRegions: """^auth-service/.*
       ^Jenkinsfile\.auth$
-      ${backendSharedRegions}
-      ${hygieneRegions}"""
+      ^${backendSharedRegions}
+      ^${hygieneRegions}"""
         ],
         [
           name: 'clinicflow-patient-ci',
@@ -109,8 +109,8 @@ jobs:
           includedRegions: """^patient-service/.*
       ^event-contracts/.*
       ^Jenkinsfile\.patient$
-      ${backendSharedRegions}
-      ${hygieneRegions}"""
+      ^${backendSharedRegions}
+      ^${hygieneRegions}"""
         ],
         [
           name: 'clinicflow-appointment-ci',
@@ -119,8 +119,8 @@ jobs:
           includedRegions: """^appointment-service/.*
       ^event-contracts/.*
       ^Jenkinsfile\.appointment$
-      ${backendSharedRegions}
-      ${hygieneRegions}"""
+      ^${backendSharedRegions}
+      ^${hygieneRegions}"""
         ],
         [
           name: 'clinicflow-clinical-ci',
@@ -129,8 +129,8 @@ jobs:
           includedRegions: """^clinical-service/.*
       ^event-contracts/.*
       ^Jenkinsfile\.clinical$
-      ${backendSharedRegions}
-      ${hygieneRegions}"""
+      ^${backendSharedRegions}
+      ^${hygieneRegions}"""
         ],
         [
           name: 'clinicflow-notification-ci',
@@ -139,8 +139,8 @@ jobs:
           includedRegions: """^notification-service/.*
       ^event-contracts/.*
       ^Jenkinsfile\.notification$
-      ${backendSharedRegions}
-      ${hygieneRegions}"""
+      ^${backendSharedRegions}
+      ^${hygieneRegions}"""
         ],
         [
           name: 'clinicflow-frontend-ci',
@@ -148,8 +148,8 @@ jobs:
           scriptPath: 'Jenkinsfile.frontend',
           includedRegions: """^frontend/.*
       ^Jenkinsfile\.frontend$
-      ${frontendSharedRegions}
-      ${hygieneRegions}"""
+      ^${frontendSharedRegions}
+      ^${hygieneRegions}"""
         ],
         [
           name: 'clinicflow-system-ci',
