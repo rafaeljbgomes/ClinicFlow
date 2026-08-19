@@ -185,6 +185,7 @@ jobs:
                   extensions {
                     pathRestriction {
                       includedRegions(component.includedRegions)
+                      excludedRegions('')
                     }
                     cloneOptions { timeout(10) }
                   }
