@@ -75,20 +75,20 @@ jobs:
       def repositoryUrl = System.getenv('CLINICFLOW_JENKINS_SCM_URL')
       def repositoryBranch = System.getenv('CLINICFLOW_JENKINS_BRANCH')
       def hygieneRegions = '''
-      ^scripts/ci/Test-RepositoryHygiene\.ps1$
-      ^\.gitleaks\.toml$
-      ^\.gitignore$
+      ^scripts/ci/Test-RepositoryHygiene[.]ps1$
+      ^[.]gitleaks[.]toml$
+      ^[.]gitignore$
       '''.stripIndent().trim()
       def backendSharedRegions = '''
-      ^pom\.xml$
+      ^pom[.]xml$
       ^mvnw$
-      ^mvnw\.cmd$
-      ^\.mvn/.*
-      ^scripts/ci/(Invoke-ServiceBackend|Assert-ServicePackage|Build-ComponentImage|Remove-ComponentImage)\.ps1$
+      ^mvnw[.]cmd$
+      ^[.]mvn/.*
+      ^scripts/ci/(Invoke-ServiceBackend|Assert-ServicePackage|Build-ComponentImage|Remove-ComponentImage)[.]ps1$
       ^deploy/jenkins/agent/.*
       '''.stripIndent().trim()
       def frontendSharedRegions = '''
-      ^scripts/ci/(Invoke-FrontendPhase|Build-ComponentImage|Remove-ComponentImage)\.ps1$
+      ^scripts/ci/(Invoke-FrontendPhase|Build-ComponentImage|Remove-ComponentImage)[.]ps1$
       ^deploy/jenkins/agent/.*
       '''.stripIndent().trim()
 
@@ -98,7 +98,7 @@ jobs:
           description: 'Independent auth-service CI. See GitHub issue #6.',
           scriptPath: 'Jenkinsfile.auth',
           includedRegions: """^auth-service/.*
-      ^Jenkinsfile\.auth$
+      ^Jenkinsfile[.]auth$
       ^${backendSharedRegions}
       ^${hygieneRegions}"""
         ],
@@ -108,7 +108,7 @@ jobs:
           scriptPath: 'Jenkinsfile.patient',
           includedRegions: """^patient-service/.*
       ^event-contracts/.*
-      ^Jenkinsfile\.patient$
+      ^Jenkinsfile[.]patient$
       ^${backendSharedRegions}
       ^${hygieneRegions}"""
         ],
@@ -118,7 +118,7 @@ jobs:
           scriptPath: 'Jenkinsfile.appointment',
           includedRegions: """^appointment-service/.*
       ^event-contracts/.*
-      ^Jenkinsfile\.appointment$
+      ^Jenkinsfile[.]appointment$
       ^${backendSharedRegions}
       ^${hygieneRegions}"""
         ],
@@ -128,7 +128,7 @@ jobs:
           scriptPath: 'Jenkinsfile.clinical',
           includedRegions: """^clinical-service/.*
       ^event-contracts/.*
-      ^Jenkinsfile\.clinical$
+      ^Jenkinsfile[.]clinical$
       ^${backendSharedRegions}
       ^${hygieneRegions}"""
         ],
@@ -138,7 +138,7 @@ jobs:
           scriptPath: 'Jenkinsfile.notification',
           includedRegions: """^notification-service/.*
       ^event-contracts/.*
-      ^Jenkinsfile\.notification$
+      ^Jenkinsfile[.]notification$
       ^${backendSharedRegions}
       ^${hygieneRegions}"""
         ],
@@ -147,7 +147,7 @@ jobs:
           description: 'Independent frontend CI. See GitHub issue #6.',
           scriptPath: 'Jenkinsfile.frontend',
           includedRegions: """^frontend/.*
-      ^Jenkinsfile\.frontend$
+      ^Jenkinsfile[.]frontend$
       ^${frontendSharedRegions}
       ^${hygieneRegions}"""
         ],
@@ -156,24 +156,24 @@ jobs:
           description: 'Full-stack system validation for shared and composition changes. See GitHub issue #6.',
           scriptPath: 'Jenkinsfile.system',
           includedRegions: '''
-      ^Jenkinsfile\.system$
+      ^Jenkinsfile[.]system$
       ^event-contracts/.*
-      ^pom\.xml$
+      ^pom[.]xml$
       ^mvnw$
-      ^mvnw\.cmd$
-      ^\.mvn/.*
+      ^mvnw[.]cmd$
+      ^[.]mvn/.*
       ^frontend/src/app/api/.*
       ^frontend/src/lib/server/.*
       ^frontend/tests/e2e/.*
-      ^frontend/(Dockerfile|package\.json|package-lock\.json|next\.config\.ts|playwright\.config\.ts)$
+      ^frontend/(Dockerfile|package[.]json|package-lock[.]json|next[.]config[.]ts|playwright[.]config[.]ts)$
       ^(auth-service|patient-service|appointment-service|clinical-service|notification-service)/Dockerfile$
-      ^docker-compose(\.ci)?\.yml$
+      ^docker-compose([.]ci)?[.]yml$
       ^docker/.*
       ^deploy/helm/.*
       ^deploy/jenkins/.*
       ^scripts/ci/.*
-      ^\.gitleaks\.toml$
-      ^\.gitignore$
+      ^[.]gitleaks[.]toml$
+      ^[.]gitignore$
       '''.stripIndent().trim()
         ]
       ]
