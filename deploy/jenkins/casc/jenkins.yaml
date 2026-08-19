@@ -97,59 +97,47 @@ jobs:
           name: 'clinicflow-auth-ci',
           description: 'Independent auth-service CI. See GitHub issue #6.',
           scriptPath: 'Jenkinsfile.auth',
-          includedRegions: """^auth-service/.*
-      ^Jenkinsfile[.]auth$
-      ^${backendSharedRegions}
-      ^${hygieneRegions}"""
+          includedRegions: '''^auth-service/.*
+      ^Jenkinsfile[.]auth$''' + System.lineSeparator() + backendSharedRegions + System.lineSeparator() + hygieneRegions
         ],
         [
           name: 'clinicflow-patient-ci',
           description: 'Independent patient-service CI. See GitHub issue #6.',
           scriptPath: 'Jenkinsfile.patient',
-          includedRegions: """^patient-service/.*
+          includedRegions: '''^patient-service/.*
       ^event-contracts/.*
-      ^Jenkinsfile[.]patient$
-      ^${backendSharedRegions}
-      ^${hygieneRegions}"""
+      ^Jenkinsfile[.]patient$''' + System.lineSeparator() + backendSharedRegions + System.lineSeparator() + hygieneRegions
         ],
         [
           name: 'clinicflow-appointment-ci',
           description: 'Independent appointment-service CI. See GitHub issue #6.',
           scriptPath: 'Jenkinsfile.appointment',
-          includedRegions: """^appointment-service/.*
+          includedRegions: '''^appointment-service/.*
       ^event-contracts/.*
-      ^Jenkinsfile[.]appointment$
-      ^${backendSharedRegions}
-      ^${hygieneRegions}"""
+      ^Jenkinsfile[.]appointment$''' + System.lineSeparator() + backendSharedRegions + System.lineSeparator() + hygieneRegions
         ],
         [
           name: 'clinicflow-clinical-ci',
           description: 'Independent clinical-service CI. See GitHub issue #6.',
           scriptPath: 'Jenkinsfile.clinical',
-          includedRegions: """^clinical-service/.*
+          includedRegions: '''^clinical-service/.*
       ^event-contracts/.*
-      ^Jenkinsfile[.]clinical$
-      ^${backendSharedRegions}
-      ^${hygieneRegions}"""
+      ^Jenkinsfile[.]clinical$''' + System.lineSeparator() + backendSharedRegions + System.lineSeparator() + hygieneRegions
         ],
         [
           name: 'clinicflow-notification-ci',
           description: 'Independent notification-service CI. See GitHub issue #6.',
           scriptPath: 'Jenkinsfile.notification',
-          includedRegions: """^notification-service/.*
+          includedRegions: '''^notification-service/.*
       ^event-contracts/.*
-      ^Jenkinsfile[.]notification$
-      ^${backendSharedRegions}
-      ^${hygieneRegions}"""
+      ^Jenkinsfile[.]notification$''' + System.lineSeparator() + backendSharedRegions + System.lineSeparator() + hygieneRegions
         ],
         [
           name: 'clinicflow-frontend-ci',
           description: 'Independent frontend CI. See GitHub issue #6.',
           scriptPath: 'Jenkinsfile.frontend',
-          includedRegions: """^frontend/.*
-      ^Jenkinsfile[.]frontend$
-      ^${frontendSharedRegions}
-      ^${hygieneRegions}"""
+          includedRegions: '''^frontend/.*
+      ^Jenkinsfile[.]frontend$''' + System.lineSeparator() + frontendSharedRegions + System.lineSeparator() + hygieneRegions
         ],
         [
           name: 'clinicflow-system-ci',
