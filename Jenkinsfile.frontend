@@ -52,7 +52,8 @@ pipeline {
     post {
         always {
             sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Remove-ComponentImage.ps1 -Component $COMPONENT -Tag $IMAGE_TAG || true'
-            cleanWs(deleteDirs: true, disableDeferredWipeout: true, notFailBuild: true)
+            sh returnStatus: true, script: 'git reset --hard HEAD'
+            sh returnStatus: true, script: 'git clean -ffdx'
         }
     }
 }

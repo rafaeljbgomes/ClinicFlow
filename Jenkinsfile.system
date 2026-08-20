@@ -76,7 +76,8 @@ pipeline {
                     publishHTML(target: [allowMissing: false, alwaysLinkToLastBuild: true, keepAll: true, reportDir: 'frontend/playwright-report', reportFiles: 'index.html', reportName: 'System Playwright'])
                 }
             }
-            cleanWs(deleteDirs: true, disableDeferredWipeout: true, notFailBuild: true)
+            sh returnStatus: true, script: 'git reset --hard HEAD'
+            sh returnStatus: true, script: 'git clean -ffdx'
         }
     }
 }
