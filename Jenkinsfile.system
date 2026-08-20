@@ -57,7 +57,7 @@ pipeline {
             }
         }
         stage('System image build') {
-            steps { sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Build-Images.ps1' }
+            steps { sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Build-Images.ps1 -RunId $CI_RUN_ID' }
         }
         stage('Compose environment') {
             steps { sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Start-IsolatedCompose.ps1 -RunId $CI_RUN_ID -RuntimeHost host.docker.internal' }
