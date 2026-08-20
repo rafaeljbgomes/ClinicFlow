@@ -153,7 +153,7 @@ jobs:
       ^frontend/src/app/api/.*
       ^frontend/src/lib/server/.*
       ^frontend/tests/e2e/.*
-      ^frontend/(Dockerfile|package[.]json|package-lock[.]json|next[.]config[.]ts|playwright[.]config[.]ts)$
+      ^frontend/(Dockerfile|package[.]json|package-lock[.]json|next[.]config[.]ts|playwright[.]config[.]ts|proxy[.]ts)$
       ^(auth-service|patient-service|appointment-service|clinical-service|notification-service)/Dockerfile$
       ^docker-compose([.]ci)?[.]yml$
       ^docker/.*
