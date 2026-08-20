@@ -16,7 +16,7 @@ pipeline {
 
     stages {
         stage('Checkout') {
-            steps { checkout scm }
+            steps { checkout changelog: false, poll: false, scm: scm }
         }
         stage('Repository hygiene') {
             steps { sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Test-RepositoryHygiene.ps1' }
