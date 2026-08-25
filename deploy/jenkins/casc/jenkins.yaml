@@ -56,7 +56,8 @@ unclassified:
 jobs:
   - script: >
       pipelineJob('clinicflow-engineering-stabilization') {
-        description('Legacy local engineering stabilization pipeline. Kept runnable until every DM-02 replacement job passes.')
+        description('Retired by DM-02 after all independent component and system pipelines passed. Re-enable only for rollback.')
+        disabled(true)
         definition {
           cpsScm {
             scm {

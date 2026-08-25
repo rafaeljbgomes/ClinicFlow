@@ -19,8 +19,10 @@ explicit access and ownership boundaries.
   and Kubernetes Service.
 - Jenkins is currently local CI only: it publishes no image and deploys no
   environment.
-- The root `Jenkinsfile` invokes full-repository backend, frontend, platform,
-  image, Compose, and Playwright checks.
+- DM-02 replaces the root pipeline with six independently executable component
+  pipelines and `Jenkinsfile.system` for platform, Compose, and Playwright
+  evidence. The retired legacy Jenkins job remains disabled as a rollback
+  boundary.
 - Before DM-01, `deploy/helm/clinicflow` rendered every workload with one
   `global.imageTag`. Issue #1 replaces it with platform, reusable service, and
   frontend charts plus per-service values and orchestration.

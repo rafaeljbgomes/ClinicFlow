@@ -147,8 +147,8 @@ service-source changes do not require it.
 
 ## Activation and Rollback Boundary
 
-Keep `clinicflow-engineering-stabilization` and the root `Jenkinsfile` runnable
-until all seven replacement jobs pass from clean checkouts. Only then disable
-the legacy job and retire the root file in a final activation commit. Roll back
-by re-enabling the legacy job and reverting that activation commit; no registry
-or deployed environment is affected.
+All seven replacement jobs passed from clean checkouts, including the isolated
+Compose and Playwright journey in `clinicflow-system-ci`. The activation commit
+therefore disables `clinicflow-engineering-stabilization` and retires the root
+`Jenkinsfile`. Roll back by re-enabling the legacy job and reverting the
+activation commit; no registry or deployed environment is affected.
