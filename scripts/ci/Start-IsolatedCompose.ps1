@@ -39,8 +39,63 @@ function Wait-HttpEndpoint {
     throw "$Name did not become ready at $Uri within $TimeoutSeconds seconds."
 }
 
+function Test-TcpPortOccupied {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$HostName,
+        [Parameter(Mandatory)][int]$Port
+    )
+
+    $Client = [Net.Sockets.TcpClient]::new()
+    try {
+        $Connection = $Client.ConnectAsync($HostName, $Port)
+        return $Connection.Wait(500) -and $Client.Connected
+    }
+    catch { return $false }
+    finally { $Client.Dispose() }
+}
+
+function Wait-DockerHostPorts {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$HostName,
+        [Parameter(Mandatory)][int[]]$Ports,
+        [int]$TimeoutSeconds = 120
+    )
+
+    $FirstPort = ($Ports | Measure-Object -Minimum).Minimum
+    $LastPort = ($Ports | Measure-Object -Maximum).Maximum
+    $Deadline = [DateTimeOffset]::UtcNow.AddSeconds($TimeoutSeconds)
+    $ClearChecks = 0
+    do {
+        $Containers = @(& docker ps --quiet --filter "publish=$FirstPort-$LastPort/tcp")
+        if ($LASTEXITCODE -ne 0) { throw "Unable to inspect Docker host-port ownership." }
+        $OccupiedPorts = @($Ports | Where-Object { Test-TcpPortOccupied -HostName $HostName -Port $_ })
+        if ($Containers.Count -eq 0 -and $OccupiedPorts.Count -eq 0) {
+            $ClearChecks++
+            if ($ClearChecks -ge 2) { return }
+        }
+        else { $ClearChecks = 0 }
+        Start-Sleep -Seconds 2
+    } while ([DateTimeOffset]::UtcNow -lt $Deadline)
+
+    throw "Docker host ports $FirstPort-$LastPort remained occupied for $TimeoutSeconds seconds."
+}
+
 Push-Location $RepositoryRoot
 try {
+    $HostPorts = @(
+        $env:CLINICFLOW_POSTGRES_PORT,
+        $env:CLINICFLOW_RABBITMQ_PORT,
+        $env:CLINICFLOW_RABBITMQ_MANAGEMENT_PORT,
+        $env:CLINICFLOW_AUTH_PORT,
+        $env:CLINICFLOW_PATIENT_PORT,
+        $env:CLINICFLOW_APPOINTMENT_PORT,
+        $env:CLINICFLOW_NOTIFICATION_PORT,
+        $env:CLINICFLOW_CLINICAL_PORT,
+        $env:CLINICFLOW_FRONTEND_PORT
+    ) | ForEach-Object { [int]$_ }
+    Wait-DockerHostPorts -HostName $RuntimeHost -Ports $HostPorts
     & docker compose --file docker-compose.yml --file docker-compose.ci.yml --project-name $ProjectName up --detach --no-build
     if ($LASTEXITCODE -ne 0) { throw "Isolated Compose startup failed." }
     $Endpoints = [ordered]@{
