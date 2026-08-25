@@ -56,7 +56,8 @@ unclassified:
 jobs:
   - script: >
       pipelineJob('clinicflow-engineering-stabilization') {
-        description('Local engineering stabilization pipeline. Triggered manually.')
+        description('Retired by DM-02 after all independent component and system pipelines passed. Re-enable only for rollback.')
+        disabled(true)
         definition {
           cpsScm {
             scm {
@@ -68,6 +69,132 @@ jobs:
             }
             scriptPath('Jenkinsfile')
             lightweight(false)
+          }
+        }
+      }
+  - script: |
+      def repositoryUrl = System.getenv('CLINICFLOW_JENKINS_SCM_URL')
+      def repositoryBranch = System.getenv('CLINICFLOW_JENKINS_BRANCH')
+      def hygieneRegions = '''
+      ^scripts/ci/Test-RepositoryHygiene[.]ps1$
+      ^[.]gitleaks[.]toml$
+      ^[.]gitignore$
+      '''.stripIndent().trim()
+      def backendSharedRegions = '''
+      ^pom[.]xml$
+      ^mvnw$
+      ^mvnw[.]cmd$
+      ^[.]mvn/.*
+      ^scripts/ci/(Invoke-ServiceBackend|Assert-ServicePackage|Build-ComponentImage|Remove-ComponentImage)[.]ps1$
+      ^deploy/jenkins/agent/.*
+      '''.stripIndent().trim()
+      def frontendSharedRegions = '''
+      ^scripts/ci/(Invoke-FrontendPhase|Build-ComponentImage|Remove-ComponentImage)[.]ps1$
+      ^deploy/jenkins/agent/.*
+      '''.stripIndent().trim()
+
+      def components = [
+        [
+          name: 'clinicflow-auth-ci',
+          description: 'Independent auth-service CI. See GitHub issue #6.',
+          scriptPath: 'Jenkinsfile.auth',
+          includedRegions: '''^auth-service/.*
+      ^Jenkinsfile[.]auth$''' + System.lineSeparator() + backendSharedRegions + System.lineSeparator() + hygieneRegions
+        ],
+        [
+          name: 'clinicflow-patient-ci',
+          description: 'Independent patient-service CI. See GitHub issue #6.',
+          scriptPath: 'Jenkinsfile.patient',
+          includedRegions: '''^patient-service/.*
+      ^event-contracts/.*
+      ^Jenkinsfile[.]patient$''' + System.lineSeparator() + backendSharedRegions + System.lineSeparator() + hygieneRegions
+        ],
+        [
+          name: 'clinicflow-appointment-ci',
+          description: 'Independent appointment-service CI. See GitHub issue #6.',
+          scriptPath: 'Jenkinsfile.appointment',
+          includedRegions: '''^appointment-service/.*
+      ^event-contracts/.*
+      ^Jenkinsfile[.]appointment$''' + System.lineSeparator() + backendSharedRegions + System.lineSeparator() + hygieneRegions
+        ],
+        [
+          name: 'clinicflow-clinical-ci',
+          description: 'Independent clinical-service CI. See GitHub issue #6.',
+          scriptPath: 'Jenkinsfile.clinical',
+          includedRegions: '''^clinical-service/.*
+      ^event-contracts/.*
+      ^Jenkinsfile[.]clinical$''' + System.lineSeparator() + backendSharedRegions + System.lineSeparator() + hygieneRegions
+        ],
+        [
+          name: 'clinicflow-notification-ci',
+          description: 'Independent notification-service CI. See GitHub issue #6.',
+          scriptPath: 'Jenkinsfile.notification',
+          includedRegions: '''^notification-service/.*
+      ^event-contracts/.*
+      ^Jenkinsfile[.]notification$''' + System.lineSeparator() + backendSharedRegions + System.lineSeparator() + hygieneRegions
+        ],
+        [
+          name: 'clinicflow-frontend-ci',
+          description: 'Independent frontend CI. See GitHub issue #6.',
+          scriptPath: 'Jenkinsfile.frontend',
+          includedRegions: '''^frontend/.*
+      ^Jenkinsfile[.]frontend$''' + System.lineSeparator() + frontendSharedRegions + System.lineSeparator() + hygieneRegions
+        ],
+        [
+          name: 'clinicflow-system-ci',
+          description: 'Full-stack system validation for shared and composition changes. See GitHub issue #6.',
+          scriptPath: 'Jenkinsfile.system',
+          includedRegions: '''
+      ^Jenkinsfile[.]system$
+      ^event-contracts/.*
+      ^pom[.]xml$
+      ^mvnw$
+      ^mvnw[.]cmd$
+      ^[.]mvn/.*
+      ^frontend/src/app/api/.*
+      ^frontend/src/lib/server/.*
+      ^frontend/tests/e2e/.*
+      ^frontend/(Dockerfile|package[.]json|package-lock[.]json|next[.]config[.]ts|playwright[.]config[.]ts|proxy[.]ts)$
+      ^(auth-service|patient-service|appointment-service|clinical-service|notification-service)/Dockerfile$
+      ^docker-compose([.]ci)?[.]yml$
+      ^docker/.*
+      ^deploy/helm/.*
+      ^deploy/jenkins/.*
+      ^scripts/ci/.*
+      ^[.]gitleaks[.]toml$
+      ^[.]gitignore$
+      '''.stripIndent().trim()
+        ]
+      ]
+
+      components.each { component ->
+        pipelineJob(component.name) {
+          description(component.description)
+          logRotator {
+            numToKeep(20)
+            artifactNumToKeep(10)
+          }
+          triggers {
+            scm('H/5 * * * *')
+          }
+          definition {
+            cpsScm {
+              scm {
+                git {
+                  remote { url(repositoryUrl) }
+                  branch(repositoryBranch)
+                  extensions {
+                    pathRestriction {
+                      includedRegions(component.includedRegions)
+                      excludedRegions('')
+                    }
+                    cloneOptions { timeout(10) }
+                  }
+                }
+              }
+              scriptPath(component.scriptPath)
+              lightweight(false)
+            }
           }
         }
       }

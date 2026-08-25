@@ -2,11 +2,10 @@
 
 ## Problem
 
-Independent pipelines must not remove evidence for cross-service behavior. The
-current root Jenkins pipeline provides broad validation, but it needs an
-explicit role once service-scoped CI exists: prove contracts, deployment
-composition, and critical end-to-end journeys rather than act as every
-service's only CI path.
+Independent pipelines must not remove evidence for cross-service behavior.
+`Jenkinsfile.system` now has that explicit role: prove contracts, deployment
+composition, and critical end-to-end journeys without acting as every service's
+only CI path.
 
 ## Outcome
 
@@ -16,8 +15,8 @@ the full ClinicFlow workflow.
 
 ## Scope
 
-- Rename or replace the root Jenkinsfile as `Jenkinsfile.system` only after
-  service jobs are established.
+- Extend the established `Jenkinsfile.system` as the focused system-validation
+  entry point alongside the independent service and frontend jobs.
 - Define triggers for system validation: `event-contracts`, root Maven
   configuration, Dockerfiles, Compose, Helm, CI scripts, BFF routing, shared
   authentication, and scheduled runs.
@@ -56,7 +55,7 @@ the full ClinicFlow workflow.
 
 ## Rollback Boundary
 
-Preserve the existing root Jenkins pipeline until the replacement covers the
-same supported local Compose and Playwright workflow from a clean checkout.
-This work package changes verification orchestration, not service runtime
-behavior.
+DM-02 preserved the root pipeline until `Jenkinsfile.system` covered the same
+supported local Compose and Playwright workflow from a clean checkout, then
+retired it. This work package changes verification orchestration, not service
+runtime behavior.

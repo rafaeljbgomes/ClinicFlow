@@ -40,6 +40,7 @@
         <pitest.version>1.22.0</pitest.version>
         <pitest-junit5.version>1.2.3</pitest-junit5.version>
         <pitest.skip>false</pitest.skip>
+        <skip.unit.tests>false</skip.unit.tests>
         <argLine></argLine>
     </properties>
 
@@ -108,6 +109,7 @@
                 <version>${maven-surefire-plugin.version}</version>
                 <configuration>
                     <argLine>@{argLine} -javaagent:${org.mockito:mockito-core:jar}</argLine>
+                    <skip>${skip.unit.tests}</skip>
                     <excludes>
                         <exclude>**/*IT.java</exclude>
                     </excludes>
@@ -263,6 +265,9 @@
                             <targetTests>
                                 <param>com.clinicflow.*</param>
                             </targetTests>
+                            <excludedTestClasses>
+                                <param>com.clinicflow.*IT</param>
+                            </excludedTestClasses>
                             <excludedClasses>
                                 <param>com.clinicflow.*.application.commands.*</param>
                                 <param>com.clinicflow.*.application.queries.*</param>

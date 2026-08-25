@@ -1,0 +1,83 @@
+pipeline {
+    agent { label 'clinicflow-ci' }
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '20', artifactNumToKeepStr: '10'))
+        disableConcurrentBuilds()
+        skipDefaultCheckout(true)
+        timeout(time: 60, unit: 'MINUTES')
+        timestamps()
+    }
+
+    environment {
+        CI_RUN_ID = "jenkins-system-${BUILD_NUMBER}"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps { checkout changelog: false, poll: false, scm: scm }
+        }
+        stage('Repository hygiene') {
+            steps { sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Test-RepositoryHygiene.ps1' }
+        }
+        stage('Shared/backend unit validation') {
+            steps { sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Invoke-SystemBackend.ps1 -Phase Unit' }
+            post {
+                always {
+                    junit allowEmptyResults: true, testResults: '**/target/surefire-reports/*.xml'
+                }
+            }
+        }
+        stage('Frontend unit validation') {
+            steps {
+                sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Invoke-FrontendPhase.ps1 -Phase Install'
+                sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Invoke-FrontendPhase.ps1 -Phase Unit'
+            }
+            post {
+                always {
+                    junit allowEmptyResults: true, testResults: 'frontend/test-results/unit.xml'
+                }
+            }
+        }
+        stage('Frontend quality and build') {
+            steps {
+                sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Invoke-FrontendPhase.ps1 -Phase Quality'
+                sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Invoke-FrontendPhase.ps1 -Phase Build'
+            }
+        }
+        stage('Platform validation') {
+            steps { sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Test-Platform.ps1' }
+        }
+        stage('Shared/backend integration validation') {
+            steps { sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Invoke-SystemBackend.ps1 -Phase Integration' }
+            post {
+                always {
+                    junit allowEmptyResults: true, testResults: '**/target/failsafe-reports/*.xml'
+                }
+            }
+        }
+        stage('System image build') {
+            steps { sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Build-Images.ps1 -RunId $CI_RUN_ID' }
+        }
+        stage('Compose environment') {
+            steps { sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Start-IsolatedCompose.ps1 -RunId $CI_RUN_ID -RuntimeHost host.docker.internal' }
+        }
+        stage('Playwright end-to-end tests') {
+            steps { sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Invoke-SystemPlaywright.ps1 -RunId $CI_RUN_ID -RuntimeHost host.docker.internal' }
+        }
+    }
+
+    post {
+        always {
+            sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Stop-IsolatedCompose.ps1 -RunId $CI_RUN_ID || true'
+            archiveArtifacts allowEmptyArchive: true, artifacts: 'reports/platform/**,frontend/playwright-report/**,frontend/test-results/**', fingerprint: false
+            script {
+                if (fileExists('frontend/playwright-report/index.html')) {
+                    publishHTML(target: [allowMissing: false, alwaysLinkToLastBuild: true, keepAll: true, reportDir: 'frontend/playwright-report', reportFiles: 'index.html', reportName: 'System Playwright'])
+                }
+            }
+            sh returnStatus: true, script: 'git reset --hard HEAD'
+            sh returnStatus: true, script: 'git clean -ffdx'
+        }
+    }
+}

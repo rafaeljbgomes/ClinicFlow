@@ -126,27 +126,41 @@ intended for local investigation of uncovered lines and branches.
 
 ## Continuous integration
 
-The root `Jenkinsfile` is the local CI entry point. It runs on the dedicated
-`clinicflow-ci` agent and publishes no images or deployments. The same gates can
-be run directly from the repository root with PowerShell 7:
+Local Jenkins CI is split into independently executable component jobs and a
+focused system job. All jobs run on the dedicated `clinicflow-ci` agent, build
+only local image evidence, and publish or deploy nothing. Backend jobs expose
+separate build, unit, integration, mutation, package, and image stages; the
+frontend job exposes separate unit, static-analysis, production-build, package,
+and image stages. Their phase interfaces can be run directly with PowerShell 7:
 
 ```powershell
 .\scripts\ci\Test-RepositoryHygiene.ps1
-.\scripts\ci\Invoke-BackendFast.ps1
-.\scripts\ci\Invoke-Frontend.ps1
-.\scripts\ci\Test-Platform.ps1
-.\scripts\ci\Invoke-BackendFull.ps1
-.\scripts\ci\Build-Images.ps1
-.\scripts\ci\Invoke-ComposePlaywright.ps1 -RunId local-full
+.\scripts\ci\Invoke-ServiceBackend.ps1 -Service auth-service -Phase Build
+.\scripts\ci\Invoke-ServiceBackend.ps1 -Service auth-service -Phase Unit
+.\scripts\ci\Invoke-ServiceBackend.ps1 -Service auth-service -Phase Integration
+.\scripts\ci\Invoke-ServiceBackend.ps1 -Service auth-service -Phase Mutation
+.\scripts\ci\Invoke-FrontendPhase.ps1 -Phase Unit
+.\scripts\ci\Invoke-FrontendPhase.ps1 -Phase Quality
+.\scripts\ci\Invoke-FrontendPhase.ps1 -Phase Build
 ```
 
-The Jenkins `FAST` level runs repository hygiene, backend-fast, frontend
-quality, and platform validation. `FULL` adds backend integration verification,
-image builds, and isolated Compose/Playwright validation. If an isolated run is
-interrupted, clean up only that run:
+`Jenkinsfile.system` owns cross-service evidence and keeps unit, integration,
+and Playwright validation as distinct stages. The corresponding local sequence
+is:
 
 ```powershell
-.\scripts\ci\Stop-IsolatedCompose.ps1 -RunId local-full
+.\scripts\ci\Invoke-SystemBackend.ps1 -Phase Unit
+.\scripts\ci\Test-Platform.ps1
+.\scripts\ci\Invoke-SystemBackend.ps1 -Phase Integration
+.\scripts\ci\Build-Images.ps1 -RunId local-system
+.\scripts\ci\Start-IsolatedCompose.ps1 -RunId local-system
+.\scripts\ci\Invoke-SystemPlaywright.ps1 -RunId local-system
+```
+
+If an isolated system run is interrupted, clean up only that run:
+
+```powershell
+.\scripts\ci\Stop-IsolatedCompose.ps1 -RunId local-system
 ```
 
 The Compose-backed validation uses fresh named volumes and an isolated project

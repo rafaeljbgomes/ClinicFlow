@@ -19,8 +19,10 @@ explicit access and ownership boundaries.
   and Kubernetes Service.
 - Jenkins is currently local CI only: it publishes no image and deploys no
   environment.
-- The root `Jenkinsfile` invokes full-repository backend, frontend, platform,
-  image, Compose, and Playwright checks.
+- DM-02 replaces the root pipeline with six independently executable component
+  pipelines and `Jenkinsfile.system` for platform, Compose, and Playwright
+  evidence. The retired legacy Jenkins job remains disabled as a rollback
+  boundary.
 - Before DM-01, `deploy/helm/clinicflow` rendered every workload with one
   `global.imageTag`. Issue #1 replaces it with platform, reusable service, and
   frontend charts plus per-service values and orchestration.
@@ -37,16 +39,14 @@ registry, remote Jenkins instance, or production environment.
 | ID | Work package | Outcome | Depends on |
 | --- | --- | --- | --- |
 | DM-01 | [Release packaging](01-release-packaging.md) ([issue #1](https://github.com/rafaeljbgomes/ClinicFlow/issues/1)) | One Helm release and image reference per service | ADR-017 |
-| DM-02 | [Service CI](02-service-ci.md) | One logical Jenkins pipeline per service, with shared reusable steps | DM-01 interface agreed |
+| DM-02 | [Service CI](02-service-ci.md) ([issue #6](https://github.com/rafaeljbgomes/ClinicFlow/issues/6)) | Independent component pipelines plus focused system CI | DM-01 interface agreed |
 | DM-03 | [Artifact promotion and CD](03-artifact-promotion-and-cd.md) | Immutable images and per-service promotion, verification, and rollback | DM-01, DM-02, registry/environment decisions |
 | DM-04 | [Platform access boundaries](04-platform-access-boundaries.md) | Per-service database credentials and clearly separated application/platform responsibility | DM-01 target manifest boundary |
 | DM-05 | [System validation](05-system-validation.md) | A focused integration gate retained alongside service pipelines | DM-01 and DM-02 |
 
-DM-01 is the first implementation candidate because it creates the release
-boundary needed by the remaining work. DM-02 and DM-04 can be designed in
-parallel after that boundary is agreed. DM-03 requires explicit choices about
-registry and deployment environments, so it must not be implemented by
-assumption.
+DM-01 established the release boundary used by DM-02. DM-03 still requires
+explicit choices about registry and deployment environments, so it must not be
+implemented by assumption.
 
 ## Shared Guardrails
 
@@ -69,4 +69,6 @@ assumption.
 Each work package becomes its own GitHub issue or implementation task only
 after its open decisions are resolved. The authoritative remote repository is
 [rafaeljbgomes/ClinicFlow](https://github.com/rafaeljbgomes/ClinicFlow). DM-01
-is tracked in [issue #1](https://github.com/rafaeljbgomes/ClinicFlow/issues/1).
+is tracked in [issue #1](https://github.com/rafaeljbgomes/ClinicFlow/issues/1),
+and DM-02 is tracked in
+[issue #6](https://github.com/rafaeljbgomes/ClinicFlow/issues/6).
