@@ -19,6 +19,7 @@ function Write-ComposeDiagnostics {
 function Wait-HttpEndpoint {
     [CmdletBinding()]
     param(
+        [Parameter(Mandatory)][string]$Name,
         [Parameter(Mandatory)][string]$Uri,
         [int]$TimeoutSeconds = 240
     )
@@ -27,7 +28,7 @@ function Wait-HttpEndpoint {
     do {
         try {
             $Response = Invoke-WebRequest -Uri $Uri -Method Get -TimeoutSec 5 -SkipHttpErrorCheck
-            if ([int]$Response.StatusCode -lt 500) { return }
+            if ([int]$Response.StatusCode -eq 200) { return }
         }
         catch {
             # Diagnostics are captured below if readiness expires.
@@ -35,14 +36,24 @@ function Wait-HttpEndpoint {
         Start-Sleep -Seconds 2
     } while ([DateTimeOffset]::UtcNow -lt $Deadline)
 
-    throw "Frontend did not become ready at $Uri within $TimeoutSeconds seconds."
+    throw "$Name did not become ready at $Uri within $TimeoutSeconds seconds."
 }
 
 Push-Location $RepositoryRoot
 try {
     & docker compose --file docker-compose.yml --file docker-compose.ci.yml --project-name $ProjectName up --detach --no-build
     if ($LASTEXITCODE -ne 0) { throw "Isolated Compose startup failed." }
-    Wait-HttpEndpoint -Uri "http://${RuntimeHost}:$($env:CLINICFLOW_FRONTEND_PORT)"
+    $Endpoints = [ordered]@{
+        "auth-service" = "http://${RuntimeHost}:$($env:CLINICFLOW_AUTH_PORT)/actuator/health"
+        "patient-service" = "http://${RuntimeHost}:$($env:CLINICFLOW_PATIENT_PORT)/actuator/health"
+        "appointment-service" = "http://${RuntimeHost}:$($env:CLINICFLOW_APPOINTMENT_PORT)/actuator/health"
+        "clinical-service" = "http://${RuntimeHost}:$($env:CLINICFLOW_CLINICAL_PORT)/actuator/health"
+        "notification-service" = "http://${RuntimeHost}:$($env:CLINICFLOW_NOTIFICATION_PORT)/actuator/health"
+        "frontend" = "http://${RuntimeHost}:$($env:CLINICFLOW_FRONTEND_PORT)/login"
+    }
+    foreach ($Endpoint in $Endpoints.GetEnumerator()) {
+        Wait-HttpEndpoint -Name $Endpoint.Key -Uri $Endpoint.Value
+    }
 }
 catch {
     $StartupFailure = $_
