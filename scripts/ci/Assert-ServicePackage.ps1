@@ -39,7 +39,8 @@ foreach ($Path in $RequiredEvidence) {
 Push-Location $RepositoryRoot
 try {
     $JarListing = & jar tf $Jars[0].FullName
-    if ($LASTEXITCODE -ne 0 -or $JarListing -notcontains "BOOT-INF/") {
+    $HasBootInfEntry = $JarListing | Where-Object { $_ -like "BOOT-INF/*" }
+    if ($LASTEXITCODE -ne 0 -or -not $HasBootInfEntry) {
         throw "$($Jars[0].Name) is not an executable Spring Boot JAR."
     }
 }
