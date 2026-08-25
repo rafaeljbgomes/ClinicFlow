@@ -86,7 +86,8 @@ JCasC generates these fixed jobs from one component map:
 Each component pipeline has its own workspace, a 60-minute timeout, 20 retained
 builds, 10 retained artifact sets, component-only reports and artifacts, and
 no upstream or downstream service-job dependency. The system pipeline retains
-the broader 90-minute timeout required by Compose and browser validation.
+the same 60-minute timeout while keeping Compose and browser validation in its
+own distinct stages.
 
 All seven jobs poll SCM every five minutes. Git PathRestriction allow-lists
 implement these boundaries:
