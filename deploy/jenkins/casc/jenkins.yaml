@@ -77,7 +77,7 @@ jobs:
       def repositoryBranch = System.getenv('CLINICFLOW_JENKINS_BRANCH')
       def hygieneRegions = '''
       ^scripts/ci/Test-RepositoryHygiene[.]ps1$
-      ^[.]gitleaks[.]toml$
+      ^[.]betterleaksignore$
       ^[.]gitignore$
       '''.stripIndent().trim()
       def backendSharedRegions = '''
@@ -161,7 +161,7 @@ jobs:
       ^deploy/helm/.*
       ^deploy/jenkins/.*
       ^scripts/ci/.*
-      ^[.]gitleaks[.]toml$
+      ^[.]betterleaksignore$
       ^[.]gitignore$
       '''.stripIndent().trim()
         ]

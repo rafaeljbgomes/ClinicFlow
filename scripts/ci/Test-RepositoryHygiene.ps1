@@ -20,7 +20,7 @@ try {
     }
     if ($Forbidden) { throw "Tracked generated or sensitive paths were found: $($Forbidden -join ', ')" }
 
-    & gitleaks git --redact --no-banner .
-    if ($LASTEXITCODE -ne 0) { throw "Gitleaks detected a potential secret." }
+    & betterleaks git --redact --no-banner .
+    if ($LASTEXITCODE -ne 0) { throw "Betterleaks detected an unreviewed potential secret." }
 }
 finally { Pop-Location }

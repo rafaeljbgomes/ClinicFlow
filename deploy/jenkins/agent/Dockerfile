@@ -16,8 +16,8 @@ ARG KUBECONFORM_VERSION=0.8.0
 ARG KUBECONFORM_SHA256=9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
 ARG ACTIONLINT_VERSION=1.7.12
 ARG ACTIONLINT_SHA256=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
-ARG GITLEAKS_VERSION=8.30.1
-ARG GITLEAKS_SHA256=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+ARG BETTERLEAKS_VERSION=1.8.1
+ARG BETTERLEAKS_SHA256=efa407244e1ea8e35f582b8a42becdeac08bdead04f68eb752adda722d583c2a
 ARG PLAYWRIGHT_VERSION=1.62.1
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
@@ -70,11 +70,11 @@ RUN curl -fsSL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz" \
     && echo "${ACTIONLINT_SHA256}  /tmp/actionlint-linux-amd64.tar.gz" | sha256sum --check --strict \
     && tar -xzf /tmp/actionlint-linux-amd64.tar.gz -C /usr/local/bin actionlint \
     && rm /tmp/actionlint-linux-amd64.tar.gz \
-    && curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
-       -o /tmp/gitleaks-linux-x64.tar.gz \
-    && echo "${GITLEAKS_SHA256}  /tmp/gitleaks-linux-x64.tar.gz" | sha256sum --check --strict \
-    && tar -xzf /tmp/gitleaks-linux-x64.tar.gz -C /usr/local/bin gitleaks \
-    && rm /tmp/gitleaks-linux-x64.tar.gz
+    && curl -fsSL "https://github.com/betterleaks/betterleaks/releases/download/v${BETTERLEAKS_VERSION}/betterleaks_${BETTERLEAKS_VERSION}_linux_x64.tar.gz" \
+       -o /tmp/betterleaks-linux-x64.tar.gz \
+    && echo "${BETTERLEAKS_SHA256}  /tmp/betterleaks-linux-x64.tar.gz" | sha256sum --check --strict \
+    && tar -xzf /tmp/betterleaks-linux-x64.tar.gz -C /usr/local/bin betterleaks \
+    && rm /tmp/betterleaks-linux-x64.tar.gz
 
 RUN npx --yes "playwright@${PLAYWRIGHT_VERSION}" install --with-deps chromium \
     && chmod -R a+rX /ms-playwright \
