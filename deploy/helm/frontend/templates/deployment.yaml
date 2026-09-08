@@ -25,6 +25,15 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "clinicflow-frontend.configName" . }}
+          env:
+            - name: CLINICFLOW_SECURITY_JWT_ISSUER
+              value: {{ .Values.jwt.issuer | quote }}
+            - name: CLINICFLOW_SECURITY_JWT_PUBLIC_KEY_PATH
+              value: /run/secrets/clinicflow/jwt-public.pem
+          volumeMounts:
+            - name: jwt-public-key
+              mountPath: /run/secrets/clinicflow
+              readOnly: true
           livenessProbe:
             httpGet:
               path: /login
@@ -39,3 +48,10 @@ spec:
             periodSeconds: 10
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: jwt-public-key
+          secret:
+            secretName: {{ .Values.jwt.secretName }}
+            items:
+              - key: {{ .Values.jwt.publicKeyKey }}
+                path: jwt-public.pem

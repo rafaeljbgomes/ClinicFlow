@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { backendGet, backendHealthGet, jsonError, readTokenCookie } from "@/lib/server/bff";
-import type { ServiceHealth, SystemHealth, UserView } from "@/lib/types";
+import { backendHealthGet, jsonError, readTokenCookie } from "@/lib/server/bff";
+import { verifyAccessToken } from "@/lib/server/jwt";
+import type { ServiceHealth, SystemHealth } from "@/lib/types";
 
 const services = [
   { service: "auth", label: "Auth Service" },
@@ -13,10 +14,10 @@ const services = [
 export async function GET() {
   const token = await readTokenCookie();
   if (!token) return jsonError(401, "Authentication is required");
-  const identity = await backendGet("auth", "/users/me", token);
-  const user = identity.data as Partial<UserView> | null;
-  if (!identity.ok) return jsonError(401, "Session could not be verified");
-  if (user?.role !== "ADMIN") return jsonError(403, "Administrator access is required");
+  const verification = await verifyAccessToken(token);
+  if (verification.status === "unavailable") return jsonError(503, "Session could not be verified");
+  if (verification.status === "invalid") return jsonError(401, "Session could not be verified");
+  if (verification.principal.role !== "ADMIN") return jsonError(403, "Administrator access is required");
 
   const results = await Promise.all(
     services.map(async ({ service, label }) => {

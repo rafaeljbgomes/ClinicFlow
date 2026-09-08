@@ -172,6 +172,10 @@ services:
       APPOINTMENT_SERVICE_URL: http://appointment-service:8083
       CLINICAL_SERVICE_URL: http://clinical-service:8085
       NOTIFICATION_SERVICE_URL: http://notification-service:8084
+      CLINICFLOW_SECURITY_JWT_ISSUER: clinicflow-auth
+      CLINICFLOW_SECURITY_JWT_PUBLIC_KEY_PATH: /run/secrets/clinicflow/jwt-public.pem
+    volumes:
+      - ./secrets:/run/secrets/clinicflow:ro
     ports:
       - "${CLINICFLOW_FRONTEND_PORT:-3000}:3000"
     depends_on:

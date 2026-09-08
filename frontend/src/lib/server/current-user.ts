@@ -4,11 +4,16 @@ import { cache } from "react";
 import { redirect } from "next/navigation";
 import { classifySession, type SessionResult } from "@/lib/session-result";
 import { backendGet, readTokenCookie } from "@/lib/server/bff";
+import { verifyAccessToken } from "@/lib/server/jwt";
 import type { Role } from "@/lib/types";
 
 export const getCurrentSession = cache(async (): Promise<SessionResult> => {
   const token = await readTokenCookie();
   if (!token) return classifySession(token);
+
+  const verification = await verifyAccessToken(token);
+  if (verification.status === "invalid") return classifySession(undefined);
+  if (verification.status === "unavailable") return { status: "unavailable" };
 
   const response = await backendGet("auth", "/users/me", token);
   return classifySession(token, response);
@@ -17,7 +22,7 @@ export const getCurrentSession = cache(async (): Promise<SessionResult> => {
 export async function requireCurrentUser() {
   const session = await getCurrentSession();
   if (session.status === "anonymous") redirect("/login");
-  if (session.status !== "authenticated") {
+  if (session.status === "unavailable" || session.status === "invalid-response") {
     throw new SessionResolutionError(session.status);
   }
   return session.user;

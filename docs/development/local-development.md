@@ -94,6 +94,8 @@ call the Spring Boot services using the following environment variables:
 - `APPOINTMENT_SERVICE_URL`
 - `CLINICAL_SERVICE_URL`
 - `NOTIFICATION_SERVICE_URL`
+- `CLINICFLOW_SECURITY_JWT_ISSUER`
+- Either `CLINICFLOW_SECURITY_JWT_PUBLIC_KEY` or `CLINICFLOW_SECURITY_JWT_PUBLIC_KEY_PATH`
 
 For local development without Docker:
 
@@ -130,7 +132,9 @@ localhost backend service URLs.
 
 The access token is stored only in the `clinicflow_access_token` HttpOnly cookie.
 The BFF also sets `clinicflow_csrf` and requires `X-CSRF-Token` on mutating
-same-origin API requests.
+same-origin API requests. Role-protected BFF routes verify the signed JWT with
+the auth-service public key before forwarding; dashboard rendering still calls
+auth-service when it needs the complete profile.
 
 ## Minimal Smoke Flow
 

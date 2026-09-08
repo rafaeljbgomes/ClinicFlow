@@ -26,6 +26,11 @@ services:
     url: http://notification-service:8084
     healthUrl: http://notification-service:9000
 
+jwt:
+  issuer: clinicflow-auth
+  secretName: clinicflow-jwt
+  publicKeyKey: jwt-public.pem
+
 resources:
   requests:
     cpu: 100m
