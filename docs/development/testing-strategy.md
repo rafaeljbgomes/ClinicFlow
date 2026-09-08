@@ -144,6 +144,11 @@ and image stages. Their phase interfaces can be run directly with PowerShell 7:
 .\scripts\ci\Invoke-FrontendPhase.ps1 -Phase Build
 ```
 
+Repository hygiene runs Betterleaks against Git history. The checked-in
+`.betterleaksignore` contains only reviewed fingerprints for intentional local,
+demo, test, and Jenkins bootstrap values; new or changed findings remain CI
+failures and must be reviewed before the allowlist is updated.
+
 `Jenkinsfile.system` owns cross-service evidence and keeps unit, integration,
 and Playwright validation as distinct stages. The corresponding local sequence
 is:
