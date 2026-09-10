@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Browser, type Page } from "@playwright/test";
 
 test("session routing remains safe for missing and stale cookies", async ({ context, page }) => {
   await page.goto("/dashboard");
@@ -21,6 +21,21 @@ test("session routing remains safe for missing and stale cookies", async ({ cont
 
   await page.goto("/dashboard");
   await expect(page).toHaveURL(/\/login$/);
+});
+
+test("role-protected BFF routes isolate psychologist, patient, and administrator sessions", async ({ browser }) => {
+  test.setTimeout(180_000);
+
+  const psychologist = await signIn(browser, "sofia.almeida@demo.clinicflow.local", "/dashboard");
+  await expect.poll(() => psychologist.evaluate((path) => fetch(path).then((response) => response.status), "/api/users/9b38f432-6b8f-4d75-9e6a-e775cc4b0175")).toBe(403);
+
+  const patient = await signIn(browser, "ana.martins@demo.clinicflow.local", "/dashboard/access-limited");
+  await expect.poll(() => patient.evaluate((path) => fetch(path).then((response) => response.status), "/api/system/health")).toBe(403);
+
+  const administrator = await signIn(browser, "admin@demo.clinicflow.local", "/dashboard/system");
+  await expect.poll(() => administrator.evaluate((path) => fetch(path).then((response) => response.status), "/api/system/health")).toBe(200);
+
+  await Promise.all([psychologist.context().close(), patient.context().close(), administrator.context().close()]);
 });
 
 test("psychologist can run the main prototype workflow", async ({ page }) => {
@@ -133,4 +148,15 @@ function futureDatetimeLocal() {
   const value = new Date(Date.now() + 24 * 60 * 60 * 1000);
   value.setMinutes(value.getMinutes() - value.getTimezoneOffset());
   return value.toISOString().slice(0, 16);
+}
+
+async function signIn(browser: Browser, email: string, destination: string) {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await page.goto("/login");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill("ClinicFlowDemo!2026");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page).toHaveURL(new RegExp(`${destination.replaceAll("/", "\\/")}$`));
+  return page;
 }

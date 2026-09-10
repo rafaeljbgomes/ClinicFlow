@@ -1,7 +1,8 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { ACCESS_TOKEN_COOKIE, CSRF_COOKIE } from "@/lib/server/auth-cookies";
-import type { Role, UserView } from "@/lib/types";
+import { verifyAccessToken, type VerifiedAccessTokenClaims } from "@/lib/server/jwt";
+import type { Role } from "@/lib/types";
 
 type ServiceName = "auth" | "patient" | "appointment" | "clinical" | "notification";
 
@@ -25,7 +26,7 @@ type ProxyOptions = {
   auth?: boolean;
   csrf?: boolean;
   roles?: Role[];
-  project?: (payload: unknown, user: UserView | null) => unknown;
+  project?: (payload: unknown, principal: VerifiedAccessTokenClaims | null) => unknown;
 };
 
 const BACKEND_TIMEOUT_MS = 10_000;
@@ -62,19 +63,23 @@ export async function proxyRequest(
 
   const cookieStore = await cookies();
   const token = cookieStore.get(ACCESS_TOKEN_COOKIE)?.value;
-  let sessionUser: UserView | null = null;
+  let verifiedPrincipal: VerifiedAccessTokenClaims | null = null;
   if (shouldAuthenticate && !token) {
     return jsonError(401, "Authentication is required");
   }
 
   if (token && options.roles?.length) {
-    const identity = await backendGet("auth", "/users/me", token);
-    const user = identity.data as Partial<UserView> | null;
-    if (!identity.ok) return jsonError(identity.status === 401 ? 401 : 503, "Session could not be verified");
-    if (!user?.role || !options.roles.includes(user.role)) {
+    const verification = await verifyAccessToken(token);
+    if (verification.status === "unavailable") {
+      return jsonError(503, "Session could not be verified");
+    }
+    if (verification.status === "invalid") {
+      return jsonError(401, "Session could not be verified");
+    }
+    if (!options.roles.includes(verification.principal.role)) {
       return jsonError(403, "You are not allowed to perform this action");
     }
-    sessionUser = user as UserView;
+    verifiedPrincipal = verification.principal;
   }
 
   try {
@@ -88,7 +93,7 @@ export async function proxyRequest(
     });
 
     if (response.ok && response.status !== 204 && options.project) {
-      return NextResponse.json(options.project(await readJson(response), sessionUser), { status: response.status });
+      return NextResponse.json(options.project(await readJson(response), verifiedPrincipal), { status: response.status });
     }
     return normalizeBackendResponse(response);
   } catch {

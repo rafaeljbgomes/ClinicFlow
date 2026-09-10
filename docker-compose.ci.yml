@@ -64,6 +64,8 @@ services:
   frontend:
     environment:
       CLINICFLOW_AUTH_COOKIE_SECURE: "false"
+    volumes: !override
+      - jwt-secrets:/run/secrets/clinicflow:ro
 
 volumes:
   jwt-secrets:

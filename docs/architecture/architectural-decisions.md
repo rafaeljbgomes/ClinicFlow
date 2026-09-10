@@ -206,11 +206,11 @@ libphonenumber.
 
 ## ADR-016: Role-Aware Frontend and Notification Ownership
 
-Decision: treat the Next.js frontend as a role-aware BFF rather than a generic dashboard. The dashboard layout validates the session with the auth service, login resolves the role-specific home, mutating routes enforce CSRF, and sensitive BFF routes perform an explicit role check. Notification records carry the owning psychologist id from domain events through RabbitMQ and persistence.
+Decision: treat the Next.js frontend as a role-aware BFF rather than a generic dashboard. The dashboard layout obtains the full user profile from auth-service, while sensitive BFF routes verify RS256 JWT claims locally for their role check; login resolves the role-specific home and mutating routes enforce CSRF. Notification records carry the owning psychologist id from domain events through RabbitMQ and persistence.
 
 Rationale: psychologists need a quiet clinical workspace, administrators need operational controls, and patient accounts must not fall through into clinician screens. A notification list shared by all psychologists would leak practice activity even if the visible UI hid technical fields.
 
-Consequences: psychologists only query notifications owned by their JWT user id; administrators retain the global delivery view. The BFF further projects psychologist messages to practice-safe fields. Legacy notification rows may have a null owner and remain visible only to administrators. Proxy checks remain optimistic and are never the authorization boundary.
+Consequences: psychologists only query notifications owned by their JWT user id; administrators retain the global delivery view. The BFF further projects psychologist messages to practice-safe fields. Legacy notification rows may have a null owner and remain visible only to administrators. BFF role checks are a defense-in-depth optimization; Spring Security remains the authorization boundary.
 
 ## ADR-017: Independent Service Delivery with Shared Platform Capabilities
 
