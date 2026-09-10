@@ -46,7 +46,7 @@ export default function PatientClinicalHistoryPage() {
         description={`${patientName} — cases, care plans, and session records in one place.`}
         actions={
           <Button
-            variant="glass"
+            variant="outline"
             render={<Link href="/dashboard/patients" />}
             nativeButton={false}
           >
@@ -87,7 +87,7 @@ export default function PatientClinicalHistoryPage() {
                       </div>
                       <Button
                         size="sm"
-                        variant="glass"
+                        variant="outline"
                         render={<Link href="/dashboard/clinical" />}
                         nativeButton={false}
                       >
@@ -110,7 +110,7 @@ export default function PatientClinicalHistoryPage() {
             </CardHeader>
             <CardContent className="flex flex-col gap-1">
               {(history.data?.sessionRecords ?? []).length === 0 ? (
-                <p className="rounded-xl border border-border bg-muted/35 p-8 text-center text-sm text-muted-foreground">
+                <p className="py-8 text-center text-sm text-muted-foreground">
                   No session records have been created yet.
                 </p>
               ) : (
@@ -132,21 +132,24 @@ export default function PatientClinicalHistoryPage() {
           </Card>
         </div>
 
-        <Card>
+        <Card tone="quiet" className="border border-border/60 bg-card">
           <CardHeader>
             <CardTitle>Care plans</CardTitle>
             <CardDescription>
               Current treatment focus and goal progress.
             </CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-col gap-4">
+          <CardContent className="flex flex-col">
             {(history.data?.carePlans ?? []).length === 0 ? (
               <p className="rounded-xl border border-border bg-muted/35 p-8 text-center text-sm text-muted-foreground">
                 No care plans for this patient yet.
               </p>
             ) : (
-              history.data?.carePlans.map((plan) => (
-                <CarePlanHistoryCard key={plan.id} carePlan={plan} />
+              history.data?.carePlans.map((plan, index, plans) => (
+                <div key={plan.id}>
+                  <CarePlanHistoryCard carePlan={plan} />
+                  {index < plans.length - 1 ? <Separator /> : null}
+                </div>
               ))
             )}
           </CardContent>
@@ -186,7 +189,7 @@ function SessionHistoryRow({
             <StatusBadge status={record.attendanceStatus} />
             <StatusBadge status={record.modality} />
           </div>
-          <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
             {record.summary ?? "No summary has been added yet."}
           </p>
         </div>
@@ -201,16 +204,16 @@ function SessionHistoryRow({
 
 function CarePlanHistoryCard({ carePlan }: { carePlan: CarePlan }) {
   return (
-    <div className="rounded-xl border border-border bg-muted/35 p-4">
-      <p className="text-sm font-medium">{carePlan.plannedFrequency}</p>
-      <p className="mt-2 line-clamp-3 text-sm leading-6 text-muted-foreground">
+    <div className="py-4 first:pt-0 last:pb-0">
+      <p className="text-sm font-semibold">{carePlan.plannedFrequency}</p>
+      <p className="mt-2 text-sm leading-6 text-muted-foreground">
         {carePlan.therapeuticFocus}
       </p>
       <div className="mt-4 flex flex-col gap-3">
         {carePlan.goals.map((goal) => (
           <div key={goal.id}>
             <div className="flex items-center justify-between gap-3">
-              <p className="truncate text-xs font-medium">{goal.description}</p>
+              <p className="break-words text-xs font-medium">{goal.description}</p>
               <span className="text-xs text-muted-foreground">
                 {goal.progressPercentage}%
               </span>

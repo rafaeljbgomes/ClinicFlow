@@ -58,7 +58,7 @@ export default function SettingsPage() {
       ) : (
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
           <div className="flex flex-col gap-6">
-            <Card>
+            <Card tone="quiet" className="border border-border/60 bg-card">
               <CardHeader>
                 <CardTitle>Account</CardTitle>
                 <CardDescription>Your ClinicFlow account details.</CardDescription>
@@ -90,7 +90,7 @@ export default function SettingsPage() {
           </div>
 
           <div className="flex flex-col gap-6">
-          <Card size="sm">
+          <Card size="sm" tone="quiet" className="border border-border/60 bg-card">
             <CardHeader>
               <CardTitle>Appearance</CardTitle>
               <CardDescription>Choose the view that feels best for your day.</CardDescription>
@@ -123,7 +123,7 @@ function SettingRow({
       </span>
       <div className="min-w-0">
         <p className="text-sm text-muted-foreground">{label}</p>
-        <p className="truncate font-medium">{value}</p>
+        <p className="break-words font-semibold">{value}</p>
       </div>
     </div>
   );

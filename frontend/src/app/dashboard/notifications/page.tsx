@@ -9,6 +9,7 @@ import { SectionHeader } from "@/components/section-header";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Separator } from "@/components/ui/separator";
 import {
   Card,
   CardContent,
@@ -60,22 +61,25 @@ export default function NotificationsPage() {
       {isLoading || currentUser.isLoading ? (
         <LoadingTable />
       ) : !isAdmin ? (
-        <Card>
+        <Card tone="quiet" className="border border-border/60 bg-card">
           <CardHeader>
             <CardTitle>Recent messages</CardTitle>
             <CardDescription>Patient and appointment updates in practice-safe language.</CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            {(data ?? []).map((notification) => (
-              <div key={notification.id} className="flex items-start gap-4 rounded-xl border border-border bg-muted/35 p-4">
+          <CardContent className="flex flex-col">
+            {(data ?? []).map((notification, index) => (
+              <div key={notification.id} className="flex flex-col">
+              <div className="flex items-start gap-4 py-4 first:pt-0">
                 <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground">
                   <BellIcon className="size-4" />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{notification.subject}</p>
+                  <p className="break-words text-sm font-semibold">{notification.subject}</p>
                   <p className="text-xs text-muted-foreground">{formatDateTime(notification.createdAt)}</p>
                 </div>
                 <StatusBadge status={notification.status} />
+              </div>
+              {index < (data ?? []).length - 1 ? <Separator /> : null}
               </div>
             ))}
             {(data ?? []).length === 0 ? (

@@ -164,7 +164,7 @@ export default function AppointmentsPage() {
           </CardHeader>
           <CardContent className="flex flex-col">
             {visibleAppointments.length === 0 ? (
-              <div className="flex min-h-64 items-center justify-center rounded-xl border border-border bg-muted/35 p-8 text-center text-sm text-muted-foreground">
+              <div className="flex min-h-40 items-center justify-center py-8 text-center text-sm text-muted-foreground">
                 No sessions match this view.
               </div>
             ) : (
@@ -245,7 +245,7 @@ function SessionRow({
           {patient?.fullName?.[0]?.toUpperCase() ?? "P"}
         </span>
         <div className="min-w-0">
-          <p className="truncate text-base font-medium">{patient?.fullName ?? appointment.patientId}</p>
+          <p className="break-words text-base font-semibold tracking-tight">{patient?.preferredName || patient?.fullName || appointment.patientId}</p>
           <p className="text-sm text-muted-foreground">
             {formatEnum(appointment.type)} - {formatDateTime(appointment.scheduledAt)}
           </p>

@@ -157,6 +157,48 @@ export default function PatientsPage() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="flex flex-col divide-y divide-border/70 md:hidden">
+              {visiblePatients.map((patient) => (
+                <div key={patient.id} className="py-5 first:pt-0">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-semibold text-secondary-foreground">
+                        {patient.fullName[0]?.toUpperCase() ?? "P"}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="break-words text-sm font-semibold">{patient.fullName}</p>
+                        {patient.preferredName ? <p className="text-xs text-muted-foreground">Prefers {patient.preferredName}</p> : null}
+                      </div>
+                    </div>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" />}>
+                        <MoreHorizontalIcon />
+                        <span className="sr-only">Patient actions</span>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuGroup>
+                          <DropdownMenuLabel>Patient actions</DropdownMenuLabel>
+                          <DropdownMenuItem onClick={() => setEditing(patient)}>Edit</DropdownMenuItem>
+                          <DropdownMenuItem render={<Link href={`/dashboard/patients/${patient.id}/clinical-history`} />}>Clinical history</DropdownMenuItem>
+                        </DropdownMenuGroup>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuGroup>
+                          <DropdownMenuItem onClick={() => changeStatus(patient, "ACTIVE")}>Mark active</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => changeStatus(patient, "INACTIVE")}>Mark inactive</DropdownMenuItem>
+                          <DropdownMenuItem variant="destructive" onClick={() => setArchiving(patient)}>Archive</DropdownMenuItem>
+                        </DropdownMenuGroup>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                  <div className="mt-4 grid gap-3 text-xs">
+                    <div><p className="type-label text-muted-foreground">Contact</p><p className="mt-1 break-all text-sm">{patient.email}</p>{patient.phone ? <p className="mt-1 text-muted-foreground">{formatEnum(patient.contactPreference)} · {patient.phone}</p> : null}</div>
+                    <div className="flex flex-wrap items-center gap-2"><StatusBadge status={patient.consentStatus} /><StatusBadge status={patient.status} /><span className="text-muted-foreground">Consent updated {formatDateTime(patient.consentUpdatedAt)}</span></div>
+                  </div>
+                </div>
+              ))}
+              {visiblePatients.length === 0 ? <p className="py-6 text-center text-sm text-muted-foreground">No patients match these filters.</p> : null}
+            </div>
+            <div className="hidden md:block">
             <Table className="min-w-[760px]">
               <TableHeader>
                 <TableRow>
@@ -251,6 +293,7 @@ export default function PatientsPage() {
                 ) : null}
               </TableBody>
             </Table>
+            </div>
           </CardContent>
         </Card>
       )}
