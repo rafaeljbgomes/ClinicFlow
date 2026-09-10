@@ -45,7 +45,12 @@ export async function verifyAccessToken(token: string): Promise<AccessTokenVerif
 }
 
 function getVerificationKey() {
-  verificationKey ??= loadVerificationKey();
+  if (!verificationKey) {
+    verificationKey = loadVerificationKey().catch((error) => {
+      verificationKey = undefined;
+      throw error;
+    });
+  }
   return verificationKey;
 }
 
