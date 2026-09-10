@@ -27,7 +27,7 @@ export default defineConfig({
           CLINICFLOW_SECURITY_JWT_ISSUER: process.env.CLINICFLOW_SECURITY_JWT_ISSUER ?? "clinicflow-auth",
           CLINICFLOW_SECURITY_JWT_PUBLIC_KEY_PATH:
             process.env.CLINICFLOW_SECURITY_JWT_PUBLIC_KEY_PATH ??
-            path.resolve(import.meta.dirname, "../secrets/jwt-public.pem"),
+            path.resolve(__dirname, "../secrets/jwt-public.pem"),
         },
         reuseExistingServer: true,
         timeout: 120_000,
