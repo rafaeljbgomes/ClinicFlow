@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { formatEnum } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 export function StatusBadge({ status }: { status: string }) {
@@ -9,7 +10,7 @@ export function StatusBadge({ status }: { status: string }) {
     <Badge
       variant="outline"
       className={cn(
-        "h-6 gap-1.5 rounded-full border-transparent px-2.5 text-[0.68rem] font-medium uppercase tracking-wide",
+        "h-6 gap-1.5 rounded-full border-transparent px-2.5 text-[0.68rem] font-medium tracking-[0.01em]",
         tone === "success" && "bg-[var(--status-success-bg)] text-[var(--status-success-fg)]",
         tone === "warning" && "bg-[var(--status-warning-bg)] text-[var(--status-warning-fg)]",
         tone === "danger" && "bg-[var(--status-danger-bg)] text-[var(--status-danger-fg)]",
@@ -18,7 +19,7 @@ export function StatusBadge({ status }: { status: string }) {
       )}
     >
       <span className="size-1 rounded-full bg-current" />
-      {status}
+      {formatEnum(status)}
     </Badge>
   );
 }

@@ -42,6 +42,7 @@
   --color-status-danger-fg: var(--status-danger-fg);
   --color-status-info-bg: var(--status-info-bg);
   --color-status-info-fg: var(--status-info-fg);
+  --color-surface-subtle: var(--surface-subtle);
   
   --spacing-stack-sm: 8px;
   --spacing-stack-md: 16px;
@@ -97,7 +98,15 @@
   --surface-container: #eeefeb;
   --surface-container-high: #e6e8e3;
   --surface-container-highest: #dcdfd9;
+  --surface-subtle: #fafbf8;
   --on-surface-variant: #5c665f;
+
+  --type-display: clamp(3rem, 6vw, 4.5rem);
+  --type-page-title: clamp(2.75rem, 5vw, 3.75rem);
+  --type-section-title: 1.125rem;
+  --type-body: 0.9375rem;
+  --type-metadata: 0.8125rem;
+  --type-label: 0.6875rem;
 }
 
 .dark {
@@ -141,6 +150,7 @@
   --surface-container: #1b211e;
   --surface-container-high: #252c28;
   --surface-container-highest: #303a34;
+  --surface-subtle: #1f2722;
   --on-surface-variant: #b8c1ba;
 }
 
@@ -160,6 +170,20 @@
 }
 
 .font-display { font-family: var(--font-display-family); }
+.type-page-title { font-family: var(--font-display-family); font-size: var(--type-page-title); line-height: .95; letter-spacing: -.04em; }
+.type-section-title { font-size: var(--type-section-title); line-height: 1.25; letter-spacing: -.02em; }
+.type-metadata { font-size: var(--type-metadata); line-height: 1.25; }
+.type-label { font-size: var(--type-label); line-height: 1.25; letter-spacing: .08em; text-transform: uppercase; }
+
+.case-work-panel,
+.session-record-list { container-type: inline-size; }
+.session-record-header { display: flex; flex-direction: column; gap: .75rem; }
+.session-record-header > :last-child { align-self: flex-start; }
+
+@container (min-width: 32rem) {
+  .session-record-header { flex-direction: row; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+  .session-record-row { grid-template-columns: 6rem minmax(0, 1fr) auto; align-items: start; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }

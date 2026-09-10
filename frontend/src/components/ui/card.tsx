@@ -5,14 +5,19 @@ import { cn } from "@/lib/utils"
 function Card({
   className,
   size = "default",
+  tone = "default",
   ...props
-}: React.ComponentProps<"div"> & { size?: "default" | "sm" }) {
+}: React.ComponentProps<"div"> & {
+  size?: "default" | "sm";
+  tone?: "default" | "quiet" | "inset";
+}) {
   return (
     <div
       data-slot="card"
       data-size={size}
+      data-tone={tone}
       className={cn(
-        "group/card flex flex-col gap-6 overflow-hidden rounded-[20px] border border-border bg-card py-6 text-sm text-card-foreground shadow-[0_10px_28px_rgb(23_27_25/0.045)] has-data-[slot=card-footer]:pb-0 has-[>img:first-child]:pt-0 data-[size=sm]:gap-4 data-[size=sm]:py-5 data-[size=sm]:has-data-[slot=card-footer]:pb-0 *:[img:first-child]:rounded-t-[20px] *:[img:last-child]:rounded-b-[20px]",
+        "group/card flex flex-col gap-6 overflow-hidden rounded-[20px] border border-border/70 bg-card py-6 text-sm text-card-foreground shadow-[0_10px_28px_rgb(23_27_25/0.035)] has-data-[slot=card-footer]:pb-0 has-[>img:first-child]:pt-0 data-[size=sm]:gap-4 data-[size=sm]:py-5 data-[size=sm]:has-data-[slot=card-footer]:pb-0 data-[tone=quiet]:border-transparent data-[tone=quiet]:bg-card/80 data-[tone=quiet]:shadow-none data-[tone=inset]:border-border/60 data-[tone=inset]:bg-surface-subtle data-[tone=inset]:shadow-none *:[img:first-child]:rounded-t-[20px] *:[img:last-child]:rounded-b-[20px]",
         className
       )}
       {...props}
