@@ -97,7 +97,7 @@ export function DashboardShell({ children, user }: { children: React.ReactNode; 
         onLogout={logout}
       />
 
-      <div className="min-h-screen lg:pl-72">
+      <div className="min-h-screen xl:pl-72">
         <main className="mx-auto flex w-full max-w-[1440px] flex-col gap-8 px-5 py-6 sm:px-8 lg:px-10 lg:py-8">
           <WorkspaceHeader isAdmin={isAdmin} />
           {children}
@@ -121,7 +121,7 @@ function DesktopSidebar({
   onLogout: () => Promise<void>;
 }) {
   return (
-    <aside className="fixed left-0 top-0 hidden h-screen w-72 lg:block">
+    <aside className="fixed left-0 top-0 hidden h-screen w-72 xl:block">
       <div className="flex h-full flex-col border-r border-border bg-card p-5 shadow-[8px_0_32px_rgb(23_27_25/0.03)]">
         <BrandBlock role={user?.role} />
 
@@ -153,7 +153,7 @@ function MobileHeader({
   onLogout: () => Promise<void>;
 }) {
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-card/95 px-4 backdrop-blur-xl lg:hidden">
+    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-card/95 px-4 backdrop-blur-xl xl:hidden">
       <Sheet>
         <SheetTrigger render={<Button variant="ghost" size="icon" />}>
           <MenuIcon />
@@ -193,7 +193,7 @@ function MobileHeader({
 
 function WorkspaceHeader({ isAdmin }: { isAdmin: boolean }) {
   return (
-    <div className="hidden items-center justify-between border-b border-border pb-4 lg:flex">
+    <div className="hidden items-center justify-between border-b border-border pb-4 xl:flex">
       <div className="flex items-center gap-2.5">
         <span className="size-2 rounded-full bg-clinical-blue" />
         <span className="text-sm font-medium text-muted-foreground">
