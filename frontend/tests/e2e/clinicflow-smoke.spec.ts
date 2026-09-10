@@ -60,6 +60,12 @@ test("psychologist can run the main prototype workflow", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Today" })).toBeVisible({
     timeout: 30_000,
   });
+  await expect(page.getByRole("link", { name: "Today" })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("button", { name: "Schedule", exact: true })).toHaveCount(1);
+  await page.getByRole("button", { name: "ClinicFlow Demo Psychologist" }).click();
+  await expect(page.getByRole("menuitem", { name: "Settings" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeVisible();
+  await page.keyboard.press("Escape");
   await expect(page.getByRole("link", { name: "System" })).toHaveCount(0);
 
   await page.getByRole("link", { name: "Patients" }).click();
@@ -77,6 +83,22 @@ test("psychologist can run the main prototype workflow", async ({ page }) => {
   await page.getByPlaceholder("Search patients").fill(patientEmail);
   await expect(page.getByText(patientName).filter({ visible: true }).first()).toBeVisible();
   await page.getByPlaceholder("Search patients").clear();
+  const statusFilter = page.getByRole("combobox", { name: "Filter patients by status" });
+  await statusFilter.focus();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await expect(page.getByRole("option", { name: "Active", exact: true })).toHaveAttribute("data-highlighted", "");
+  await page.keyboard.press("Enter");
+  await expect(statusFilter).toContainText("Active");
+  await statusFilter.focus();
+  await page.keyboard.press("Space");
+  await page.keyboard.press("Home");
+  await page.keyboard.press("Enter");
+  const patientActions = page.getByRole("button", { name: "Patient actions" }).last();
+  await patientActions.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("menuitem", { name: "Archive" })).toBeVisible();
+  await page.keyboard.press("Escape");
 
   await page.getByRole("link", { name: "Calendar" }).click();
   await openDialog(page, "Schedule session", "Schedule session");
@@ -98,6 +120,10 @@ test("psychologist can run the main prototype workflow", async ({ page }) => {
   await page.getByLabel("Review date").fill("2026-08-15");
   await page.getByLabel("Goal description").fill("Improve sleep consistency");
   await page.getByLabel("Progress").fill("20");
+  await page.getByRole("button", { name: "Add goal" }).click();
+  await expect(page.getByText("Goal 2")).toBeVisible();
+  await page.getByLabel("Goal description").nth(1).fill("Create a consistent wind-down routine");
+  await page.getByLabel("Progress").nth(1).fill("0");
   await page.getByRole("button", { name: "Save care plan" }).click();
   await expect(page.getByText(therapeuticFocus).filter({ visible: true }).first()).toBeVisible();
 
@@ -123,6 +149,10 @@ test("psychologist can run the main prototype workflow", async ({ page }) => {
   await page.getByRole("link", { name: "Messages" }).click();
   await expect(page.locator("main")).toContainText("Patient profile created");
   await expect(page.locator("main")).toContainText("Appointment scheduled");
+
+  await page.getByRole("link", { name: "Settings" }).click();
+  await expect(page.getByText("CSRF protection")).toHaveCount(0);
+  await expect(page.getByText("Browser access uses")).toHaveCount(0);
 });
 
 async function openDialog(
