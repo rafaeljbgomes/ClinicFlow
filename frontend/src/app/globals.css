@@ -185,6 +185,13 @@
   .session-record-row { grid-template-columns: 6rem minmax(0, 1fr) auto; align-items: start; }
 }
 
+.care-plan-preview { container-type: inline-size; }
+.care-plan-preview .care-plan-goal:nth-child(n + 2) { display: none; }
+
+@container (min-width: 25rem) {
+  .care-plan-preview .care-plan-goal:nth-child(2) { display: block; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
 }

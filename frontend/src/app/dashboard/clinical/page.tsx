@@ -85,6 +85,7 @@ export default function ClinicalPage() {
   const [newSessionOpen, setNewSessionOpen] = useState(false);
   const [editingSession, setEditingSession] = useState<SessionRecord | null>(null);
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
+  const [goalsOpen, setGoalsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<ClinicalCaseStatus | "ALL">("ALL");
 
@@ -246,9 +247,10 @@ export default function ClinicalPage() {
                   key={clinicalCase.id}
                   type="button"
                   onClick={() => setSelectedCaseId(clinicalCase.id)}
+                  aria-pressed={selectedCase?.id === clinicalCase.id}
                   className={cn(
-                    "w-full border-l-2 border-transparent px-3 py-3 text-left transition duration-150 hover:bg-secondary/45 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/25",
-                    selectedCase?.id === clinicalCase.id && "border-l-primary bg-secondary/80"
+                    "w-full rounded-xl border-l-2 border-transparent px-3.5 py-3 text-left transition duration-150 hover:bg-secondary/45 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/25",
+                    selectedCase?.id === clinicalCase.id && "border-l-primary bg-secondary/80 shadow-[inset_0_0_0_1px_rgb(42_118_91/12%)]"
                   )}
                 >
                   <div className="flex items-start justify-between gap-3">
@@ -283,6 +285,7 @@ export default function ClinicalPage() {
             onCreateSession={() => setNewSessionOpen(true)}
             onEditCarePlan={() => setCarePlanOpen(true)}
             onEditSession={setEditingSession}
+            onViewAllGoals={() => setGoalsOpen(true)}
           />
         ) : (
           <Card>
@@ -314,6 +317,18 @@ export default function ClinicalPage() {
             </DialogDescription>
           </DialogHeader>
           <CarePlanForm carePlan={carePlan.data} onSubmit={saveCarePlan} />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={goalsOpen} onOpenChange={setGoalsOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Care-plan objectives</DialogTitle>
+            <DialogDescription>
+              Review every objective and its current progress for this care plan.
+            </DialogDescription>
+          </DialogHeader>
+          {carePlan.data ? <CarePlanGoalsDialog carePlan={carePlan.data} /> : null}
         </DialogContent>
       </Dialog>
 
@@ -372,6 +387,7 @@ function CaseDetail({
   onCreateSession,
   onEditCarePlan,
   onEditSession,
+  onViewAllGoals,
 }: {
   carePlan?: CarePlan;
   carePlanError?: Error;
@@ -386,6 +402,7 @@ function CaseDetail({
   onCreateSession: () => void;
   onEditCarePlan: () => void;
   onEditSession: (record: SessionRecord) => void;
+  onViewAllGoals: () => void;
 }) {
   const orderedSessions = useMemo(
     () =>
@@ -448,9 +465,9 @@ function CaseDetail({
             </div>
           </div>
         </CardHeader>
-        <CardContent className="flex flex-col gap-5">
+        <CardContent className="flex flex-col gap-4">
           <p className="max-w-4xl text-sm leading-6 text-muted-foreground">{clinicalCase.presentingConcern}</p>
-          <div className="grid divide-y divide-border/70 border-y border-border/70 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+          <div className="grid overflow-hidden rounded-xl border border-border/70 bg-surface-subtle divide-y divide-border/70 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
             <CaseMetadata label="Opened" value={formatDateTime(clinicalCase.openedAt)} />
             <CaseMetadata label="Default duration" value={`${defaultDuration ?? 50} minutes`} />
             <CaseMetadata label="Status" value={formatEnum(clinicalCase.status)} />
@@ -515,7 +532,7 @@ function CaseDetail({
             ) : isCarePlanLoading ? (
               <LoadingTable />
             ) : carePlan ? (
-              <CarePlanSummary carePlan={carePlan} />
+              <CarePlanSummary carePlan={carePlan} onViewAllGoals={onViewAllGoals} />
             ) : (
               <div className="flex min-h-36 items-center justify-center py-8 text-center text-sm text-muted-foreground">
                 No care plan has been created for this case.
@@ -582,23 +599,23 @@ function SessionRecordRow({
   );
 }
 
-function CarePlanSummary({ carePlan }: { carePlan: CarePlan }) {
+function CarePlanSummary({ carePlan, onViewAllGoals }: { carePlan: CarePlan; onViewAllGoals: () => void }) {
   return (
     <div className="flex flex-col gap-5">
       <div>
         <p className="type-label text-muted-foreground">Therapeutic focus</p>
         <p className="mt-2 text-sm leading-6">{carePlan.therapeuticFocus}</p>
       </div>
-      <div className="grid divide-y divide-border/70 border-y border-border/70 sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+      <div className="grid overflow-hidden rounded-xl border border-border/70 bg-surface-subtle divide-y divide-border/70 sm:grid-cols-2 sm:divide-x sm:divide-y-0">
         <CaseMetadata label="Frequency" value={carePlan.plannedFrequency} />
         <CaseMetadata label="Review" value={formatDate(carePlan.reviewDate)} />
       </div>
-      <div className="flex flex-col">
+      <div className="care-plan-preview flex flex-col">
         {carePlan.goals.map((goal, index) => (
-          <div key={goal.id} className="py-4 first:pt-0 last:pb-0">
+          <div key={goal.id} className="care-plan-goal py-4 first:pt-0 last:pb-0">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-sm font-semibold">{goal.description}</p>
+                <p className="line-clamp-2 text-sm font-semibold">{goal.description}</p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {goal.targetDate ? `Target ${formatDate(goal.targetDate)}` : "No target date"}
                 </p>
@@ -613,13 +630,41 @@ function CarePlanSummary({ carePlan }: { carePlan: CarePlan }) {
           </div>
         ))}
       </div>
+      {carePlan.goals.length > 1 ? (
+        <Button variant="ghost" size="sm" className="w-fit px-0" onClick={onViewAllGoals}>
+          View all {carePlan.goals.length} objectives
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+function CarePlanGoalsDialog({ carePlan }: { carePlan: CarePlan }) {
+  return (
+    <div className="flex max-h-[55dvh] flex-col overflow-y-auto">
+      {carePlan.goals.map((goal, index) => (
+        <div key={goal.id} className="py-5 first:pt-0 last:pb-0">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold">{goal.description}</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {goal.targetDate ? `Target ${formatDate(goal.targetDate)}` : "No target date"}
+              </p>
+            </div>
+            <StatusBadge status={goal.status} />
+          </div>
+          <Progress className="mt-4" value={goal.progressPercentage} />
+          <p className="mt-1 text-xs text-muted-foreground">{goal.progressPercentage}% complete</p>
+          {index < carePlan.goals.length - 1 ? <Separator className="mt-5" /> : null}
+        </div>
+      ))}
     </div>
   );
 }
 
 function CaseMetadata({ label, value }: { label: string; value: string }) {
   return (
-    <div className="py-3 first:pt-0 last:pb-0 sm:px-4 sm:py-0 sm:first:pl-0 sm:last:pr-0">
+    <div className="min-w-0 px-3 py-3 sm:px-4">
       <p className="type-label text-muted-foreground">{label}</p>
       <p className="mt-2 text-sm font-semibold">{value}</p>
     </div>

@@ -137,6 +137,10 @@ test("psychologist can run the main prototype workflow", async ({ page }) => {
   await page.getByRole("button", { name: "Save care plan" }).click();
   await expect(page.getByText(therapeuticFocus).filter({ visible: true }).first()).toBeVisible();
   await expect(page.getByText("Not started").filter({ visible: true }).first()).toBeVisible();
+  await page.getByRole("button", { name: "View all 2 objectives" }).click();
+  await expect(page.getByRole("dialog", { name: "Care-plan objectives" })).toContainText("Improve sleep consistency");
+  await expect(page.getByRole("dialog", { name: "Care-plan objectives" })).toContainText("Create a consistent wind-down routine");
+  await page.keyboard.press("Escape");
 
   await openDialog(page, "New record", "New session record");
   await page.getByLabel("Session date").fill(futureDatetimeLocal());
