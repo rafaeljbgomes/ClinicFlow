@@ -112,7 +112,17 @@ test("psychologist can run the main prototype workflow", async ({ page }) => {
   await page.getByLabel("Presenting concern").fill(presentingConcern);
   await page.getByRole("button", { name: "Create case" }).click();
   await expect(page.getByText(presentingConcern).filter({ visible: true }).first()).toBeVisible();
-  await expect(page.getByText("INTAKE").filter({ visible: true }).first()).toBeVisible();
+  await expect(page.getByText("Intake").filter({ visible: true }).first()).toBeVisible();
+  await page.getByPlaceholder("Search cases or patients").fill(patientName);
+  await expect(page.getByText(presentingConcern).filter({ visible: true }).first()).toBeVisible();
+  const clinicalFilter = page.getByRole("combobox", { name: "Filter clinical cases by status" });
+  await clinicalFilter.focus();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await expect(page.getByRole("option", { name: "Intake", exact: true })).toHaveAttribute("data-highlighted", "");
+  await page.keyboard.press("Enter");
+  await expect(clinicalFilter).toContainText("Intake");
+  await expect(page.getByRole("checkbox")).toHaveCount(0);
 
   await openDialog(page, "Create", "Care plan", true);
   await page.getByLabel("Therapeutic focus").fill(therapeuticFocus);
@@ -126,6 +136,7 @@ test("psychologist can run the main prototype workflow", async ({ page }) => {
   await page.getByLabel("Progress").nth(1).fill("0");
   await page.getByRole("button", { name: "Save care plan" }).click();
   await expect(page.getByText(therapeuticFocus).filter({ visible: true }).first()).toBeVisible();
+  await expect(page.getByText("Not started").filter({ visible: true }).first()).toBeVisible();
 
   await openDialog(page, "New record", "New session record");
   await page.getByLabel("Session date").fill(futureDatetimeLocal());
