@@ -97,29 +97,31 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-surface-container-low px-4 py-10">
-      <div className="grid w-full max-w-5xl gap-8 lg:grid-cols-[minmax(0,1fr)_27rem] lg:items-center">
-        <section className="hidden max-w-xl flex-col gap-6 lg:flex">
+    <main className="flex min-h-screen items-center justify-center bg-surface-container-low px-5 py-6 sm:px-8 sm:py-10">
+      <div className="grid w-full max-w-6xl gap-6 lg:grid-cols-[minmax(0,1.15fr)_27rem] lg:items-stretch">
+        <section className="hidden min-h-[34rem] flex-col justify-between rounded-[28px] bg-primary p-10 text-primary-foreground shadow-[0_20px_60px_rgb(23_75_58/20%)] lg:flex">
           <div className="flex items-center gap-3">
-            <span className="flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground">
+            <span className="flex size-12 items-center justify-center rounded-full bg-white/12 text-white ring-1 ring-white/20">
               <HeartPulseIcon className="size-5" />
             </span>
             <div>
               <p className="text-lg font-semibold tracking-tight">ClinicFlow</p>
-              <p className="text-sm text-muted-foreground">Practice workspace</p>
+              <p className="text-sm text-white/70">Practice workspace</p>
             </div>
           </div>
-          <div className="flex flex-col gap-4">
-            <h1 className="text-5xl font-semibold tracking-tight">
-              Clinical operations without the noise.
+          <div className="flex max-w-xl flex-col gap-5">
+            <p className="text-sm font-semibold tracking-[0.14em] text-white/65 uppercase">A clearer clinical day</p>
+            <h1 className="font-display text-6xl leading-[0.92] tracking-[-0.045em]">
+              Care, brought into focus.
             </h1>
-            <p className="max-w-lg text-base leading-7 text-muted-foreground">
-              A quiet workspace for managing patients, sessions, and practice messages with a secure BFF boundary.
+            <p className="max-w-md text-base leading-7 text-white/75">
+              A calm, considered workspace for patients, appointments, care plans, and the work around them.
             </p>
           </div>
+          <p className="max-w-sm text-sm leading-6 text-white/65">Built for the everyday rhythm of an independent mental health practice.</p>
         </section>
 
-        <Card className="w-full">
+        <Card className="w-full self-center py-8 shadow-[0_20px_48px_rgb(23_27_25/0.08)]">
         <CardHeader>
           <div className="mb-2 flex items-center gap-2 text-xs font-bold tracking-widest text-muted-foreground uppercase">
             <HeartPulseIcon className="size-4 text-primary" />
@@ -128,8 +130,8 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
           <CardTitle>{isRegister ? "Create workspace access" : "Sign in"}</CardTitle>
           <CardDescription>
             {isRegister
-              ? "Create a psychologist account for the prototype dashboard."
-              : "Access the clinical operations dashboard."}
+              ? "Create access for your ClinicFlow practice workspace."
+              : "Sign in to manage your practice with clarity."}
           </CardDescription>
         </CardHeader>
         <form onSubmit={form.handleSubmit(onSubmit)}>

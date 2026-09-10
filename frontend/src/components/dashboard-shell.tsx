@@ -11,7 +11,6 @@ import {
   LayoutDashboardIcon,
   LogOutIcon,
   MenuIcon,
-  PlusIcon,
   ServerIcon,
   SettingsIcon,
   UsersIcon,
@@ -98,9 +97,9 @@ export function DashboardShell({ children, user }: { children: React.ReactNode; 
         onLogout={logout}
       />
 
-      <div className="min-h-screen md:pl-[17rem]">
-        <main className="mx-auto flex w-full max-w-[1380px] flex-col gap-8 px-4 py-6 sm:px-6 md:px-8 md:py-8">
-          <WorkspaceHeader isAdmin={isAdmin} role={user?.role} />
+      <div className="min-h-screen lg:pl-72">
+        <main className="mx-auto flex w-full max-w-[1440px] flex-col gap-8 px-5 py-6 sm:px-8 lg:px-10 lg:py-8">
+          <WorkspaceHeader isAdmin={isAdmin} />
           {children}
         </main>
       </div>
@@ -122,31 +121,18 @@ function DesktopSidebar({
   onLogout: () => Promise<void>;
 }) {
   return (
-    <aside className="fixed left-0 top-0 hidden h-screen w-[17rem] p-4 md:block">
-      <div className="glass-panel flex h-full flex-col rounded-[30px] p-4">
+    <aside className="fixed left-0 top-0 hidden h-screen w-72 lg:block">
+      <div className="flex h-full flex-col border-r border-border bg-card p-5 shadow-[8px_0_32px_rgb(23_27_25/0.03)]">
         <BrandBlock role={user?.role} />
 
-        <div className="mt-8">
-          {isLoading ? <Skeleton className="h-12 rounded-full" /> : <UserPill user={user} />}
-        </div>
-
-        <nav className="mt-8 flex flex-1 flex-col gap-1">
+        <nav className="mt-10 flex flex-1 flex-col gap-1.5">
           {navItems.map((item) => (
             <NavLink key={item.href} item={item} pathname={pathname} />
           ))}
         </nav>
 
-        <div className="mt-6 flex flex-col gap-3">
-          {user?.role === "PSYCHOLOGIST" ? (
-            <Button render={<Link href="/dashboard/appointments" />} nativeButton={false}>
-              <PlusIcon data-icon="inline-start" />
-              Schedule
-            </Button>
-          ) : null}
-          <Button variant="ghost" onClick={onLogout}>
-            <LogOutIcon data-icon="inline-start" />
-            Sign out
-          </Button>
+        <div className="mt-6 border-t border-border pt-5">
+          {isLoading ? <Skeleton className="h-14 rounded-xl" /> : <AccountMenu user={user} onLogout={onLogout} />}
         </div>
       </div>
     </aside>
@@ -167,22 +153,25 @@ function MobileHeader({
   onLogout: () => Promise<void>;
 }) {
   return (
-    <header className="sticky top-0 flex h-16 items-center justify-between border-b bg-background/80 px-4 backdrop-blur-xl md:hidden">
+    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-card/95 px-4 backdrop-blur-xl lg:hidden">
       <Sheet>
         <SheetTrigger render={<Button variant="ghost" size="icon" />}>
           <MenuIcon />
           <span className="sr-only">Open navigation</span>
         </SheetTrigger>
-        <SheetContent side="left" className="w-72 p-4">
+        <SheetContent side="left" className="flex w-72 p-5">
           <SheetHeader className="text-left">
             <SheetTitle>ClinicFlow</SheetTitle>
             <SheetDescription>{user?.role === "ADMIN" ? "System console" : "Practice workspace"}</SheetDescription>
           </SheetHeader>
-          <nav className="mt-6 flex flex-col gap-1">
+          <nav className="mt-8 flex flex-1 flex-col gap-1.5">
             {navItems.map((item) => (
               <NavLink key={item.href} item={item} pathname={pathname} />
             ))}
           </nav>
+          <div className="border-t border-border pt-5">
+            {isLoading ? <Skeleton className="h-14 rounded-xl" /> : <AccountMenu user={user} onLogout={onLogout} />}
+          </div>
         </SheetContent>
       </Sheet>
 
@@ -202,28 +191,23 @@ function MobileHeader({
   );
 }
 
-function WorkspaceHeader({ isAdmin, role }: { isAdmin: boolean; role?: Role }) {
+function WorkspaceHeader({ isAdmin }: { isAdmin: boolean }) {
   return (
-    <div className="hidden items-center justify-between rounded-full bg-background/60 px-3 py-3 backdrop-blur-xl md:flex">
-      <div className="flex items-center gap-3 px-2">
+    <div className="hidden items-center justify-between border-b border-border pb-4 lg:flex">
+      <div className="flex items-center gap-2.5">
         <span className="size-2 rounded-full bg-clinical-blue" />
-        <span className="text-sm text-muted-foreground">
+        <span className="text-sm font-medium text-muted-foreground">
           {isAdmin ? "Admin console" : "Practice workspace"}
         </span>
       </div>
-      <div className="flex items-center gap-2">
-        <div className="rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground">
-          {role ?? "Loading"}
-        </div>
-        <ThemeToggle />
-      </div>
+      <ThemeToggle />
     </div>
   );
 }
 
 function BrandBlock({ role }: { role?: Role }) {
   return (
-    <Link href={homeForRole(role)} className="flex items-center gap-3 rounded-[22px] px-2 py-1">
+    <Link href={homeForRole(role)} className="flex items-center gap-3 rounded-xl px-1 py-1">
       <span className="flex size-11 items-center justify-center rounded-full bg-primary text-primary-foreground">
         <HeartPulseIcon className="size-5" />
       </span>
@@ -234,18 +218,6 @@ function BrandBlock({ role }: { role?: Role }) {
         </span>
       </span>
     </Link>
-  );
-}
-
-function UserPill({ user }: { user?: UserView }) {
-  return (
-    <div className="flex items-center gap-3 rounded-full bg-background/55 p-2">
-      <AvatarInitials name={user?.fullName} />
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{user?.fullName ?? "Account"}</p>
-        <p className="truncate text-xs text-muted-foreground">{user?.email ?? user?.role}</p>
-      </div>
-    </div>
   );
 }
 
@@ -260,15 +232,14 @@ function AccountMenu({
 }) {
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger render={<Button variant="outline" size={compact ? "icon-sm" : "sm"} />}>
+      <DropdownMenuTrigger render={<Button variant={compact ? "outline" : "ghost"} size={compact ? "icon-sm" : "default"} className={compact ? undefined : "h-auto w-full justify-start px-2 py-2"} />}>
         <AvatarInitials name={user?.fullName} compact={compact} />
-        {!compact ? user?.fullName?.split(" ")[0] ?? "Account" : null}
+        {!compact ? <span className="min-w-0 text-left"><span className="block truncate text-sm font-semibold">{user?.fullName ?? "Account"}</span><span className="block truncate text-xs font-normal text-muted-foreground">{user?.email ?? "Account settings"}</span></span> : null}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuGroup>
-          <DropdownMenuLabel>Signed in</DropdownMenuLabel>
-          <DropdownMenuItem>{user?.email ?? "Not available"}</DropdownMenuItem>
-          <DropdownMenuItem>{user?.role ?? "Role unavailable"}</DropdownMenuItem>
+          <DropdownMenuLabel>Account</DropdownMenuLabel>
+          <DropdownMenuItem render={<Link href="/dashboard/settings" />}>Settings</DropdownMenuItem>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
@@ -303,9 +274,10 @@ function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
     <Link
       href={item.href}
       className={cn(
-        "flex h-11 items-center gap-3 rounded-full px-4 text-sm font-medium text-muted-foreground transition-all hover:bg-background/60 hover:text-foreground",
-        active && "bg-background text-foreground shadow-sm"
+        "flex h-11 items-center gap-3 rounded-xl px-3.5 text-sm font-medium text-muted-foreground transition-all duration-150 hover:bg-secondary/65 hover:text-primary focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/25",
+        active && "bg-primary text-primary-foreground shadow-[0_5px_14px_rgb(23_75_58/18%)] hover:bg-primary hover:text-primary-foreground"
       )}
+      aria-current={active ? "page" : undefined}
     >
       <Icon className="size-4" />
       {item.label}
