@@ -52,95 +52,96 @@
 }
 
 :root {
-  --font-sans-family: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+  --font-sans-family: var(--font-instrument-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-display-family: var(--font-instrument-serif), Georgia, serif;
   --font-mono-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  --background: oklch(0.985 0.006 92);
-  --foreground: oklch(0.23 0.018 165);
+  --background: #f4f3ee;
+  --foreground: #171b19;
   
-  --card: oklch(0.995 0.003 92);
-  --card-foreground: oklch(0.23 0.018 165);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.23 0.018 165);
+  --card: #ffffff;
+  --card-foreground: #171b19;
+  --popover: #ffffff;
+  --popover-foreground: #171b19;
   
-  --primary: oklch(0.36 0.055 165);
-  --primary-foreground: oklch(0.99 0.004 92);
-  --secondary: oklch(0.945 0.012 155);
-  --secondary-foreground: oklch(0.30 0.035 165);
+  --primary: #174b3a;
+  --primary-foreground: #ffffff;
+  --secondary: #e4efe9;
+  --secondary-foreground: #174b3a;
   
-  --muted: oklch(0.955 0.008 92);
-  --muted-foreground: oklch(0.52 0.018 110);
+  --muted: #eeefeb;
+  --muted-foreground: #5c665f;
   
-  --accent: oklch(0.93 0.018 155);
-  --accent-foreground: oklch(0.28 0.035 165);
+  --accent: #e4efe9;
+  --accent-foreground: #174b3a;
   
   --destructive: oklch(0.51 0.19 28);
   --destructive-foreground: oklch(0.99 0 0);
   
-  --border: oklch(0.39 0.03 160 / 0.12);
-  --input: oklch(1 0 0 / 0.94);
-  --ring: oklch(0.55 0.075 165);
+  --border: #d8ddd9;
+  --input: #ffffff;
+  --ring: #2a765b;
   --radius: 1.25rem;
   
   /* Additional tokens */
-  --clinical-blue: oklch(0.55 0.075 165);
-  --status-success-bg: rgb(111 143 130 / 13%);
-  --status-success-fg: #3f6658;
-  --status-warning-bg: rgb(181 126 59 / 14%);
-  --status-warning-fg: #8a5f2c;
-  --status-danger-bg: rgb(180 35 24 / 11%);
-  --status-danger-fg: #a12b22;
-  --status-info-bg: rgb(78 107 140 / 12%);
-  --status-info-fg: #4e6b8c;
-  --surface-container-low: oklch(0.965 0.009 92);
-  --surface-container-lowest: oklch(1 0 0);
-  --surface-container: oklch(0.935 0.012 92);
-  --surface-container-high: oklch(0.90 0.014 92);
-  --surface-container-highest: oklch(0.865 0.016 92);
-  --on-surface-variant: oklch(0.49 0.02 105);
+  --clinical-blue: #2a765b;
+  --status-success-bg: #e4efe9;
+  --status-success-fg: #215b47;
+  --status-warning-bg: #f6eddf;
+  --status-warning-fg: #8b5a20;
+  --status-danger-bg: #f9e7e4;
+  --status-danger-fg: #a33228;
+  --status-info-bg: #e8eef5;
+  --status-info-fg: #426481;
+  --surface-container-low: #f4f3ee;
+  --surface-container-lowest: #ffffff;
+  --surface-container: #eeefeb;
+  --surface-container-high: #e6e8e3;
+  --surface-container-highest: #dcdfd9;
+  --on-surface-variant: #5c665f;
 }
 
 .dark {
-  --background: #10100f;
-  --foreground: #f4f2ee;
+  --background: #111513;
+  --foreground: #f5f7f3;
   
-  --card: rgb(28 28 26 / 72%);
-  --card-foreground: #f4f2ee;
-  --popover: #1d1d1b;
-  --popover-foreground: #f4f2ee;
+  --card: #1b211e;
+  --card-foreground: #f5f7f3;
+  --popover: #202722;
+  --popover-foreground: #f5f7f3;
   
-  --primary: #f4f2ee;
-  --primary-foreground: #171717;
-  --secondary: #262623;
-  --secondary-foreground: #f4f2ee;
+  --primary: #d9eee2;
+  --primary-foreground: #123528;
+  --secondary: #26342d;
+  --secondary-foreground: #d9eee2;
   
-  --muted: #242421;
-  --muted-foreground: #aaa79e;
+  --muted: #252c28;
+  --muted-foreground: #b8c1ba;
   
-  --accent: #2d2d29;
-  --accent-foreground: #f4f2ee;
-  
+  --accent: #2b3b32;
+  --accent-foreground: #f5f7f3;
+
   --destructive: #f04438;
   --destructive-foreground: #ffffff;
   
-  --border: rgb(255 255 255 / 10%);
-  --input: rgb(255 255 255 / 7%);
-  --ring: #9eb9aa;
-  
-  --clinical-blue: #9eb9aa;
-  --status-success-bg: rgb(158 185 170 / 18%);
-  --status-success-fg: #c8d9cf;
-  --status-warning-bg: rgb(214 166 94 / 16%);
-  --status-warning-fg: #e3c18f;
-  --status-danger-bg: rgb(240 68 56 / 16%);
-  --status-danger-fg: #ffb4ad;
-  --status-info-bg: rgb(132 165 199 / 16%);
-  --status-info-fg: #bfd5ed;
-  --surface-container-low: #151513;
-  --surface-container-lowest: #0f0f0e;
-  --surface-container: #1d1d1b;
-  --surface-container-high: #282824;
-  --surface-container-highest: #33332f;
-  --on-surface-variant: #bdb9ae;
+  --border: #39453e;
+  --input: #202722;
+  --ring: #9fd2b9;
+
+  --clinical-blue: #9fd2b9;
+  --status-success-bg: #213d30;
+  --status-success-fg: #b9e0ca;
+  --status-warning-bg: #493722;
+  --status-warning-fg: #f2ca95;
+  --status-danger-bg: #4c2926;
+  --status-danger-fg: #ffc1bb;
+  --status-info-bg: #283849;
+  --status-info-fg: #c8def4;
+  --surface-container-low: #111513;
+  --surface-container-lowest: #171c19;
+  --surface-container: #1b211e;
+  --surface-container-high: #252c28;
+  --surface-container-highest: #303a34;
+  --on-surface-variant: #b8c1ba;
 }
 
 @layer base {
@@ -149,48 +150,17 @@
   }
   body {
     @apply bg-surface-container-low text-foreground font-sans antialiased overflow-x-hidden;
-    background:
-      linear-gradient(180deg, rgb(255 255 255 / 64%) 0%, rgb(244 242 238 / 88%) 42%, var(--surface-container-low) 100%);
+    background: var(--surface-container-low);
     min-height: 100vh;
   }
   
   html.dark body {
-    background:
-      linear-gradient(180deg, rgb(33 33 30 / 86%) 0%, var(--surface-container-low) 100%);
+    background: var(--surface-container-low);
   }
 }
 
-/* ClinicFlow premium minimal utilities */
-.glass-panel {
-  background: var(--card);
-  backdrop-filter: blur(28px) saturate(1.08);
-  -webkit-backdrop-filter: blur(28px) saturate(1.08);
-  border: 1px solid var(--border);
-  box-shadow: 0 24px 80px rgb(23 23 23 / 5%);
-  transition: backdrop-filter 200ms ease, -webkit-backdrop-filter 200ms ease;
-}
+.font-display { font-family: var(--font-display-family); }
 
-.glass-panel:hover {
-  backdrop-filter: blur(32px) saturate(1.12);
-  -webkit-backdrop-filter: blur(32px) saturate(1.12);
-}
-
-.glass-button {
-  background: rgb(255 255 255 / 46%);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
-  border: 1px solid var(--border);
-  transition: all 200ms ease;
-}
-
-.dark .glass-button {
-  background: rgb(255 255 255 / 6%);
-}
-
-.glass-button:hover {
-  background: rgb(255 255 255 / 70%);
-}
-
-.dark .glass-button:hover {
-  background: rgb(255 255 255 / 10%);
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
 }

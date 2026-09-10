@@ -1,11 +1,22 @@
 import type { Metadata } from "next";
-import { Manrope } from "next/font/google";
+import { Instrument_Sans, Instrument_Serif } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
 
-const manrope = Manrope({ subsets: ["latin"], variable: "--font-manrope" });
+const instrumentSans = Instrument_Sans({
+  subsets: ["latin"],
+  variable: "--font-instrument-sans",
+  display: "swap",
+});
+
+const instrumentSerif = Instrument_Serif({
+  subsets: ["latin"],
+  variable: "--font-instrument-serif",
+  display: "swap",
+  weight: "400",
+});
 
 export const metadata: Metadata = {
   title: "ClinicFlow",
@@ -19,7 +30,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en-GB" className="h-full antialiased" suppressHydrationWarning>
-      <body className={`${manrope.variable} min-h-full flex flex-col`}>
+      <body className={`${instrumentSans.variable} ${instrumentSerif.variable} min-h-full flex flex-col`}>
         <ThemeProvider>
           <TooltipProvider>
             {children}
