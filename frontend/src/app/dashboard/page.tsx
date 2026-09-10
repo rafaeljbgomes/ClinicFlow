@@ -108,7 +108,7 @@ export default function DashboardPage() {
     <>
       <SectionHeader
         title="Today"
-        description={`${todayText} - a quiet view of sessions, patients, and follow-ups for your practice.`}
+        description={`${todayText} — appointments, patients, and follow-ups in one considered view.`}
         actions={
           <>
             <Button variant="glass" render={<Link href="/dashboard/patients" />} nativeButton={false}>
@@ -130,10 +130,10 @@ export default function DashboardPage() {
       {error ? <ErrorAlert message={error.message} /> : null}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
-        <Card className="min-h-[560px]">
+        <Card>
           <CardHeader>
             <CardTitle>Session timeline</CardTitle>
-            <CardDescription>Privacy-safe appointment flow for the day and week ahead.</CardDescription>
+            <CardDescription>A clear view of the day and week ahead.</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-1">
             {upcomingAppointments.length === 0 ? (
@@ -172,7 +172,7 @@ export default function DashboardPage() {
                 <p className="text-sm text-muted-foreground">No follow-ups need attention.</p>
               ) : (
                 actionItems.map((item) => (
-                  <div key={item.id} className="flex items-start gap-3 rounded-[20px] bg-background/45 p-3">
+                  <div key={item.id} className="flex items-start gap-3 rounded-xl border border-border bg-muted/35 p-4">
                     <CheckCircle2Icon className="mt-0.5 size-4 text-clinical-blue" />
                     <div className="min-w-0">
                       <p className="text-sm font-medium">{item.title}</p>
@@ -191,7 +191,7 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               {(notifications.data ?? []).slice(-3).reverse().map((message) => (
-                <div key={message.id} className="flex items-start gap-3">
+                <div key={message.id} className="flex items-start gap-3 rounded-xl border border-border bg-muted/35 p-4">
                   <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground">
                     <MessageCircleIcon className="size-4" />
                   </span>
@@ -227,13 +227,13 @@ function AppointmentRow({
       <div className="grid gap-4 py-5 sm:grid-cols-[5rem_3rem_minmax(0,1fr)_auto] sm:items-center">
         <div>
           <p className="text-sm font-semibold">
-            {new Date(appointment.scheduledAt).toLocaleTimeString([], {
+            {new Date(appointment.scheduledAt).toLocaleTimeString("en-GB", {
               hour: "2-digit",
               minute: "2-digit",
             })}
           </p>
           <p className="text-xs text-muted-foreground">
-            {new Date(appointment.scheduledAt).toLocaleDateString([], {
+            {new Date(appointment.scheduledAt).toLocaleDateString("en-GB", {
               month: "short",
               day: "numeric",
             })}
@@ -286,14 +286,11 @@ function PracticePulse({
         <CardTitle>Practice pulse</CardTitle>
         <CardDescription>Only the essentials for the clinical day.</CardDescription>
       </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        {items.map((item, index) => (
-          <div key={item.label} className="flex flex-col gap-4">
-            <div className="flex items-end justify-between gap-4">
-              <span className="text-sm text-muted-foreground">{item.label}</span>
-              <span className="text-3xl font-semibold tracking-tight">{item.value}</span>
-            </div>
-            {index < items.length - 1 ? <Separator /> : null}
+      <CardContent className="grid grid-cols-2 gap-3">
+        {items.map((item) => (
+          <div key={item.label} className="rounded-xl border border-border bg-muted/35 p-4">
+            <span className="block text-xs font-medium text-muted-foreground">{item.label}</span>
+            <span className="mt-2 block text-3xl font-semibold tracking-tight text-foreground">{item.value}</span>
           </div>
         ))}
       </CardContent>
@@ -303,7 +300,7 @@ function PracticePulse({
 
 function EmptyPracticeState() {
   return (
-    <div className="flex min-h-80 flex-col items-center justify-center gap-4 rounded-[24px] bg-background/45 p-8 text-center">
+    <div className="flex min-h-72 flex-col items-center justify-center gap-4 rounded-xl border border-border bg-muted/35 p-8 text-center">
       <span className="flex size-14 items-center justify-center rounded-full bg-secondary text-secondary-foreground">
         <CalendarClockIcon className="size-6" />
       </span>
@@ -313,18 +310,14 @@ function EmptyPracticeState() {
           The workspace will fill in as appointments are scheduled.
         </p>
       </div>
-      <Button render={<Link href="/dashboard/appointments" />} nativeButton={false}>
-        <PlusIcon data-icon="inline-start" />
-        Schedule session
-      </Button>
     </div>
   );
 }
 
 function todayLabel() {
-  return new Date().toLocaleDateString([], {
+  return new Date().toLocaleDateString("en-GB", {
     weekday: "long",
     month: "long",
     day: "numeric",
-  });
+  }).replace(/^./, (letter) => letter.toUpperCase());
 }

@@ -182,7 +182,7 @@ export default function ClinicalPage() {
     <>
       <SectionHeader
         title="Clinical"
-        description="Coordinate cases, care plans, and session records without mixing clinical work with system telemetry."
+        description="Coordinate cases, care plans, and session records with clarity."
         actions={
           <Button
             disabled={(patients.data ?? []).length === 0}
@@ -197,7 +197,7 @@ export default function ClinicalPage() {
       {error ? <ErrorAlert message={error.message} /> : null}
 
       <div className="grid gap-6 xl:grid-cols-[24rem_minmax(0,1fr)]">
-        <Card className="min-h-[520px]">
+        <Card className="self-start">
           <CardHeader>
             <CardTitle>Case registry</CardTitle>
             <CardDescription>
@@ -214,13 +214,13 @@ export default function ClinicalPage() {
                   type="button"
                   onClick={() => setSelectedCaseId(clinicalCase.id)}
                   className={cn(
-                    "rounded-[22px] bg-background/45 p-4 text-left transition hover:bg-background",
-                    selectedCase?.id === clinicalCase.id && "bg-background ring-2 ring-ring/25"
+                    "w-full rounded-xl border border-transparent bg-muted/35 p-4 text-left transition duration-150 hover:border-primary/25 hover:bg-secondary/45 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/25",
+                    selectedCase?.id === clinicalCase.id && "border-primary/40 bg-secondary shadow-[inset_3px_0_0_var(--primary)]"
                   )}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">
+                      <p className="text-sm font-semibold">
                         {patientName(patientById.get(clinicalCase.patientId), clinicalCase.patientId)}
                       </p>
                       <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
@@ -252,8 +252,8 @@ export default function ClinicalPage() {
             onEditSession={setEditingSession}
           />
         ) : (
-          <Card className="min-h-[520px]">
-            <CardContent className="flex min-h-[520px] items-center justify-center text-sm text-muted-foreground">
+          <Card>
+            <CardContent className="flex min-h-72 items-center justify-center text-sm text-muted-foreground">
               Create a clinical case to start the clinical record.
             </CardContent>
           </Card>
@@ -409,7 +409,7 @@ function CaseDetail({
             </div>
           </div>
         </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-3">
+        <CardContent className="grid gap-3 sm:grid-cols-3">
           <Metric label="Opened" value={formatDateTime(clinicalCase.openedAt)} />
           <Metric label="Default duration" value={`${defaultDuration ?? 50} minutes`} />
           <Metric label="Status" value={formatEnum(clinicalCase.status)} />
@@ -437,7 +437,7 @@ function CaseDetail({
             {isSessionsLoading ? (
               <LoadingTable />
             ) : orderedSessions.length === 0 ? (
-              <div className="flex min-h-56 items-center justify-center rounded-[24px] bg-background/45 p-8 text-center text-sm text-muted-foreground">
+              <div className="flex min-h-52 items-center justify-center rounded-xl border border-border bg-muted/35 p-8 text-center text-sm text-muted-foreground">
                 No session records for this case yet.
               </div>
             ) : (
@@ -475,7 +475,7 @@ function CaseDetail({
             ) : carePlan ? (
               <CarePlanSummary carePlan={carePlan} />
             ) : (
-              <div className="flex min-h-56 items-center justify-center rounded-[24px] bg-background/45 p-8 text-center text-sm text-muted-foreground">
+              <div className="flex min-h-52 items-center justify-center rounded-xl border border-border bg-muted/35 p-8 text-center text-sm text-muted-foreground">
                 No care plan has been created for this case.
               </div>
             )}
@@ -500,13 +500,13 @@ function SessionRecordRow({
       <div className="grid gap-4 py-5 md:grid-cols-[8rem_minmax(0,1fr)_auto] md:items-start">
         <div>
           <p className="text-sm font-semibold">
-            {new Date(record.sessionDate).toLocaleTimeString([], {
+            {new Date(record.sessionDate).toLocaleTimeString("en-GB", {
               hour: "2-digit",
               minute: "2-digit",
             })}
           </p>
           <p className="text-xs text-muted-foreground">
-            {new Date(record.sessionDate).toLocaleDateString([], {
+            {new Date(record.sessionDate).toLocaleDateString("en-GB", {
               month: "short",
               day: "numeric",
             })}
@@ -543,7 +543,7 @@ function SessionRecordRow({
 function CarePlanSummary({ carePlan }: { carePlan: CarePlan }) {
   return (
     <div className="flex flex-col gap-5">
-      <div className="rounded-[22px] bg-background/45 p-4">
+      <div className="rounded-xl border border-border bg-muted/35 p-4">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
           Therapeutic focus
         </p>
@@ -555,7 +555,7 @@ function CarePlanSummary({ carePlan }: { carePlan: CarePlan }) {
       </div>
       <div className="flex flex-col gap-3">
         {carePlan.goals.map((goal) => (
-          <div key={goal.id} className="rounded-[22px] bg-background/45 p-4">
+          <div key={goal.id} className="rounded-xl border border-border bg-muted/35 p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-sm font-medium">{goal.description}</p>
@@ -578,18 +578,18 @@ function CarePlanSummary({ carePlan }: { carePlan: CarePlan }) {
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-[22px] bg-background/45 p-4">
+    <div className="rounded-xl border border-border bg-muted/35 p-4">
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
         {label}
       </p>
-      <p className="mt-2 truncate text-sm font-medium">{value}</p>
+      <p className="mt-2 text-sm font-medium">{value}</p>
     </div>
   );
 }
 
 function EmptyClinicalState() {
   return (
-    <div className="flex min-h-80 flex-col items-center justify-center gap-4 rounded-[24px] bg-background/45 p-8 text-center">
+    <div className="flex min-h-72 flex-col items-center justify-center gap-4 rounded-xl border border-border bg-muted/35 p-8 text-center">
       <span className="flex size-14 items-center justify-center rounded-full bg-secondary text-secondary-foreground">
         <ClipboardListIcon className="size-6" />
       </span>

@@ -43,7 +43,7 @@ export default function PatientClinicalHistoryPage() {
     <>
       <SectionHeader
         title="Clinical history"
-        description={`${patientName} - cases, care plans, and session records owned by the signed-in psychologist.`}
+        description={`${patientName} — cases, care plans, and session records in one place.`}
         actions={
           <Button
             variant="glass"
@@ -110,7 +110,7 @@ export default function PatientClinicalHistoryPage() {
             </CardHeader>
             <CardContent className="flex flex-col gap-1">
               {(history.data?.sessionRecords ?? []).length === 0 ? (
-                <p className="rounded-[24px] bg-background/45 p-8 text-center text-sm text-muted-foreground">
+                <p className="rounded-xl border border-border bg-muted/35 p-8 text-center text-sm text-muted-foreground">
                   No session records have been created yet.
                 </p>
               ) : (
@@ -141,7 +141,7 @@ export default function PatientClinicalHistoryPage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             {(history.data?.carePlans ?? []).length === 0 ? (
-              <p className="rounded-[24px] bg-background/45 p-8 text-center text-sm text-muted-foreground">
+              <p className="rounded-xl border border-border bg-muted/35 p-8 text-center text-sm text-muted-foreground">
                 No care plans for this patient yet.
               </p>
             ) : (
@@ -168,13 +168,13 @@ function SessionHistoryRow({
       <div className="grid gap-4 py-5 md:grid-cols-[8rem_minmax(0,1fr)_auto] md:items-start">
         <div>
           <p className="text-sm font-semibold">
-            {new Date(record.sessionDate).toLocaleTimeString([], {
+            {new Date(record.sessionDate).toLocaleTimeString("en-GB", {
               hour: "2-digit",
               minute: "2-digit",
             })}
           </p>
           <p className="text-xs text-muted-foreground">
-            {new Date(record.sessionDate).toLocaleDateString([], {
+            {new Date(record.sessionDate).toLocaleDateString("en-GB", {
               month: "short",
               day: "numeric",
             })}
@@ -201,7 +201,7 @@ function SessionHistoryRow({
 
 function CarePlanHistoryCard({ carePlan }: { carePlan: CarePlan }) {
   return (
-    <div className="rounded-[24px] bg-background/45 p-4">
+    <div className="rounded-xl border border-border bg-muted/35 p-4">
       <p className="text-sm font-medium">{carePlan.plannedFrequency}</p>
       <p className="mt-2 line-clamp-3 text-sm leading-6 text-muted-foreground">
         {carePlan.therapeuticFocus}
@@ -233,7 +233,7 @@ function CarePlanHistoryCard({ carePlan }: { carePlan: CarePlan }) {
 
 function EmptyHistoryState() {
   return (
-    <div className="flex min-h-64 flex-col items-center justify-center gap-4 rounded-[24px] bg-background/45 p-8 text-center">
+    <div className="flex min-h-64 flex-col items-center justify-center gap-4 rounded-xl border border-border bg-muted/35 p-8 text-center">
       <span className="flex size-14 items-center justify-center rounded-full bg-secondary text-secondary-foreground">
         <ClipboardListIcon className="size-6" />
       </span>

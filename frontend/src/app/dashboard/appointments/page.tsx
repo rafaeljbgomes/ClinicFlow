@@ -164,7 +164,7 @@ export default function AppointmentsPage() {
           </CardHeader>
           <CardContent className="flex flex-col">
             {visibleAppointments.length === 0 ? (
-              <div className="flex min-h-72 items-center justify-center rounded-[24px] bg-background/45 p-8 text-center text-sm text-muted-foreground">
+              <div className="flex min-h-64 items-center justify-center rounded-xl border border-border bg-muted/35 p-8 text-center text-sm text-muted-foreground">
                 No sessions match this view.
               </div>
             ) : (
@@ -229,13 +229,13 @@ function SessionRow({
       <div className="grid gap-4 py-5 md:grid-cols-[7rem_3rem_minmax(0,1fr)_auto] md:items-center">
         <div>
           <p className="text-sm font-semibold">
-            {new Date(appointment.scheduledAt).toLocaleTimeString([], {
+            {new Date(appointment.scheduledAt).toLocaleTimeString("en-GB", {
               hour: "2-digit",
               minute: "2-digit",
             })}
           </p>
           <p className="text-xs text-muted-foreground">
-            {new Date(appointment.scheduledAt).toLocaleDateString([], {
+            {new Date(appointment.scheduledAt).toLocaleDateString("en-GB", {
               month: "short",
               day: "numeric",
             })}

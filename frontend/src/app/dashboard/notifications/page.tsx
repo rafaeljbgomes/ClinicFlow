@@ -45,7 +45,7 @@ export default function NotificationsPage() {
         description={
           isAdmin
             ? "Technical notification delivery history for platform review."
-            : "Practice updates shown without clinical detail."
+            : "Practice updates without clinical detail."
         }
         actions={
           <Button variant="outline" onClick={() => mutate()} disabled={isValidating}>
@@ -67,7 +67,7 @@ export default function NotificationsPage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             {(data ?? []).map((notification) => (
-              <div key={notification.id} className="flex items-start gap-4 rounded-[22px] bg-background/45 p-4">
+              <div key={notification.id} className="flex items-start gap-4 rounded-xl border border-border bg-muted/35 p-4">
                 <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground">
                   <BellIcon className="size-4" />
                 </span>

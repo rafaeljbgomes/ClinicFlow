@@ -109,7 +109,7 @@ export function ClinicalCaseForm({
   )?.fullName;
 
   return (
-    <form onSubmit={form.handleSubmit(onSubmit)}>
+    <form className="@container/clinical-form" onSubmit={form.handleSubmit(onSubmit)}>
       <FieldGroup>
         <Controller
           control={form.control}
@@ -199,7 +199,7 @@ export function CarePlanForm({
   }
 
   return (
-    <form onSubmit={form.handleSubmit(submit)}>
+    <form className="@container/clinical-form" onSubmit={form.handleSubmit(submit)}>
       <FieldGroup>
         <Field data-invalid={!!form.formState.errors.therapeuticFocus}>
           <FieldLabel htmlFor="therapeuticFocus">Therapeutic focus</FieldLabel>
@@ -213,7 +213,7 @@ export function CarePlanForm({
           </FieldError>
         </Field>
 
-        <div className="grid gap-5 md:grid-cols-2">
+        <div className="grid gap-5 @lg/clinical-form:grid-cols-2">
           <Field data-invalid={!!form.formState.errors.plannedFrequency}>
             <FieldLabel htmlFor="plannedFrequency">Planned frequency</FieldLabel>
             <Input
@@ -255,8 +255,9 @@ export function CarePlanForm({
           {fields.map((field, index) => (
             <div
               key={field.fieldId}
-              className="grid gap-4 rounded-[22px] bg-background/45 p-4 md:grid-cols-[minmax(0,1fr)_9rem_9rem_auto]"
+              className="@container/goal flex flex-col gap-4 rounded-xl border border-border bg-muted/35 p-4"
             >
+              <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Goal {index + 1}</p>
               <Field data-invalid={!!form.formState.errors.goals?.[index]?.description}>
                 <FieldLabel htmlFor={`goal-${index}`}>Goal description</FieldLabel>
                 <Input
@@ -269,44 +270,44 @@ export function CarePlanForm({
                 </FieldError>
               </Field>
 
-              <Field data-invalid={!!form.formState.errors.goals?.[index]?.targetDate}>
-                <FieldLabel htmlFor={`goal-target-${index}`}>Target</FieldLabel>
-                <Input
-                  id={`goal-target-${index}`}
-                  type="date"
-                  aria-invalid={!!form.formState.errors.goals?.[index]?.targetDate}
-                  {...form.register(`goals.${index}.targetDate`)}
+              <div className="grid gap-4 @lg/goal:grid-cols-[9rem_minmax(0,1fr)_7rem_auto] @lg/goal:items-end">
+                <Field data-invalid={!!form.formState.errors.goals?.[index]?.targetDate}>
+                  <FieldLabel htmlFor={`goal-target-${index}`}>Target date</FieldLabel>
+                  <Input
+                    id={`goal-target-${index}`}
+                    type="date"
+                    aria-invalid={!!form.formState.errors.goals?.[index]?.targetDate}
+                    {...form.register(`goals.${index}.targetDate`)}
+                  />
+                </Field>
+
+                <Controller
+                  control={form.control}
+                  name={`goals.${index}.status`}
+                  render={({ field }) => (
+                    <Field data-invalid={!!form.formState.errors.goals?.[index]?.status}>
+                      <FieldLabel>Status</FieldLabel>
+                      <Select
+                        value={field.value}
+                        onValueChange={(value) => field.onChange(value as GoalStatus)}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue>{formatEnum(field.value)}</SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            {goalStatuses.map((status) => (
+                              <SelectItem key={status} value={status}>
+                                {formatEnum(status)}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  )}
                 />
-              </Field>
 
-              <Controller
-                control={form.control}
-                name={`goals.${index}.status`}
-                render={({ field }) => (
-                  <Field data-invalid={!!form.formState.errors.goals?.[index]?.status}>
-                    <FieldLabel>Status</FieldLabel>
-                    <Select
-                      value={field.value}
-                      onValueChange={(value) => field.onChange(value as GoalStatus)}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue>{formatEnum(field.value)}</SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          {goalStatuses.map((status) => (
-                            <SelectItem key={status} value={status}>
-                              {formatEnum(status)}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                )}
-              />
-
-              <div className="flex items-end gap-2">
                 <Field data-invalid={!!form.formState.errors.goals?.[index]?.progressPercentage}>
                   <FieldLabel htmlFor={`goal-progress-${index}`}>Progress</FieldLabel>
                   <Input
@@ -326,6 +327,7 @@ export function CarePlanForm({
                 <Button
                   type="button"
                   variant="ghost"
+                  className="justify-self-start @lg/goal:justify-self-auto"
                   disabled={fields.length === 1}
                   onClick={() => remove(index)}
                 >
@@ -386,9 +388,9 @@ export function SessionRecordForm({
   }
 
   return (
-    <form onSubmit={form.handleSubmit(submit)}>
+    <form className="@container/clinical-form" onSubmit={form.handleSubmit(submit)}>
       <FieldGroup>
-        <div className="grid gap-5 md:grid-cols-2">
+        <div className="grid gap-5 @lg/clinical-form:grid-cols-2">
           <Field data-invalid={!!form.formState.errors.sessionDate}>
             <FieldLabel htmlFor="sessionDate">Session date</FieldLabel>
             <Input
@@ -416,7 +418,7 @@ export function SessionRecordForm({
           </Field>
         </div>
 
-        <div className="grid gap-5 md:grid-cols-3">
+        <div className="grid gap-5 @lg/clinical-form:grid-cols-3">
           <Controller
             control={form.control}
             name="modality"
@@ -567,7 +569,7 @@ export function PracticeProfileForm({
   }
 
   return (
-    <form onSubmit={form.handleSubmit(submit)}>
+    <form className="@container/clinical-form" onSubmit={form.handleSubmit(submit)}>
       <FieldGroup>
         <Field data-invalid={!!form.formState.errors.professionalRegistration}>
           <FieldLabel htmlFor="professionalRegistration">
@@ -583,7 +585,7 @@ export function PracticeProfileForm({
           </FieldError>
         </Field>
 
-        <div className="grid gap-5 md:grid-cols-2">
+        <div className="grid gap-5 @lg/clinical-form:grid-cols-2">
           <Field data-invalid={!!form.formState.errors.timezone}>
             <FieldLabel htmlFor="timezone">Timezone</FieldLabel>
             <Input

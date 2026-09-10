@@ -120,7 +120,7 @@ export default function PatientsPage() {
               <DialogHeader>
                 <DialogTitle>Create patient</DialogTitle>
                 <DialogDescription>
-                  Store only the minimum information required for this prototype.
+              Add the details you need to support this person’s care.
                 </DialogDescription>
               </DialogHeader>
               <PatientForm submitLabel="Create patient" onSubmit={createPatient} />
@@ -137,7 +137,7 @@ export default function PatientsPage() {
           <CardHeader>
             <CardTitle>Patient registry</CardTitle>
             <CardDescription>
-              Each record is scoped to the signed-in practice user.
+              Search, filter, and keep patient details organised.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -148,7 +148,7 @@ export default function PatientsPage() {
                 <span className="sr-only">Search patients</span>
               </label>
               <Select value={status} onValueChange={(value) => setStatus(value as PatientStatus | "ALL")}>
-                <SelectTrigger className="w-full"><SelectValue>{status === "ALL" ? "All statuses" : formatEnum(status)}</SelectValue></SelectTrigger>
+                <SelectTrigger aria-label="Filter patients by status" className="w-full"><SelectValue>{status === "ALL" ? "All statuses" : formatEnum(status)}</SelectValue></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="ALL">All statuses</SelectItem>
                   <SelectItem value="ACTIVE">Active</SelectItem>
@@ -157,7 +157,7 @@ export default function PatientsPage() {
                 </SelectContent>
               </Select>
             </div>
-            <Table>
+            <Table className="min-w-[760px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
@@ -185,9 +185,9 @@ export default function PatientsPage() {
                         </span>
                       </div>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">
+                    <TableCell className="whitespace-normal text-muted-foreground">
                       <div className="flex flex-col gap-0.5">
-                        <span>{patient.email}</span>
+                        <span className="break-words">{patient.email}</span>
                         <span className="text-xs">
                           {formatEnum(patient.contactPreference)}
                           {patient.phone ? ` - ${patient.phone}` : ""}
@@ -233,7 +233,7 @@ export default function PatientsPage() {
                             <DropdownMenuItem onClick={() => changeStatus(patient, "INACTIVE")}>
                               Mark inactive
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => setArchiving(patient)}>
+                            <DropdownMenuItem variant="destructive" onClick={() => setArchiving(patient)}>
                               Archive
                             </DropdownMenuItem>
                           </DropdownMenuGroup>
@@ -260,7 +260,7 @@ export default function PatientsPage() {
           <SheetHeader>
             <SheetTitle>Edit patient</SheetTitle>
             <SheetDescription>
-              Email is immutable in this first prototype slice.
+              Email cannot be changed after a patient is created.
             </SheetDescription>
           </SheetHeader>
           {editing ? (

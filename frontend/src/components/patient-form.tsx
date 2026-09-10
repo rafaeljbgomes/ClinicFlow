@@ -92,7 +92,7 @@ export function PatientForm({
   });
 
   return (
-    <form onSubmit={form.handleSubmit(onSubmit)}>
+    <form className="@container/patient-form" onSubmit={form.handleSubmit(onSubmit)}>
       <FieldGroup>
         <Field data-invalid={!!form.formState.errors.fullName}>
           <FieldLabel htmlFor="fullName">Full name</FieldLabel>
@@ -151,7 +151,7 @@ export function PatientForm({
           <FieldError>{form.formState.errors.phone?.message}</FieldError>
         </Field>
 
-        <div className="grid gap-5 md:grid-cols-3">
+        <div className="grid gap-5 @lg/patient-form:grid-cols-3">
           <Field data-invalid={!!form.formState.errors.emergencyContactName}>
             <FieldLabel htmlFor="emergencyContactName">Emergency contact</FieldLabel>
             <Input
