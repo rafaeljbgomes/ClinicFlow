@@ -10,7 +10,6 @@ import {
   type PracticeProfileFormValues,
 } from "@/components/clinical-forms";
 import { SectionHeader } from "@/components/section-header";
-import { StatusBadge } from "@/components/status-badge";
 import {
   Card,
   CardContent,
@@ -49,7 +48,7 @@ export default function SettingsPage() {
     <>
       <SectionHeader
         title="Settings"
-        description="Account context and security posture for the current workspace."
+        description="Manage your account, practice defaults, and the appearance of your workspace."
       />
 
       {error ? <ErrorAlert message={error.message} /> : null}
@@ -59,10 +58,10 @@ export default function SettingsPage() {
       ) : (
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
           <div className="flex flex-col gap-6">
-            <Card>
+            <Card tone="quiet" className="border border-border/60 bg-card">
               <CardHeader>
                 <CardTitle>Account</CardTitle>
-                <CardDescription>Information returned by the authenticated session.</CardDescription>
+                <CardDescription>Your ClinicFlow account details.</CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col">
                 <SettingRow icon={<UserRoundIcon />} label="Name" value={user?.fullName ?? "Not available"} />
@@ -91,26 +90,10 @@ export default function SettingsPage() {
           </div>
 
           <div className="flex flex-col gap-6">
-          <Card size="sm">
-            <CardHeader>
-              <CardTitle>Security</CardTitle>
-              <CardDescription>Browser access uses the Next.js BFF and HttpOnly cookies.</CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-sm text-muted-foreground">Session</span>
-                <StatusBadge status="ACTIVE" />
-              </div>
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-sm text-muted-foreground">CSRF protection</span>
-                <StatusBadge status="ACTIVE" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card size="sm">
+          <Card size="sm" tone="quiet" className="border border-border/60 bg-card">
             <CardHeader>
               <CardTitle>Appearance</CardTitle>
-              <CardDescription>Choose the calmest view for your environment.</CardDescription>
+              <CardDescription>Choose the view that feels best for your day.</CardDescription>
             </CardHeader>
             <CardContent className="flex items-center justify-between gap-4">
               <span className="text-sm text-muted-foreground">Light or dark theme</span>
@@ -140,7 +123,7 @@ function SettingRow({
       </span>
       <div className="min-w-0">
         <p className="text-sm text-muted-foreground">{label}</p>
-        <p className="truncate font-medium">{value}</p>
+        <p className="break-words font-semibold">{value}</p>
       </div>
     </div>
   );

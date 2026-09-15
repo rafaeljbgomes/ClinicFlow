@@ -8,12 +8,12 @@ export function SectionHeader({
   actions?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+    <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
       <div className="flex max-w-3xl flex-col gap-2">
-        <h1 className="text-4xl font-semibold tracking-tight text-primary md:text-5xl">{title}</h1>
-        <p className="text-sm leading-6 text-muted-foreground">{description}</p>
+        <h1 className="type-page-title text-foreground">{title}</h1>
+        <p className="max-w-2xl text-sm leading-6 text-muted-foreground">{description}</p>
       </div>
-      {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
+      {actions ? <div data-slot="page-actions" className="flex flex-wrap items-center gap-2">{actions}</div> : null}
     </div>
   );
 }

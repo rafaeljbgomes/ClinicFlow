@@ -120,7 +120,7 @@ export default function PatientsPage() {
               <DialogHeader>
                 <DialogTitle>Create patient</DialogTitle>
                 <DialogDescription>
-                  Store only the minimum information required for this prototype.
+              Add the details you need to support this person’s care.
                 </DialogDescription>
               </DialogHeader>
               <PatientForm submitLabel="Create patient" onSubmit={createPatient} />
@@ -137,7 +137,7 @@ export default function PatientsPage() {
           <CardHeader>
             <CardTitle>Patient registry</CardTitle>
             <CardDescription>
-              Each record is scoped to the signed-in practice user.
+              Search, filter, and keep patient details organised.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -148,7 +148,7 @@ export default function PatientsPage() {
                 <span className="sr-only">Search patients</span>
               </label>
               <Select value={status} onValueChange={(value) => setStatus(value as PatientStatus | "ALL")}>
-                <SelectTrigger className="w-full"><SelectValue>{status === "ALL" ? "All statuses" : formatEnum(status)}</SelectValue></SelectTrigger>
+                <SelectTrigger aria-label="Filter patients by status" className="w-full"><SelectValue>{status === "ALL" ? "All statuses" : formatEnum(status)}</SelectValue></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="ALL">All statuses</SelectItem>
                   <SelectItem value="ACTIVE">Active</SelectItem>
@@ -157,7 +157,49 @@ export default function PatientsPage() {
                 </SelectContent>
               </Select>
             </div>
-            <Table>
+            <div className="flex flex-col divide-y divide-border/70 md:hidden">
+              {visiblePatients.map((patient) => (
+                <div key={patient.id} className="py-5 first:pt-0">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-semibold text-secondary-foreground">
+                        {patient.fullName[0]?.toUpperCase() ?? "P"}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="break-words text-sm font-semibold">{patient.fullName}</p>
+                        {patient.preferredName ? <p className="text-xs text-muted-foreground">Prefers {patient.preferredName}</p> : null}
+                      </div>
+                    </div>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" />}>
+                        <MoreHorizontalIcon />
+                        <span className="sr-only">Patient actions</span>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuGroup>
+                          <DropdownMenuLabel>Patient actions</DropdownMenuLabel>
+                          <DropdownMenuItem onClick={() => setEditing(patient)}>Edit</DropdownMenuItem>
+                          <DropdownMenuItem render={<Link href={`/dashboard/patients/${patient.id}/clinical-history`} />}>Clinical history</DropdownMenuItem>
+                        </DropdownMenuGroup>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuGroup>
+                          <DropdownMenuItem onClick={() => changeStatus(patient, "ACTIVE")}>Mark active</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => changeStatus(patient, "INACTIVE")}>Mark inactive</DropdownMenuItem>
+                          <DropdownMenuItem variant="destructive" onClick={() => setArchiving(patient)}>Archive</DropdownMenuItem>
+                        </DropdownMenuGroup>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                  <div className="mt-4 grid gap-3 text-xs">
+                    <div><p className="type-label text-muted-foreground">Contact</p><p className="mt-1 break-all text-sm">{patient.email}</p>{patient.phone ? <p className="mt-1 text-muted-foreground">{formatEnum(patient.contactPreference)} · {patient.phone}</p> : null}</div>
+                    <div className="flex flex-wrap items-center gap-2"><StatusBadge status={patient.consentStatus} /><StatusBadge status={patient.status} /><span className="text-muted-foreground">Consent updated {formatDateTime(patient.consentUpdatedAt)}</span></div>
+                  </div>
+                </div>
+              ))}
+              {visiblePatients.length === 0 ? <p className="py-6 text-center text-sm text-muted-foreground">No patients match these filters.</p> : null}
+            </div>
+            <div className="hidden md:block">
+            <Table className="min-w-[760px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
@@ -185,9 +227,9 @@ export default function PatientsPage() {
                         </span>
                       </div>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">
+                    <TableCell className="whitespace-normal text-muted-foreground">
                       <div className="flex flex-col gap-0.5">
-                        <span>{patient.email}</span>
+                        <span className="break-words">{patient.email}</span>
                         <span className="text-xs">
                           {formatEnum(patient.contactPreference)}
                           {patient.phone ? ` - ${patient.phone}` : ""}
@@ -233,7 +275,7 @@ export default function PatientsPage() {
                             <DropdownMenuItem onClick={() => changeStatus(patient, "INACTIVE")}>
                               Mark inactive
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => setArchiving(patient)}>
+                            <DropdownMenuItem variant="destructive" onClick={() => setArchiving(patient)}>
                               Archive
                             </DropdownMenuItem>
                           </DropdownMenuGroup>
@@ -251,6 +293,7 @@ export default function PatientsPage() {
                 ) : null}
               </TableBody>
             </Table>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -260,7 +303,7 @@ export default function PatientsPage() {
           <SheetHeader>
             <SheetTitle>Edit patient</SheetTitle>
             <SheetDescription>
-              Email is immutable in this first prototype slice.
+              Email cannot be changed after a patient is created.
             </SheetDescription>
           </SheetHeader>
           {editing ? (

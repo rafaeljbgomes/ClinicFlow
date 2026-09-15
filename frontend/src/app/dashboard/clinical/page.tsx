@@ -8,6 +8,7 @@ import {
   FileTextIcon,
   MoreHorizontalIcon,
   PlusIcon,
+  SearchIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -47,6 +48,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -83,6 +85,9 @@ export default function ClinicalPage() {
   const [newSessionOpen, setNewSessionOpen] = useState(false);
   const [editingSession, setEditingSession] = useState<SessionRecord | null>(null);
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
+  const [goalsOpen, setGoalsOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<ClinicalCaseStatus | "ALL">("ALL");
 
   const patientById = useMemo(
     () => new Map((patients.data ?? []).map((patient) => [patient.id, patient])),
@@ -97,9 +102,22 @@ export default function ClinicalPage() {
     [cases.data]
   );
 
+  const visibleCases = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    return sortedCases.filter((clinicalCase) => {
+      const patient = patientById.get(clinicalCase.patientId);
+      const matchesQuery = !normalized || [patient?.fullName, patient?.preferredName, clinicalCase.presentingConcern]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(normalized);
+      return matchesQuery && (statusFilter === "ALL" || clinicalCase.status === statusFilter);
+    });
+  }, [patientById, query, sortedCases, statusFilter]);
+
   const selectedCase =
-    sortedCases.find((clinicalCase) => clinicalCase.id === selectedCaseId) ??
-    sortedCases[0];
+    visibleCases.find((clinicalCase) => clinicalCase.id === selectedCaseId) ??
+    visibleCases[0];
 
   const carePlan = useSWR<CarePlan>(
     selectedCase ? `/api/clinical-cases/${selectedCase.id}/care-plan` : null,
@@ -182,7 +200,7 @@ export default function ClinicalPage() {
     <>
       <SectionHeader
         title="Clinical"
-        description="Coordinate cases, care plans, and session records without mixing clinical work with system telemetry."
+        description="Coordinate cases, care plans, and session records with clarity."
         actions={
           <Button
             disabled={(patients.data ?? []).length === 0}
@@ -196,34 +214,51 @@ export default function ClinicalPage() {
 
       {error ? <ErrorAlert message={error.message} /> : null}
 
-      <div className="grid gap-6 xl:grid-cols-[24rem_minmax(0,1fr)]">
-        <Card className="min-h-[520px]">
+      <div className="grid items-start gap-6 xl:grid-cols-[24rem_minmax(0,1fr)]">
+        <Card tone="quiet" className="self-start border border-border/60 bg-card">
           <CardHeader>
             <CardTitle>Case registry</CardTitle>
             <CardDescription>
               Open and historical clinical cases for your patients.
             </CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-col gap-3">
+          <CardContent className="flex flex-col gap-4">
+            <div className="flex flex-col gap-3">
+              <label className="relative">
+                <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search cases or patients" className="pl-9" />
+                <span className="sr-only">Search clinical cases</span>
+              </label>
+              <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as ClinicalCaseStatus | "ALL")}>
+                <SelectTrigger aria-label="Filter clinical cases by status" className="w-full"><SelectValue>{statusFilter === "ALL" ? "All case statuses" : formatEnum(statusFilter)}</SelectValue></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">All case statuses</SelectItem>
+                  {caseStatuses.map((status) => <SelectItem key={status} value={status}>{formatEnum(status)}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
             {sortedCases.length === 0 ? (
               <EmptyClinicalState />
+            ) : visibleCases.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">No clinical cases match this view.</p>
             ) : (
-              sortedCases.map((clinicalCase) => (
+              visibleCases.map((clinicalCase) => (
                 <button
                   key={clinicalCase.id}
                   type="button"
                   onClick={() => setSelectedCaseId(clinicalCase.id)}
+                  aria-pressed={selectedCase?.id === clinicalCase.id}
                   className={cn(
-                    "rounded-[22px] bg-background/45 p-4 text-left transition hover:bg-background",
-                    selectedCase?.id === clinicalCase.id && "bg-background ring-2 ring-ring/25"
+                    "w-full rounded-xl border-l-2 border-transparent px-3.5 py-3 text-left transition duration-150 hover:bg-secondary/45 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/25",
+                    selectedCase?.id === clinicalCase.id && "border-l-primary bg-secondary/80 shadow-[inset_0_0_0_1px_rgb(42_118_91/12%)]"
                   )}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">
+                      <p className="text-sm font-semibold">
                         {patientName(patientById.get(clinicalCase.patientId), clinicalCase.patientId)}
                       </p>
-                      <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
                         {clinicalCase.presentingConcern}
                       </p>
                     </div>
@@ -250,10 +285,11 @@ export default function ClinicalPage() {
             onCreateSession={() => setNewSessionOpen(true)}
             onEditCarePlan={() => setCarePlanOpen(true)}
             onEditSession={setEditingSession}
+            onViewAllGoals={() => setGoalsOpen(true)}
           />
         ) : (
-          <Card className="min-h-[520px]">
-            <CardContent className="flex min-h-[520px] items-center justify-center text-sm text-muted-foreground">
+          <Card>
+            <CardContent className="flex min-h-72 items-center justify-center text-sm text-muted-foreground">
               Create a clinical case to start the clinical record.
             </CardContent>
           </Card>
@@ -281,6 +317,18 @@ export default function ClinicalPage() {
             </DialogDescription>
           </DialogHeader>
           <CarePlanForm carePlan={carePlan.data} onSubmit={saveCarePlan} />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={goalsOpen} onOpenChange={setGoalsOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Care-plan objectives</DialogTitle>
+            <DialogDescription>
+              Review every objective and its current progress for this care plan.
+            </DialogDescription>
+          </DialogHeader>
+          {carePlan.data ? <CarePlanGoalsDialog carePlan={carePlan.data} /> : null}
         </DialogContent>
       </Dialog>
 
@@ -339,6 +387,7 @@ function CaseDetail({
   onCreateSession,
   onEditCarePlan,
   onEditSession,
+  onViewAllGoals,
 }: {
   carePlan?: CarePlan;
   carePlanError?: Error;
@@ -353,6 +402,7 @@ function CaseDetail({
   onCreateSession: () => void;
   onEditCarePlan: () => void;
   onEditSession: (record: SessionRecord) => void;
+  onViewAllGoals: () => void;
 }) {
   const orderedSessions = useMemo(
     () =>
@@ -368,15 +418,21 @@ function CaseDetail({
       <Card>
         <CardHeader>
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <CardTitle>{patientName(patient, clinicalCase.patientId)}</CardTitle>
-              <CardDescription className="mt-2 max-w-3xl">
-                {clinicalCase.presentingConcern}
-              </CardDescription>
+            <div className="flex min-w-0 items-start gap-4">
+              <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-secondary text-base font-semibold text-secondary-foreground">
+                {patientInitials(patient)}
+              </span>
+              <div className="min-w-0">
+                <CardTitle>{patient?.fullName ?? clinicalCase.patientId}</CardTitle>
+                {patient?.preferredName && patient.preferredName !== patient.fullName ? (
+                  <p className="mt-1 text-sm text-muted-foreground">Prefers {patient.preferredName}</p>
+                ) : null}
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">{patientContext(patient)}</p>
+              </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Button
-                variant="glass"
+                variant="outline"
                 render={
                   <Link
                     href={`/dashboard/patients/${clinicalCase.patientId}/clinical-history`}
@@ -409,17 +465,20 @@ function CaseDetail({
             </div>
           </div>
         </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-3">
-          <Metric label="Opened" value={formatDateTime(clinicalCase.openedAt)} />
-          <Metric label="Default duration" value={`${defaultDuration ?? 50} minutes`} />
-          <Metric label="Status" value={formatEnum(clinicalCase.status)} />
+        <CardContent className="flex flex-col gap-4">
+          <p className="max-w-4xl text-sm leading-6 text-muted-foreground">{clinicalCase.presentingConcern}</p>
+          <div className="grid overflow-hidden rounded-xl border border-border/70 bg-surface-subtle divide-y divide-border/70 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+            <CaseMetadata label="Opened" value={formatDateTime(clinicalCase.openedAt)} />
+            <CaseMetadata label="Default duration" value={`${defaultDuration ?? 50} minutes`} />
+            <CaseMetadata label="Status" value={formatEnum(clinicalCase.status)} />
+          </div>
         </CardContent>
       </Card>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_24rem]">
-        <Card>
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(19rem,0.95fr)]">
+        <Card className="case-work-panel">
           <CardHeader>
-            <div className="flex items-start justify-between gap-4">
+            <div className="session-record-header">
               <div>
                 <CardTitle>Session records</CardTitle>
                 <CardDescription>
@@ -432,12 +491,12 @@ function CaseDetail({
               </Button>
             </div>
           </CardHeader>
-          <CardContent className="flex flex-col gap-1">
+          <CardContent className="session-record-list flex flex-col gap-1">
             {sessionsError ? <ErrorAlert message={sessionsError.message} /> : null}
             {isSessionsLoading ? (
               <LoadingTable />
             ) : orderedSessions.length === 0 ? (
-              <div className="flex min-h-56 items-center justify-center rounded-[24px] bg-background/45 p-8 text-center text-sm text-muted-foreground">
+              <div className="flex min-h-36 items-center justify-center py-8 text-center text-sm text-muted-foreground">
                 No session records for this case yet.
               </div>
             ) : (
@@ -453,7 +512,7 @@ function CaseDetail({
           </CardContent>
         </Card>
 
-        <Card>
+        <Card tone="quiet" className="border border-border/60 bg-card">
           <CardHeader>
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -462,7 +521,7 @@ function CaseDetail({
                   Focus, review date, and goal progress.
                 </CardDescription>
               </div>
-              <Button variant="glass" onClick={onEditCarePlan}>
+              <Button variant="outline" onClick={onEditCarePlan}>
                 {carePlan ? "Edit" : "Create"}
               </Button>
             </div>
@@ -473,9 +532,9 @@ function CaseDetail({
             ) : isCarePlanLoading ? (
               <LoadingTable />
             ) : carePlan ? (
-              <CarePlanSummary carePlan={carePlan} />
+              <CarePlanSummary carePlan={carePlan} onViewAllGoals={onViewAllGoals} />
             ) : (
-              <div className="flex min-h-56 items-center justify-center rounded-[24px] bg-background/45 p-8 text-center text-sm text-muted-foreground">
+              <div className="flex min-h-36 items-center justify-center py-8 text-center text-sm text-muted-foreground">
                 No care plan has been created for this case.
               </div>
             )}
@@ -497,16 +556,16 @@ function SessionRecordRow({
 }) {
   return (
     <div className="flex flex-col">
-      <div className="grid gap-4 py-5 md:grid-cols-[8rem_minmax(0,1fr)_auto] md:items-start">
+      <div className="session-record-row grid gap-4 py-5">
         <div>
           <p className="text-sm font-semibold">
-            {new Date(record.sessionDate).toLocaleTimeString([], {
+            {new Date(record.sessionDate).toLocaleTimeString("en-GB", {
               hour: "2-digit",
               minute: "2-digit",
             })}
           </p>
           <p className="text-xs text-muted-foreground">
-            {new Date(record.sessionDate).toLocaleDateString([], {
+            {new Date(record.sessionDate).toLocaleDateString("en-GB", {
               month: "short",
               day: "numeric",
             })}
@@ -518,7 +577,7 @@ function SessionRecordRow({
             <StatusBadge status={record.attendanceStatus} />
             <StatusBadge status={record.modality} />
           </div>
-          <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
             {record.summary ?? "No summary has been added yet."}
           </p>
         </div>
@@ -540,27 +599,25 @@ function SessionRecordRow({
   );
 }
 
-function CarePlanSummary({ carePlan }: { carePlan: CarePlan }) {
+function CarePlanSummary({ carePlan, onViewAllGoals }: { carePlan: CarePlan; onViewAllGoals: () => void }) {
   return (
     <div className="flex flex-col gap-5">
-      <div className="rounded-[22px] bg-background/45 p-4">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Therapeutic focus
-        </p>
+      <div>
+        <p className="type-label text-muted-foreground">Therapeutic focus</p>
         <p className="mt-2 text-sm leading-6">{carePlan.therapeuticFocus}</p>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Metric label="Frequency" value={carePlan.plannedFrequency} />
-        <Metric label="Review" value={carePlan.reviewDate} />
+      <div className="grid overflow-hidden rounded-xl border border-border/70 bg-surface-subtle divide-y divide-border/70 sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+        <CaseMetadata label="Frequency" value={carePlan.plannedFrequency} />
+        <CaseMetadata label="Review" value={formatDate(carePlan.reviewDate)} />
       </div>
-      <div className="flex flex-col gap-3">
-        {carePlan.goals.map((goal) => (
-          <div key={goal.id} className="rounded-[22px] bg-background/45 p-4">
+      <div className="care-plan-preview flex flex-col">
+        {carePlan.goals.map((goal, index) => (
+          <div key={goal.id} className="care-plan-goal py-4 first:pt-0 last:pb-0">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-sm font-medium">{goal.description}</p>
+                <p className="line-clamp-2 text-sm font-semibold">{goal.description}</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {goal.targetDate ? `Target ${goal.targetDate}` : "No target date"}
+                  {goal.targetDate ? `Target ${formatDate(goal.targetDate)}` : "No target date"}
                 </p>
               </div>
               <StatusBadge status={goal.status} />
@@ -569,27 +626,54 @@ function CarePlanSummary({ carePlan }: { carePlan: CarePlan }) {
             <p className="mt-1 text-xs text-muted-foreground">
               {goal.progressPercentage}% complete
             </p>
+            {index < carePlan.goals.length - 1 ? <Separator className="mt-4" /> : null}
           </div>
         ))}
       </div>
+      {carePlan.goals.length > 1 ? (
+        <Button variant="ghost" size="sm" className="w-fit px-0" onClick={onViewAllGoals}>
+          View all {carePlan.goals.length} objectives
+        </Button>
+      ) : null}
     </div>
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function CarePlanGoalsDialog({ carePlan }: { carePlan: CarePlan }) {
   return (
-    <div className="rounded-[22px] bg-background/45 p-4">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {label}
-      </p>
-      <p className="mt-2 truncate text-sm font-medium">{value}</p>
+    <div className="flex max-h-[55dvh] flex-col overflow-y-auto">
+      {carePlan.goals.map((goal, index) => (
+        <div key={goal.id} className="py-5 first:pt-0 last:pb-0">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold">{goal.description}</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {goal.targetDate ? `Target ${formatDate(goal.targetDate)}` : "No target date"}
+              </p>
+            </div>
+            <StatusBadge status={goal.status} />
+          </div>
+          <Progress className="mt-4" value={goal.progressPercentage} />
+          <p className="mt-1 text-xs text-muted-foreground">{goal.progressPercentage}% complete</p>
+          {index < carePlan.goals.length - 1 ? <Separator className="mt-5" /> : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CaseMetadata({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 px-3 py-3 sm:px-4">
+      <p className="type-label text-muted-foreground">{label}</p>
+      <p className="mt-2 text-sm font-semibold">{value}</p>
     </div>
   );
 }
 
 function EmptyClinicalState() {
   return (
-    <div className="flex min-h-80 flex-col items-center justify-center gap-4 rounded-[24px] bg-background/45 p-8 text-center">
+    <div className="flex min-h-72 flex-col items-center justify-center gap-4 rounded-xl border border-border bg-muted/35 p-8 text-center">
       <span className="flex size-14 items-center justify-center rounded-full bg-secondary text-secondary-foreground">
         <ClipboardListIcon className="size-6" />
       </span>
@@ -608,6 +692,35 @@ function patientName(patient: Patient | undefined, fallback: string) {
     return fallback;
   }
   return patient.preferredName || patient.fullName;
+}
+
+function patientInitials(patient?: Patient) {
+  return (patient?.fullName ?? "Patient")
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+}
+
+function patientContext(patient?: Patient) {
+  if (!patient) return "Patient details are unavailable.";
+  const details = [patient.birthDate ? `${formatDate(patient.birthDate)} · ${ageFromDate(patient.birthDate)} years` : null, `Patient since ${formatDate(patient.createdAt)}`]
+    .filter(Boolean);
+  return details.join(" · ");
+}
+
+function ageFromDate(value: string) {
+  const birthDate = new Date(value);
+  const now = new Date();
+  let age = now.getFullYear() - birthDate.getFullYear();
+  const hasHadBirthday = now.getMonth() > birthDate.getMonth() || (now.getMonth() === birthDate.getMonth() && now.getDate() >= birthDate.getDate());
+  if (!hasHadBirthday) age -= 1;
+  return age;
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(new Date(value));
 }
 
 function isNotFound(error: Error) {

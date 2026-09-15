@@ -6,7 +6,7 @@ import useSWR from "swr";
 import {
   ArrowRightIcon,
   CalendarClockIcon,
-  CheckCircle2Icon,
+  CircleAlertIcon,
   ClipboardListIcon,
   MessageCircleIcon,
   PlusIcon,
@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { swrFetcher } from "@/lib/api-client";
+import { deriveFollowUps, practiceMetrics, type FollowUp, type PracticeMetric } from "@/lib/dashboard-insights";
 import { formatDateTime, formatEnum } from "@/lib/format";
 import type { Appointment, ClinicalCase, Notification, Patient } from "@/lib/types";
 
@@ -37,81 +38,37 @@ export default function DashboardPage() {
   const clinicalCases = useSWR<ClinicalCase[]>("/api/clinical-cases", swrFetcher);
   const notifications = useSWR<Notification[]>("/api/notifications", swrFetcher);
 
-  const isLoading =
-    patients.isLoading ||
-    appointments.isLoading ||
-    clinicalCases.isLoading ||
-    notifications.isLoading;
-  const error =
-    patients.error ??
-    appointments.error ??
-    clinicalCases.error ??
-    notifications.error;
-
+  const isLoading = patients.isLoading || appointments.isLoading || clinicalCases.isLoading || notifications.isLoading;
+  const error = patients.error ?? appointments.error ?? clinicalCases.error ?? notifications.error;
   const patientById = useMemo(
     () => new Map((patients.data ?? []).map((patient) => [patient.id, patient])),
     [patients.data]
   );
-
-  const orderedAppointments = useMemo(
-    () =>
-      [...(appointments.data ?? [])].sort(
-        (a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime()
-      ),
-    [appointments.data]
+  const upcomingAppointments = useMemo(
+    () => [...(appointments.data ?? [])]
+      .filter((appointment) => appointment.status !== "CANCELLED" && new Date(appointment.scheduledAt).getTime() >= renderedAt)
+      .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime()),
+    [appointments.data, renderedAt]
+  );
+  const followUps = useMemo(
+    () => deriveFollowUps(patients.data ?? [], clinicalCases.data ?? []),
+    [clinicalCases.data, patients.data]
+  );
+  const metrics = useMemo(
+    () => practiceMetrics(patients.data ?? [], appointments.data ?? [], clinicalCases.data ?? [], notifications.data ?? [], renderedAt),
+    [appointments.data, clinicalCases.data, notifications.data, patients.data, renderedAt]
   );
 
-  const upcomingAppointments = useMemo(() => {
-    return orderedAppointments.filter(
-      (appointment) =>
-        appointment.status !== "CANCELLED" &&
-        new Date(appointment.scheduledAt).getTime() >= renderedAt
-    );
-  }, [orderedAppointments, renderedAt]);
-
-  const actionItems = useMemo(() => {
-    const pendingConsent = (patients.data ?? [])
-      .filter((patient) => patient.consentStatus === "PENDING")
-      .slice(0, 2)
-      .map((patient) => ({
-        id: `consent-${patient.id}`,
-        title: "Consent pending",
-        description: patient.fullName,
-      }));
-
-    const inactivePatients = (patients.data ?? [])
-      .filter((patient) => patient.status === "INACTIVE")
-      .slice(0, 2)
-      .map((patient) => ({
-        id: `inactive-${patient.id}`,
-        title: "Review follow-up",
-        description: patient.fullName,
-      }));
-
-    const intakeCases = (clinicalCases.data ?? [])
-      .filter((clinicalCase) => clinicalCase.status === "INTAKE")
-      .slice(0, 2)
-      .map((clinicalCase) => ({
-        id: `case-${clinicalCase.id}`,
-        title: "Case intake",
-        description: patientById.get(clinicalCase.patientId)?.fullName ?? "Patient",
-      }));
-
-    return [...pendingConsent, ...inactivePatients, ...intakeCases].slice(0, 3);
-  }, [clinicalCases.data, patientById, patients.data]);
-
-  if (isLoading) {
-    return <LoadingTable />;
-  }
+  if (isLoading) return <LoadingTable />;
 
   return (
     <>
       <SectionHeader
         title="Today"
-        description={`${todayText} - a quiet view of sessions, patients, and follow-ups for your practice.`}
+        description={`${todayText} — appointments, patients, and clinical follow-ups in one considered view.`}
         actions={
           <>
-            <Button variant="glass" render={<Link href="/dashboard/patients" />} nativeButton={false}>
+            <Button variant="outline" render={<Link href="/dashboard/patients" />} nativeButton={false}>
               <UserRoundPlusIcon data-icon="inline-start" />
               New patient
             </Button>
@@ -119,7 +76,7 @@ export default function DashboardPage() {
               <PlusIcon data-icon="inline-start" />
               Schedule
             </Button>
-            <Button variant="glass" render={<Link href="/dashboard/clinical" />} nativeButton={false}>
+            <Button variant="ghost" render={<Link href="/dashboard/clinical" />} nativeButton={false}>
               <ClipboardListIcon data-icon="inline-start" />
               Clinical
             </Button>
@@ -129,126 +86,72 @@ export default function DashboardPage() {
 
       {error ? <ErrorAlert message={error.message} /> : null}
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
-        <Card className="min-h-[560px]">
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
+        <Card className="self-start">
           <CardHeader>
-            <CardTitle>Session timeline</CardTitle>
-            <CardDescription>Privacy-safe appointment flow for the day and week ahead.</CardDescription>
+            <CardTitle>Upcoming sessions</CardTitle>
+            <CardDescription>A focused view of the next appointments in your practice.</CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-col gap-1">
+          <CardContent className="flex flex-col">
             {upcomingAppointments.length === 0 ? (
               <EmptyPracticeState />
             ) : (
-              upcomingAppointments.slice(0, 8).map((appointment, index) => {
-                const patient = patientById.get(appointment.patientId);
-                return (
-                  <AppointmentRow
-                    key={appointment.id}
-                    appointment={appointment}
-                    patient={patient}
-                    showDivider={index < upcomingAppointments.length - 1}
-                  />
-                );
-              })
+              upcomingAppointments.slice(0, 8).map((appointment, index) => (
+                <AppointmentRow
+                  key={appointment.id}
+                  appointment={appointment}
+                  patient={patientById.get(appointment.patientId)}
+                  showDivider={index < Math.min(upcomingAppointments.length, 8) - 1}
+                />
+              ))
             )}
           </CardContent>
         </Card>
 
-        <div className="flex flex-col gap-6">
-          <PracticePulse
-            appointments={upcomingAppointments.length}
-            cases={clinicalCases.data?.length ?? 0}
-            messages={notifications.data?.length ?? 0}
-            patients={patients.data?.length ?? 0}
-          />
+        <Card size="sm" tone="quiet" className="self-start border border-border/60 bg-card">
+          <CardHeader>
+            <CardTitle>Follow-ups</CardTitle>
+            <CardDescription>Items that benefit from a closer look.</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col">
+            {followUps.length === 0 ? (
+              <p className="py-2 text-sm text-muted-foreground">Nothing needs attention right now.</p>
+            ) : (
+              followUps.map((item, index) => (
+                <FollowUpRow key={item.id} item={item} showDivider={index < followUps.length - 1} />
+              ))
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
-          <Card size="sm">
-            <CardHeader>
-              <CardTitle>Follow-ups</CardTitle>
-              <CardDescription>Small practice tasks worth keeping visible.</CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-              {actionItems.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No follow-ups need attention.</p>
-              ) : (
-                actionItems.map((item) => (
-                  <div key={item.id} className="flex items-start gap-3 rounded-[20px] bg-background/45 p-3">
-                    <CheckCircle2Icon className="mt-0.5 size-4 text-clinical-blue" />
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium">{item.title}</p>
-                      <p className="truncate text-xs text-muted-foreground">{item.description}</p>
-                    </div>
-                  </div>
-                ))
-              )}
-            </CardContent>
-          </Card>
-
-          <Card size="sm">
-            <CardHeader>
-              <CardTitle>Recent messages</CardTitle>
-              <CardDescription>Practice notifications in plain language.</CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-              {(notifications.data ?? []).slice(-3).reverse().map((message) => (
-                <div key={message.id} className="flex items-start gap-3">
-                  <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground">
-                    <MessageCircleIcon className="size-4" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{message.subject}</p>
-                    <p className="text-xs text-muted-foreground">{formatDateTime(message.createdAt)}</p>
-                  </div>
-                  <StatusBadge status={message.status} />
-                </div>
-              ))}
-              {(notifications.data ?? []).length === 0 ? (
-                <p className="text-sm text-muted-foreground">No messages yet.</p>
-              ) : null}
-            </CardContent>
-          </Card>
-        </div>
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,0.7fr)]">
+        <PracticePulse metrics={metrics} />
+        <RecentMessages messages={notifications.data ?? []} />
       </div>
     </>
   );
 }
 
-function AppointmentRow({
-  appointment,
-  patient,
-  showDivider,
-}: {
-  appointment: Appointment;
-  patient?: Patient;
-  showDivider: boolean;
-}) {
+function AppointmentRow({ appointment, patient, showDivider }: { appointment: Appointment; patient?: Patient; showDivider: boolean }) {
   return (
     <div className="flex flex-col">
-      <div className="grid gap-4 py-5 sm:grid-cols-[5rem_3rem_minmax(0,1fr)_auto] sm:items-center">
+      <div className="grid gap-4 py-4 sm:grid-cols-[5.25rem_2.75rem_minmax(0,1fr)_auto] sm:items-center">
         <div>
-          <p className="text-sm font-semibold">
-            {new Date(appointment.scheduledAt).toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
+          <p className="text-sm font-semibold tabular-nums">
+            {new Date(appointment.scheduledAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
           </p>
-          <p className="text-xs text-muted-foreground">
-            {new Date(appointment.scheduledAt).toLocaleDateString([], {
-              month: "short",
-              day: "numeric",
-            })}
+          <p className="type-metadata text-muted-foreground">
+            {new Date(appointment.scheduledAt).toLocaleDateString("en-GB", { month: "short", day: "numeric" })}
           </p>
         </div>
-
-        <span className="flex size-11 items-center justify-center rounded-full bg-secondary text-sm font-semibold text-secondary-foreground">
+        <span className="flex size-10 items-center justify-center rounded-full bg-secondary text-sm font-semibold text-secondary-foreground">
           {patient?.fullName?.[0]?.toUpperCase() ?? "P"}
         </span>
-
         <div className="min-w-0">
-          <p className="truncate text-base font-medium">{patient?.fullName ?? "Patient"}</p>
+          <p className="break-words text-base font-semibold tracking-tight">{patient?.preferredName || patient?.fullName || "Patient"}</p>
           <p className="text-sm text-muted-foreground">{formatEnum(appointment.type)} session</p>
         </div>
-
         <div className="flex items-center gap-2">
           <StatusBadge status={appointment.status} />
           <Button variant="ghost" size="icon-sm" render={<Link href="/dashboard/appointments" />} nativeButton={false}>
@@ -262,38 +165,67 @@ function AppointmentRow({
   );
 }
 
-function PracticePulse({
-  appointments,
-  cases,
-  messages,
-  patients,
-}: {
-  appointments: number;
-  cases: number;
-  messages: number;
-  patients: number;
-}) {
-  const items = [
-    { label: "Patients", value: patients },
-    { label: "Upcoming", value: appointments },
-    { label: "Cases", value: cases },
-    { label: "Messages", value: messages },
-  ];
-
+function FollowUpRow({ item, showDivider }: { item: FollowUp; showDivider: boolean }) {
+  const iconClass = item.tone === "danger" ? "text-status-danger-fg" : item.tone === "warning" ? "text-status-warning-fg" : "text-status-info-fg";
   return (
-    <Card size="sm">
+    <div className="flex flex-col">
+      <Link href={item.href} className="group flex items-start gap-3 rounded-xl py-3 outline-none transition-colors hover:bg-secondary/45 focus-visible:ring-3 focus-visible:ring-ring/25">
+        <CircleAlertIcon className={`mt-0.5 size-4 shrink-0 ${iconClass}`} />
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-semibold">{item.title}</span>
+          <span className="block break-words text-xs text-muted-foreground">{item.description}</span>
+        </span>
+        <ArrowRightIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+      </Link>
+      {showDivider ? <Separator /> : null}
+    </div>
+  );
+}
+
+function PracticePulse({ metrics }: { metrics: PracticeMetric[] }) {
+  return (
+    <Card size="sm" tone="inset">
       <CardHeader>
         <CardTitle>Practice pulse</CardTitle>
-        <CardDescription>Only the essentials for the clinical day.</CardDescription>
+        <CardDescription>A little context for the clinical day.</CardDescription>
       </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        {items.map((item, index) => (
-          <div key={item.label} className="flex flex-col gap-4">
-            <div className="flex items-end justify-between gap-4">
-              <span className="text-sm text-muted-foreground">{item.label}</span>
-              <span className="text-3xl font-semibold tracking-tight">{item.value}</span>
+      <CardContent className="grid divide-y divide-border/70 sm:grid-cols-4 sm:divide-x sm:divide-y-0">
+        {metrics.map((item) => (
+          <div key={item.label} className="py-4 first:pt-0 last:pb-0 sm:px-4 sm:py-0 sm:first:pl-0 sm:last:pr-0">
+            <span className="type-label text-muted-foreground">{item.label}</span>
+            <span className="mt-2 block text-3xl font-semibold tracking-[-0.04em]">{item.value}</span>
+            <span className="mt-1 block text-xs leading-5 text-muted-foreground">{item.context}</span>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function RecentMessages({ messages }: { messages: Notification[] }) {
+  const recent = [...messages].slice(-3).reverse();
+  return (
+    <Card size="sm" tone="quiet" className="border border-border/60 bg-card">
+      <CardHeader>
+        <CardTitle>Recent messages</CardTitle>
+        <CardDescription>Practice updates in plain language.</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col">
+        {recent.length === 0 ? (
+          <p className="py-2 text-sm text-muted-foreground">No messages yet.</p>
+        ) : recent.map((message, index) => (
+          <div key={message.id} className="flex flex-col">
+            <div className="flex items-start gap-3 py-3">
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground">
+                <MessageCircleIcon className="size-4" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="break-words text-sm font-semibold">{message.subject}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{formatDateTime(message.createdAt)}</p>
+              </div>
+              <StatusBadge status={message.status} />
             </div>
-            {index < items.length - 1 ? <Separator /> : null}
+            {index < recent.length - 1 ? <Separator /> : null}
           </div>
         ))}
       </CardContent>
@@ -303,28 +235,18 @@ function PracticePulse({
 
 function EmptyPracticeState() {
   return (
-    <div className="flex min-h-80 flex-col items-center justify-center gap-4 rounded-[24px] bg-background/45 p-8 text-center">
-      <span className="flex size-14 items-center justify-center rounded-full bg-secondary text-secondary-foreground">
-        <CalendarClockIcon className="size-6" />
+    <div className="flex min-h-48 flex-col items-center justify-center gap-3 py-8 text-center">
+      <span className="flex size-11 items-center justify-center rounded-full bg-secondary text-secondary-foreground">
+        <CalendarClockIcon className="size-5" />
       </span>
-      <div className="flex max-w-sm flex-col gap-2">
-        <p className="text-base font-medium">No upcoming sessions</p>
-        <p className="text-sm leading-6 text-muted-foreground">
-          The workspace will fill in as appointments are scheduled.
-        </p>
+      <div className="flex max-w-sm flex-col gap-1">
+        <p className="text-base font-semibold">No upcoming sessions</p>
+        <p className="text-sm leading-6 text-muted-foreground">Schedule a session when you are ready to plan the next clinical day.</p>
       </div>
-      <Button render={<Link href="/dashboard/appointments" />} nativeButton={false}>
-        <PlusIcon data-icon="inline-start" />
-        Schedule session
-      </Button>
     </div>
   );
 }
 
 function todayLabel() {
-  return new Date().toLocaleDateString([], {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-  });
+  return new Date().toLocaleDateString("en-GB", { weekday: "long", month: "long", day: "numeric" }).replace(/^./, (letter) => letter.toUpperCase());
 }
