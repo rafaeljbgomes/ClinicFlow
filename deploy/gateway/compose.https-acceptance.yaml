@@ -1,0 +1,14 @@
+# Add after docker-compose.ci.yml for HTTPS browser acceptance with isolated JWT/database volumes.
+services:
+  gateway:
+    environment:
+      CLINICFLOW_GATEWAY_TLS: "true"
+    ports: !override
+      - "${CLINICFLOW_GATEWAY_HTTP_PORT:-19080}:8000"
+      - "${CLINICFLOW_GATEWAY_HTTPS_PORT:-19443}:8443"
+    volumes: !override
+      - ./secrets/edge/edge.crt:/certs/edge.crt:ro
+      - ./secrets/edge/edge.key:/certs/edge.key:ro
+  frontend:
+    environment:
+      CLINICFLOW_AUTH_COOKIE_SECURE: "true"
