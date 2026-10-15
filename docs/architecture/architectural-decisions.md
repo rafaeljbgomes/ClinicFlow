@@ -236,3 +236,14 @@ future service pipeline must publish an immutable image, deploy one service
 release, verify that release, and roll back only that release. Platform and
 cross-service changes remain subject to a system integration gate. DM-01 is
 tracked by [GitHub issue #1](https://github.com/rafaeljbgomes/ClinicFlow/issues/1).
+
+## ADR-018: Traefik Gateway and Kubernetes Edge
+
+Decision: use one Traefik edge with separate UI/API hostnames, a private BFF listener,
+Gateway API in Kubernetes, and file-provider routes in Compose. Business/JWT ownership
+remains in each service; cookies, CSRF, roles, and projection remain in Next.js.
+
+The independently managed controller and application gateway releases preserve ADR-017
+service delivery. See [ADR-018](decisions/ADR-018-traefik-gateway.md) for the route contract,
+CRD lifecycle, TLS, local quotas, telemetry, and acceptance limitations. ADR-018 supersedes
+ADR-013's direct UI exposure and ADR-014's unchanged frontend service URLs.

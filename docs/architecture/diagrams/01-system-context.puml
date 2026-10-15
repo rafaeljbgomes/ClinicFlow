@@ -1,0 +1,68 @@
+@startuml
+title ClinicFlow - System Context and Service Boundaries
+left to right direction
+skinparam componentStyle rectangle
+skinparam shadowing false
+
+actor "Psychologist\nPatient\nAdministrator" as user
+rectangle "Browser" as browser
+component "Traefik public HTTPS\nUI and bearer API hosts" as edge
+component "Traefik private API\nBFF listener" as privateEdge
+component "Next.js frontend\nApp Router + BFF" as bff
+
+component "auth-service\nIdentity, profiles, JWT issuance" as auth
+component "patient-service\nPatient records" as patient
+component "appointment-service\nAppointment lifecycle" as appointment
+component "clinical-service\nClinical workflow" as clinical
+component "notification-service\nSimulated delivery history" as notification
+
+database "Auth PostgreSQL" as authdb
+database "Patient PostgreSQL" as patientdb
+database "Appointment PostgreSQL" as appointmentdb
+database "Clinical PostgreSQL" as clinicaldb
+database "Notification PostgreSQL" as notificationdb
+queue "RabbitMQ\ntherapy.events.exchange" as broker
+
+user --> browser
+browser --> edge : HTTPS
+edge --> bff : UI host / same-origin BFF
+bff --> privateEdge : GATEWAY_URL + Bearer JWT
+edge --> auth : API host / facade rewrite
+edge --> patient
+edge --> appointment
+edge --> clinical
+edge --> notification
+privateEdge --> auth
+privateEdge --> patient
+privateEdge --> appointment
+privateEdge --> clinical
+privateEdge --> notification
+
+auth --> authdb
+patient --> patientdb
+appointment --> appointmentdb
+clinical --> clinicaldb
+notification --> notificationdb
+
+auth --> bff : signed RS256 JWT
+note on link
+  auth-service signs with its private RSA key.
+  BFF and resource services validate with public-key material.
+end note
+
+patient ..> broker : patient lifecycle events
+appointment ..> broker : appointment lifecycle events
+broker ..> notification : notification-worthy events
+broker ..> clinical : appointment.completed
+
+note bottom of broker
+  Event contracts are minimal and carry correlation IDs.
+  Clinical notes and care-plan content are not published.
+end note
+
+legend bottom
+  Solid arrows: synchronous HTTP or local persistence.
+  Dashed arrows: asynchronous domain events.
+  Each service owns its persistence model; services do not share tables.
+endlegend
+@enduml
