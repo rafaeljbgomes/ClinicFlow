@@ -1,0 +1,65 @@
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+entryPoints:
+  web:
+    address: :8000
+    forwardedHeaders:
+      insecure: false
+    transport:
+      lifeCycle: {graceTimeOut: 30s}
+      respondingTimeouts: {readTimeout: 15s, writeTimeout: 30s, idleTimeout: 60s}
+  websecure:
+    address: :8443
+    forwardedHeaders:
+      insecure: false
+    transport:
+      lifeCycle: {graceTimeOut: 30s}
+      respondingTimeouts: {readTimeout: 15s, writeTimeout: 30s, idleTimeout: 60s}
+  api:
+    address: :8080
+    forwardedHeaders:
+      insecure: false
+    transport:
+      lifeCycle: {graceTimeOut: 30s}
+      respondingTimeouts: {readTimeout: 15s, writeTimeout: 30s, idleTimeout: 60s}
+  traefik:
+    address: :9001
+  metrics:
+    address: :9100
+providers:
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+api:
+  dashboard: false
+  insecure: false
+ping:
+  entryPoint: traefik
+metrics:
+  prometheus:
+    entryPoint: metrics
+serversTransport:
+  forwardingTimeouts:
+    dialTimeout: 2s
+    responseHeaderTimeout: 15s
+    idleConnTimeout: 60s
+log:
+  level: INFO
+  format: json
+accessLog:
+  format: json
+  fields:
+    defaultMode: drop
+    names:
+      StartUTC: keep
+      RequestMethod: keep
+      RouterName: keep
+      ServiceName: keep
+      DownstreamStatus: keep
+      OriginStatus: keep
+      Duration: keep
+    headers:
+      defaultMode: drop
+    queryParameters:
+      defaultMode: drop

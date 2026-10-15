@@ -21,7 +21,7 @@ the roadmap.
 | --- | --- |
 | Product scope | Cloud-native therapy-practice MVP / portfolio prototype |
 | Application shape | Next.js BFF plus five Spring Boot services |
-| Local entry point | Docker Compose at `http://localhost:3000` |
+| Local entry point | Docker Compose at `https://clinicflow.localhost` |
 | Messaging | RabbitMQ topic exchange with version-controlled event contracts |
 | Persistence | PostgreSQL database per service with Flyway migrations |
 | Kubernetes | Helm-packaged Docker Desktop Kubernetes deployment |
@@ -85,12 +85,23 @@ flowchart LR
     ClinicalDB[(Clinical PostgreSQL DB)]
     NotificationDB[(Notification PostgreSQL DB)]
 
-    Browser --> BFF
-    BFF --> Auth
-    BFF --> Patient
-    BFF --> Appointment
-    BFF --> Clinical
-    BFF --> Notification
+    Edge[Traefik public HTTPS]
+    Private[Traefik private API listener]
+    Client[Bearer API client]
+    Browser -->|UI hostname| Edge
+    Edge --> BFF
+    BFF -->|GATEWAY_URL| Private
+    Client -->|API hostname| Edge
+    Edge --> Auth
+    Edge --> Patient
+    Edge --> Appointment
+    Edge --> Clinical
+    Edge --> Notification
+    Private --> Auth
+    Private --> Patient
+    Private --> Appointment
+    Private --> Clinical
+    Private --> Notification
 
     Auth --> AuthDB
     Patient --> PatientDB
@@ -113,6 +124,7 @@ flowchart LR
 | `appointment-service` | Appointment lifecycle and appointment events | `POST /appointments`, `PATCH /appointments/{id}/reschedule` |
 | `clinical-service` | Practice profiles, clinical cases, care plans, and session records | `POST /clinical-cases`, `POST /clinical-cases/{id}/session-records` |
 | `notification-service` | RabbitMQ consumers, simulated delivery, history, and event metrics | `GET /notifications` |
+| `gateway` | Traefik TLS, routing, local rate limits, and edge telemetry | Separate UI/API hosts plus private BFF listener |
 | `frontend` | Next.js App Router application and same-origin BFF | Browser-facing `/api/*` routes |
 | `event-contracts` | Shared, explicit event payload contracts and examples | Patient and appointment events |
 
@@ -181,10 +193,12 @@ From the repository root:
 
 ```powershell
 .\scripts\generate-dev-jwt-keys.ps1
+.\scripts\gateway\New-DevelopmentCertificate.ps1
 docker compose up --build
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The Compose setup starts
+Open [https://clinicflow.localhost](https://clinicflow.localhost). Trust the generated
+`secrets/edge/ca.crt` manually in your browser; see the [gateway guide](docs/infrastructure/gateway.md). The Compose setup starts
 PostgreSQL, RabbitMQ, all five backend services, and the frontend. It also
 loads deterministic demo data so the main role-specific screens can be
 explored immediately.
@@ -208,12 +222,9 @@ Useful local endpoints:
 
 | Component | URL |
 | --- | --- |
-| Frontend | `http://localhost:3000` |
-| Auth Service | `http://localhost:8081` |
-| Patient Service | `http://localhost:8082` |
-| Appointment Service | `http://localhost:8083` |
-| Notification Service | `http://localhost:8084` |
-| Clinical Service | `http://localhost:8085` |
+| UI and BFF | `https://clinicflow.localhost` |
+| Bearer-token API | `https://api.clinicflow.localhost/api/v1/**` |
+| Backend application and management ports | Internal container DNS only |
 | RabbitMQ Management | `http://localhost:15672` |
 
 For the full local-development guide, including environment variables,

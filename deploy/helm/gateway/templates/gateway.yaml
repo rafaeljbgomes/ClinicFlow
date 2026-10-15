@@ -1,0 +1,32 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: clinicflow-gateway
+spec:
+  gatewayClassName: {{ .Values.gatewayClassName }}
+  listeners:
+    {{- range $name, $hostname := dict "ui" .Values.uiHostname "public-api" .Values.apiHostname }}
+    - name: {{ $name }}-http
+      hostname: {{ $hostname | quote }}
+      protocol: HTTP
+      port: 8000
+      allowedRoutes:
+        namespaces: {from: Same}
+    {{- if $.Values.tls.enabled }}
+    - name: {{ $name }}-https
+      hostname: {{ $hostname | quote }}
+      protocol: HTTPS
+      port: 8443
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: {{ $.Values.tls.secretName }}
+      allowedRoutes:
+        namespaces: {from: Same}
+    {{- end }}
+    {{- end }}
+    - name: internal-api
+      protocol: HTTP
+      port: 8080
+      allowedRoutes:
+        namespaces: {from: Same}

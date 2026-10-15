@@ -46,5 +46,6 @@ serviceMonitor:
 
 networkPolicy:
   enabled: true
+  gatewayNamespace: ingress-system
   frontendComponent: frontend
   monitoringNamespace: monitoring

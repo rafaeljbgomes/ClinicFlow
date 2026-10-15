@@ -1,4 +1,15 @@
 services:
+  gateway:
+    environment:
+      CLINICFLOW_GATEWAY_TLS: "false"
+      CLINICFLOW_GATEWAY_PUBLIC_AVERAGE: "1000"
+      CLINICFLOW_GATEWAY_PUBLIC_BURST: "2000"
+      CLINICFLOW_GATEWAY_AUTH_AVERAGE: "1000"
+      CLINICFLOW_GATEWAY_AUTH_PERIOD: "1s"
+      CLINICFLOW_GATEWAY_AUTH_BURST: "2000"
+    ports: !override
+      - "${CLINICFLOW_GATEWAY_HTTP_PORT:-3000}:8000"
+    volumes: !override []
   postgres:
     volumes: !override
       - postgres-data:/var/lib/postgresql/data
@@ -27,35 +38,35 @@ services:
     restart: "no"
 
   auth-service:
-    volumes:
+    volumes: !override
       - jwt-secrets:/run/secrets/clinicflow:ro
     depends_on:
       jwt-secrets-bootstrap:
         condition: service_completed_successfully
 
   patient-service:
-    volumes:
+    volumes: !override
       - jwt-secrets:/run/secrets/clinicflow:ro
     depends_on:
       jwt-secrets-bootstrap:
         condition: service_completed_successfully
 
   appointment-service:
-    volumes:
+    volumes: !override
       - jwt-secrets:/run/secrets/clinicflow:ro
     depends_on:
       jwt-secrets-bootstrap:
         condition: service_completed_successfully
 
   clinical-service:
-    volumes:
+    volumes: !override
       - jwt-secrets:/run/secrets/clinicflow:ro
     depends_on:
       jwt-secrets-bootstrap:
         condition: service_completed_successfully
 
   notification-service:
-    volumes:
+    volumes: !override
       - jwt-secrets:/run/secrets/clinicflow:ro
     depends_on:
       jwt-secrets-bootstrap:

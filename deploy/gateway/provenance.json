@@ -1,0 +1,24 @@
+{
+  "gatewayApi": "1.6.2",
+  "channel": "standard",
+  "traefikChart": "41.6.1",
+  "traefikProxy": "3.7.13",
+  "image": "traefik:v3.7.13@sha256:24841fe2de7304c149343d877d2923b4c8800a38ba015dea9174c23b20e344a0",
+  "chartOci": "oci://ghcr.io/traefik/helm/traefik",
+  "chartOciDigest": "sha256:29ac8528d15084bef88c0369e1e678138466a3c880b4df399ee964359712e1db",
+  "gatewayApiSource": "https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.6.2/standard-install.yaml",
+  "artifacts": [
+    {
+      "path": "deploy/gateway/crds/gateway-api-1.6.2.yaml",
+      "sha256": "faede450fa178126aba41337737b97d351ebe87d93c910237ce1e072d1ca40d9"
+    },
+    {
+      "path": "deploy/gateway/crds/traefik-41.6.1.yaml",
+      "sha256": "957f3a8373ad9df1e077503b7b3b489a502a90c0dbabaaa379fed767031b8571"
+    },
+    {
+      "path": "deploy/helm/gateway-controller/charts/traefik-41.6.1.tgz",
+      "sha256": "cc37dd82316434efa061f2341568fa2447cdb97a2ed07a904f951d1e1b10d4ff"
+    }
+  ]
+}

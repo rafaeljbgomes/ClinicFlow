@@ -1,0 +1,69 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: clinicflow-gateway-controller
+spec:
+  podSelector:
+    matchLabels:
+      clinicflow.io/edge: gateway
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - ports:
+        - {port: 8000, protocol: TCP}
+        - {port: 8443, protocol: TCP}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.applicationNamespace }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/component: frontend
+      ports:
+        - {port: 8080, protocol: TCP}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.monitoringNamespace }}
+          podSelector:
+            matchLabels: {app.kubernetes.io/name: prometheus}
+      ports:
+        - {port: 9100, protocol: TCP}
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.applicationNamespace }}
+          podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values: [frontend, auth-service, patient-service, appointment-service, clinical-service, notification-service]
+      ports:
+        - {port: 3000, protocol: TCP}
+        - {port: 8081, protocol: TCP}
+        - {port: 8082, protocol: TCP}
+        - {port: 8083, protocol: TCP}
+        - {port: 8084, protocol: TCP}
+        - {port: 8085, protocol: TCP}
+    {{- if .Values.kubernetesApi.cidrs }}
+    - to:
+        {{- range .Values.kubernetesApi.cidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        {{- range .Values.kubernetesApi.ports }}
+        - {port: {{ . }}, protocol: TCP}
+        {{- end }}
+    {{- end }}
+{{- end }}

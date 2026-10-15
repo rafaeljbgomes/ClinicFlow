@@ -1,0 +1,10 @@
+apiVersion: v2
+name: clinicflow-gateway-controller
+description: ClinicFlow shared Traefik controller and isolated edge listeners
+type: application
+version: 0.1.0
+appVersion: "3.7.13"
+dependencies:
+  - name: traefik
+    version: 41.6.1
+    repository: oci://ghcr.io/traefik/helm

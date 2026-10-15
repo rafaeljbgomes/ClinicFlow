@@ -10,6 +10,8 @@ export default defineConfig({
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000",
     trace: "retain-on-failure",
+    // Local CA trust is verified independently by gateway contract tests; this opt-in only affects the test browser.
+    ignoreHTTPSErrors: process.env.PLAYWRIGHT_IGNORE_HTTPS_ERRORS === "true",
   },
   projects: [
     {

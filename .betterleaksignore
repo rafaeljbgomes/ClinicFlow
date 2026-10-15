@@ -32,3 +32,13 @@
 6c260a8aea02503895c885876ac135323b2602ea:docker-compose.yml:generic-password:149
 6c260a8aea02503895c885876ac135323b2602ea:frontend/src/components/auth-form.tsx:generic-password:171
 6c260a8aea02503895c885876ac135323b2602ea:frontend/tests/e2e/clinicflow-smoke.spec.ts:generic-password:6
+
+# Reviewed issue #13 matches: synthetic test credentials and runtime Grafana Secret lookup.
+b5e7c4f6c2c8ea3e55985d1e53f4b692fbafadea:scripts/gateway/Test-GatewayObservability.ps1:generic-password:26
+b5e7c4f6c2c8ea3e55985d1e53f4b692fbafadea:frontend/tests/e2e/gateway-api.spec.ts:generic-password:12
+b5e7c4f6c2c8ea3e55985d1e53f4b692fbafadea:frontend/tests/e2e/gateway-api.spec.ts:generic-password:17
+b5e7c4f6c2c8ea3e55985d1e53f4b692fbafadea:frontend/tests/e2e/gateway-api.spec.ts:generic-password:18
+b5e7c4f6c2c8ea3e55985d1e53f4b692fbafadea:frontend/tests/e2e/gateway-api.spec.ts:generic-password:19
+b5e7c4f6c2c8ea3e55985d1e53f4b692fbafadea:frontend/tests/e2e/gateway-api.spec.ts:generic-password:33
+b5e7c4f6c2c8ea3e55985d1e53f4b692fbafadea:frontend/tests/e2e/gateway-api.spec.ts:generic-password:65
+b5e7c4f6c2c8ea3e55985d1e53f4b692fbafadea:scripts/gateway/test-kubernetes-contract.cjs:generic-password:111

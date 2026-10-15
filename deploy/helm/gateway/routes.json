@@ -1,0 +1,102 @@
+[
+  {
+    "id": "auth-login",
+    "service": "auth",
+    "backend": "auth-service",
+    "port": 8081,
+    "match": "Exact",
+    "path": "/api/v1/auth/login",
+    "upstream": "/auth/login",
+    "policy": "auth"
+  },
+  {
+    "id": "auth-register",
+    "service": "auth",
+    "backend": "auth-service",
+    "port": 8081,
+    "match": "Exact",
+    "path": "/api/v1/auth/register",
+    "upstream": "/auth/register",
+    "policy": "auth"
+  },
+  {
+    "id": "auth-users",
+    "service": "auth",
+    "backend": "auth-service",
+    "port": 8081,
+    "match": "PathPrefix",
+    "path": "/api/v1/auth/users",
+    "upstream": "/users",
+    "policy": "public"
+  },
+  {
+    "id": "patients",
+    "service": "patient",
+    "backend": "patient-service",
+    "port": 8082,
+    "match": "PathPrefix",
+    "path": "/api/v1/patients",
+    "upstream": "/patients",
+    "policy": "public"
+  },
+  {
+    "id": "appointments",
+    "service": "appointment",
+    "backend": "appointment-service",
+    "port": 8083,
+    "match": "PathPrefix",
+    "path": "/api/v1/appointments",
+    "upstream": "/appointments",
+    "policy": "public"
+  },
+  {
+    "id": "clinical-cases",
+    "service": "clinical",
+    "backend": "clinical-service",
+    "port": 8085,
+    "match": "PathPrefix",
+    "path": "/api/v1/clinical/clinical-cases",
+    "upstream": "/clinical-cases",
+    "policy": "public"
+  },
+  {
+    "id": "clinical-sessions",
+    "service": "clinical",
+    "backend": "clinical-service",
+    "port": 8085,
+    "match": "PathPrefix",
+    "path": "/api/v1/clinical/session-records",
+    "upstream": "/session-records",
+    "policy": "public"
+  },
+  {
+    "id": "clinical-profile",
+    "service": "clinical",
+    "backend": "clinical-service",
+    "port": 8085,
+    "match": "Exact",
+    "path": "/api/v1/clinical/practice-profile",
+    "upstream": "/practice-profile",
+    "policy": "public"
+  },
+  {
+    "id": "clinical-history",
+    "service": "clinical",
+    "backend": "clinical-service",
+    "port": 8085,
+    "match": "PathPrefix",
+    "path": "/api/v1/clinical/patients",
+    "upstream": "/patients",
+    "policy": "public"
+  },
+  {
+    "id": "notifications",
+    "service": "notification",
+    "backend": "notification-service",
+    "port": 8084,
+    "match": "PathPrefix",
+    "path": "/api/v1/notifications",
+    "upstream": "/notifications",
+    "policy": "public"
+  }
+]

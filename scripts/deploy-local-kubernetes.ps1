@@ -2,11 +2,13 @@
 param(
     [switch]$SkipBuild,
     [switch]$SkipObservability,
-    [ValidateSet("All", "Platform", "Auth", "Patient", "Appointment", "Clinical", "Notification", "Frontend")]
+    [switch]$UpgradeGatewayCrds,
+    [ValidateSet("All", "Platform", "Auth", "Patient", "Appointment", "Clinical", "Notification", "Frontend", "GatewayController", "Gateway")]
     [string]$Component = "All",
     [string]$ImageTag = "",
     [string]$Namespace = "clinicflow",
     [string]$MonitoringNamespace = "monitoring",
+    [string]$IngressNamespace = "ingress-system",
     [string]$Timeout = "5m"
 )
 
@@ -52,10 +54,10 @@ function Assert-HelmCompatibility {
 }
 
 function Invoke-Checked {
-    param(
-        [Parameter(Mandatory)][string]$Command,
-        [Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments
-    )
+    # A simple function keeps native flags such as kubectl's -o out of
+    # PowerShell's common-parameter binding (OutVariable/OutBuffer).
+    param([string]$Command)
+    $Arguments = $args
 
     & $Command @Arguments
     if ($LASTEXITCODE -ne 0) {
@@ -72,6 +74,23 @@ try {
 
     Write-Host "Checking Kubernetes cluster..."
     Invoke-Checked kubectl cluster-info
+    if ($Component -in @('All','GatewayController','Gateway')) {
+        Invoke-Checked kubectl version -o json
+        $AdmissionApi = & kubectl api-resources --api-group=admissionregistration.k8s.io -o name
+        if ($LASTEXITCODE -ne 0 -or $AdmissionApi -notcontains 'validatingadmissionpolicies.admissionregistration.k8s.io') { throw 'The pinned Gateway API bundle requires ValidatingAdmissionPolicy support.' }
+        Invoke-Checked kubectl get daemonsets -A
+        Write-Host 'Gateway preflight: inspect CNI enforcement and LoadBalancer support; isolation acceptance requires live probes.'
+        foreach ($Port in @(80,443)) {
+            $Client = [Net.Sockets.TcpClient]::new()
+            try {
+                if ($Client.ConnectAsync('127.0.0.1',$Port).Wait(300) -and $Client.Connected) {
+                    $ExistingGateway = & kubectl get service clinicflow-gateway-controller -n $IngressNamespace --ignore-not-found -o name
+                    if ($LASTEXITCODE -ne 0 -or -not $ExistingGateway) { throw "Port $Port is occupied without an existing gateway Service; inspect its owner before deployment." }
+                    Write-Warning "Port $Port is already listening; confirm it belongs to the gateway LoadBalancer."
+                }
+            } finally { $Client.Dispose() }
+        }
+    }
 
     & helm status clinicflow --namespace $Namespace *> $null
     if ($LASTEXITCODE -eq 0) {
@@ -81,7 +100,7 @@ try {
     $selectedComponents = if ($Component -eq "All") {
         @($components.Keys)
     }
-    elseif ($Component -eq "Platform") {
+    elseif ($Component -in @("Platform", "GatewayController", "Gateway")) {
         @()
     }
     else {
@@ -167,6 +186,31 @@ try {
         }
     }
 
+    if ($Component -in @('All','GatewayController')) {
+        & (Join-Path $PSScriptRoot 'gateway/Initialize-GatewayCrds.ps1') -Upgrade:$UpgradeGatewayCrds
+        $ApiService = (& kubectl get service kubernetes -n default -o json) | ConvertFrom-Json
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot discover Kubernetes API Service.' }
+        $ApiEndpoints = (& kubectl get endpointslices -n default -l kubernetes.io/service-name=kubernetes -o json) | ConvertFrom-Json
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot discover Kubernetes API endpoints.' }
+        $ApiPorts = @((@($ApiService.spec.ports.port) + @($ApiEndpoints.items.ports.port)) | Where-Object { $_ } | Sort-Object -Unique)
+        if (-not $ApiPorts.Count) { throw 'No Kubernetes API ports discovered.' }
+        $Addresses = @($ApiService.spec.clusterIPs) + @($ApiEndpoints.items.endpoints.addresses)
+        $Cidrs = @($Addresses | Where-Object { $_ } | Sort-Object -Unique | ForEach-Object {
+            $Ip = [Net.IPAddress]::Parse($_)
+            if ($Ip.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork) { "$($_)/32" } else { "$($_)/128" }
+        })
+        if (-not $Cidrs.Count) { throw 'No Kubernetes API CIDRs discovered; refusing unrestricted controller egress.' }
+        $ControllerChart = Join-Path $repoRoot 'deploy/helm/gateway-controller'
+        $ControllerValues = @{ applicationNamespace=$Namespace; monitoringNamespace=$MonitoringNamespace; kubernetesApi=@{cidrs=$Cidrs;ports=$ApiPorts}; traefik=@{providers=@{kubernetesGateway=@{namespaces=@($Namespace,$IngressNamespace);statusAddress=@{service=@{namespace=$IngressNamespace}}};kubernetesCRD=@{namespaces=@($Namespace,$IngressNamespace)}};metrics=@{prometheus=@{serviceMonitor=@{enabled=(-not $SkipObservability)}}}} }
+        $TemporaryValues = Join-Path ([IO.Path]::GetTempPath()) "clinicflow-gateway-$([Guid]::NewGuid()).json"
+        try {
+            $ControllerValues | ConvertTo-Json -Depth 10 | Set-Content $TemporaryValues
+            Invoke-Checked helm dependency build $ControllerChart
+            Invoke-Checked helm upgrade --install clinicflow-gateway-controller $ControllerChart --namespace $IngressNamespace --create-namespace --values $TemporaryValues --skip-crds --rollback-on-failure --wait=watcher --server-side=false --timeout $Timeout
+        }
+        finally { Remove-Item -LiteralPath $TemporaryValues -ErrorAction SilentlyContinue }
+    }
+
     foreach ($componentName in $selectedComponents) {
         $definition = $components[$componentName]
         $arguments = @(
@@ -176,20 +220,36 @@ try {
             "--rollback-on-failure", "--wait=watcher", "--server-side=false", "--timeout", $Timeout
         )
         if ($definition.Values) {
-            $arguments += @("--values", (Join-Path $serviceValuesDirectory $definition.Values))
+            $arguments += @("--values", (Join-Path $serviceValuesDirectory $definition.Values), "--set-string", "networkPolicy.gatewayNamespace=$IngressNamespace", "--set-string", "networkPolicy.monitoringNamespace=$MonitoringNamespace")
         }
 
+        if ($componentName -eq 'Frontend') {
+            $arguments += @('--set-string',"gatewayNamespace=$IngressNamespace",'--set-string',"gatewayUrl=http://clinicflow-gateway-api.$IngressNamespace.svc.cluster.local:8080")
+        }
         Write-Host "Installing or upgrading $($definition.Release)..."
         Invoke-Checked helm @arguments
     }
 
+    if ($Component -in @('All','Gateway')) {
+        $TlsSecret = & kubectl get secret clinicflow-edge-tls --namespace $Namespace --ignore-not-found -o name
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect development TLS Secret.' }
+        if (-not $TlsSecret) {
+            & (Join-Path $PSScriptRoot 'gateway/New-DevelopmentCertificate.ps1')
+            $Certificate = Join-Path $repoRoot 'secrets/edge/edge.crt'
+            $CertificateKey = Join-Path $repoRoot 'secrets/edge/edge.key'
+            Invoke-Checked kubectl create secret tls clinicflow-edge-tls --namespace $Namespace "--cert=$Certificate" "--key=$CertificateKey"
+        }
+        Invoke-Checked helm upgrade --install clinicflow-gateway (Join-Path $repoRoot 'deploy/helm/gateway') --namespace $Namespace --rollback-on-failure --wait=watcher --server-side=false --timeout $Timeout
+        & (Join-Path $PSScriptRoot 'gateway/Wait-GatewayRoutes.ps1') -Namespace $Namespace
+        & (Join-Path $PSScriptRoot 'gateway/Test-GatewayTraffic.ps1') -IngressNamespace $IngressNamespace
+    }
     Write-Host ""
     Write-Host "ClinicFlow $Component deployment completed."
     Invoke-Checked helm list --namespace $Namespace
     Invoke-Checked kubectl get pods --namespace $Namespace
     Write-Host ""
     Write-Host "Open the frontend with:"
-    Write-Host "  kubectl port-forward svc/frontend 3000:3000 -n $Namespace"
+    Write-Host "  https://clinicflow.localhost (trust secrets/edge/ca.crt manually)"
     if (-not $SkipObservability -and $Component -in @("All", "Platform")) {
         Write-Host "Open Grafana with:"
         Write-Host "  kubectl port-forward svc/clinicflow-observability-grafana 3001:80 -n $MonitoringNamespace"

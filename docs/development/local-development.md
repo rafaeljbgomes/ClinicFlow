@@ -43,6 +43,8 @@ rules, coverage thresholds, and report locations.
 ## Run Locally with Docker Compose
 
 ```powershell
+./scripts/generate-dev-jwt-keys.ps1
+./scripts/gateway/New-DevelopmentCertificate.ps1
 docker compose up --build
 ```
 
@@ -71,15 +73,14 @@ all lifecycle states, practice profiles, clinical cases, care plans, care goals,
 session records, and notification history. Disable it by removing or setting
 `CLINICFLOW_DEMO_BOOTSTRAP_ENABLED=false` for each backend service.
 
-Service ports:
+Public endpoints:
 
-- Frontend: `http://localhost:3000`
-- Auth Service: `http://localhost:8081`
-- Patient Service: `http://localhost:8082`
-- Appointment Service: `http://localhost:8083`
-- Clinical Service: `http://localhost:8085`
-- Notification Service: `http://localhost:8084`
-- RabbitMQ Management: `http://localhost:15672`
+- UI/BFF: `https://clinicflow.localhost`.
+- Bearer API: `https://api.clinicflow.localhost/api/v1/**`.
+- RabbitMQ Management: `http://localhost:15672`.
+
+Backend/frontend application ports and management 9000 are unpublished. Trust the generated
+local CA manually in the browser; see [gateway setup and acceptance](../infrastructure/gateway.md).
 
 RabbitMQ credentials for local development are `clinicflow` / `clinicflow`.
 
@@ -87,7 +88,8 @@ RabbitMQ credentials for local development are `clinicflow` / `clinicflow`.
 
 The frontend lives in `frontend/` and uses Next.js App Router as a lightweight
 BFF. Browser code calls only same-origin `/api/*` routes. Those route handlers
-call the Spring Boot services using the following environment variables:
+call the private gateway with server-only `GATEWAY_URL` in Compose/Kubernetes.
+The following direct-service variables are retained only for host-run non-production development:
 
 - `AUTH_SERVICE_URL`
 - `PATIENT_SERVICE_URL`
@@ -138,7 +140,7 @@ auth-service when it needs the complete profile.
 
 ## Minimal Smoke Flow
 
-1. Open `http://localhost:3000/register`.
+1. Open `https://clinicflow.localhost/register` (or `http://localhost:3000/register` for host-run development).
 2. Register a psychologist account.
 3. Create a patient from the Patients page.
 4. Schedule an appointment from the Appointments page.
@@ -258,9 +260,8 @@ kubectl rollout status deployment/frontend -n clinicflow
 Open the local UI and Grafana:
 
 ```powershell
-kubectl port-forward svc/frontend 3000:3000 -n clinicflow
 kubectl port-forward svc/clinicflow-observability-grafana 3001:80 -n monitoring
 ```
 
-Frontend: `http://localhost:3000`. Grafana: `http://localhost:3001` with
+Frontend: `https://clinicflow.localhost`. Grafana: `http://localhost:3001` with
 `admin` / `clinicflow`.
