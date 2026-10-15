@@ -58,7 +58,7 @@ try {
     $Controller=(& kubectl get pods -n $IngressNamespace -l clinicflow.io/edge=gateway,app.kubernetes.io/name=traefik -o json | ConvertFrom-Json).items[0].metadata.name
     & kubectl exec $Controller -n $IngressNamespace -- wget -T 4 -q -O /dev/null "http://frontend.$Namespace.svc.cluster.local:3000/login"
     if ($LASTEXITCODE -ne 0) { throw 'Real controller cannot reach its allowed frontend/DNS positive control.' }
-    & kubectl exec $Controller -n $IngressNamespace -- sh -c 'command -v nc' 
+    & kubectl exec $Controller -n $IngressNamespace -- sh -c 'command -v nc'
     if ($LASTEXITCODE -ne 0) { throw 'TCP probe tool is unavailable; egress isolation cannot be inferred.' }
     # Open ONLY the temporary sink's ingress, with a frontend positive control.
     # This separates controller egress denial from the real DB/broker ingress rules.

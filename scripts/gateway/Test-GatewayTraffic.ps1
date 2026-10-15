@@ -27,4 +27,4 @@ foreach ($Case in @(@{HostName='clinicflow.localhost';Path='/login';Status='200'
 }
 $Redirect=& $Curl --silent --show-error --max-time 10 --output $Sink --write-out '%{http_code}' --request POST --resolve "api.clinicflow.localhost:80:$Address" http://api.clinicflow.localhost/api/v1/auth/login
 if ($LASTEXITCODE -ne 0 -or $Redirect -ne '308') { throw "Mutation HTTP-to-HTTPS redirect did not return 308: '$Redirect'" }
-Write-Host 'Gateway HTTPS, business routing, authentication, management isolation, and method-preserving redirect checks passed.' 
+Write-Host 'Gateway HTTPS, business routing, authentication, management isolation, and method-preserving redirect checks passed.'
