@@ -88,27 +88,21 @@ try {
         $env:CLINICFLOW_POSTGRES_PORT,
         $env:CLINICFLOW_RABBITMQ_PORT,
         $env:CLINICFLOW_RABBITMQ_MANAGEMENT_PORT,
-        $env:CLINICFLOW_AUTH_PORT,
-        $env:CLINICFLOW_PATIENT_PORT,
-        $env:CLINICFLOW_APPOINTMENT_PORT,
-        $env:CLINICFLOW_NOTIFICATION_PORT,
-        $env:CLINICFLOW_CLINICAL_PORT,
         $env:CLINICFLOW_FRONTEND_PORT
     ) | ForEach-Object { [int]$_ }
     Wait-DockerHostPorts -HostName $RuntimeHost -Ports $HostPorts
     & docker compose --file docker-compose.yml --file docker-compose.ci.yml --project-name $ProjectName up --detach --no-build
     if ($LASTEXITCODE -ne 0) { throw "Isolated Compose startup failed." }
-    $Endpoints = [ordered]@{
-        "auth-service" = "http://${RuntimeHost}:$($env:CLINICFLOW_AUTH_PORT)/actuator/health"
-        "patient-service" = "http://${RuntimeHost}:$($env:CLINICFLOW_PATIENT_PORT)/actuator/health"
-        "appointment-service" = "http://${RuntimeHost}:$($env:CLINICFLOW_APPOINTMENT_PORT)/actuator/health"
-        "clinical-service" = "http://${RuntimeHost}:$($env:CLINICFLOW_CLINICAL_PORT)/actuator/health"
-        "notification-service" = "http://${RuntimeHost}:$($env:CLINICFLOW_NOTIFICATION_PORT)/actuator/health"
-        "frontend" = "http://${RuntimeHost}:$($env:CLINICFLOW_FRONTEND_PORT)/login"
+    foreach ($Service in @('auth-service','patient-service','appointment-service','clinical-service','notification-service')) {
+        $Deadline = [DateTimeOffset]::UtcNow.AddSeconds(240)
+        do {
+            & docker compose --file docker-compose.yml --file docker-compose.ci.yml --project-name $ProjectName exec -T gateway wget -T 5 -q -O /dev/null "http://${Service}:9000/actuator/health" 2>$null
+            if ($LASTEXITCODE -eq 0) { break }
+            Start-Sleep -Seconds 2
+        } while ([DateTimeOffset]::UtcNow -lt $Deadline)
+        if ($LASTEXITCODE -ne 0) { throw "$Service did not become ready on its private management port." }
     }
-    foreach ($Endpoint in $Endpoints.GetEnumerator()) {
-        Wait-HttpEndpoint -Name $Endpoint.Key -Uri $Endpoint.Value
-    }
+    Wait-HttpEndpoint -Name frontend -Uri "http://${RuntimeHost}:$($env:CLINICFLOW_FRONTEND_PORT)/login"
 }
 catch {
     $StartupFailure = $_

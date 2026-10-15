@@ -18,10 +18,7 @@ function Set-IsolatedPorts {
     $env:CLINICFLOW_POSTGRES_PORT = [string]($Base + 1)
     $env:CLINICFLOW_RABBITMQ_PORT = [string]($Base + 2)
     $env:CLINICFLOW_RABBITMQ_MANAGEMENT_PORT = [string]($Base + 3)
-    $env:CLINICFLOW_AUTH_PORT = [string]($Base + 4)
-    $env:CLINICFLOW_PATIENT_PORT = [string]($Base + 5)
-    $env:CLINICFLOW_APPOINTMENT_PORT = [string]($Base + 6)
-    $env:CLINICFLOW_NOTIFICATION_PORT = [string]($Base + 7)
-    $env:CLINICFLOW_CLINICAL_PORT = [string]($Base + 8)
+    $env:CLINICFLOW_GATEWAY_HTTP_PORT = [string]($Base + 9)
+    # Existing Playwright scripts use this name for the public UI endpoint.
     $env:CLINICFLOW_FRONTEND_PORT = [string]($Base + 9)
 }

@@ -23,7 +23,7 @@ ARG PLAYWRIGHT_VERSION=1.62.1
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 RUN apt-get update \
-    && apt-get install --no-install-recommends -y ca-certificates curl git git-lfs gnupg jq openssl procps tar unzip xz-utils \
+    && apt-get install --no-install-recommends -y ca-certificates curl git git-lfs gnupg jq openssl procps python3 tar unzip xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
