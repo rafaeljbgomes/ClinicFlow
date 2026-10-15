@@ -1,0 +1,12 @@
+gatewayClassName: clinicflow-traefik
+uiHostname: clinicflow.localhost
+apiHostname: api.clinicflow.localhost
+tls:
+  enabled: true
+  secretName: clinicflow-edge-tls
+rateLimits:
+  public: {average: 20, period: 1s, burst: 40}
+  auth: {average: 10, period: 1m, burst: 5}
+  internal: {average: 100, period: 1s, burst: 200}
+grafanaDashboard:
+  enabled: true

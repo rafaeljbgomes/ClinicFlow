@@ -48,6 +48,9 @@ pipeline {
         stage('Platform validation') {
             steps { sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Test-Platform.ps1' }
         }
+        stage('Gateway contract acceptance') {
+            steps { sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Invoke-GatewayContract.ps1 -RunId $CI_RUN_ID -RuntimeHost host.docker.internal' }
+        }
         stage('Shared/backend integration validation') {
             steps { sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Invoke-SystemBackend.ps1 -Phase Integration' }
             post {
@@ -70,7 +73,7 @@ pipeline {
     post {
         always {
             sh 'pwsh -NoLogo -NoProfile -File ./scripts/ci/Stop-IsolatedCompose.ps1 -RunId $CI_RUN_ID || true'
-            archiveArtifacts allowEmptyArchive: true, artifacts: 'reports/platform/**,frontend/playwright-report/**,frontend/test-results/**', fingerprint: false
+            archiveArtifacts allowEmptyArchive: true, artifacts: 'reports/platform/**,reports/gateway/**,frontend/playwright-report/**,frontend/test-results/**', fingerprint: false
             script {
                 if (fileExists('frontend/playwright-report/index.html')) {
                     publishHTML(target: [allowMissing: false, alwaysLinkToLastBuild: true, keepAll: true, reportDir: 'frontend/playwright-report', reportFiles: 'index.html', reportName: 'System Playwright'])

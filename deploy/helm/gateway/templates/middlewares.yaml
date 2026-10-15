@@ -1,0 +1,27 @@
+{{- range $name := list "headers" "secure-headers" }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ $name }}
+spec:
+  headers:
+    contentTypeNosniff: true
+    frameDeny: true
+    referrerPolicy: no-referrer
+    {{- if eq $name "secure-headers" }}
+    stsSeconds: 86400
+    {{- end }}
+{{- end }}
+{{- range $name, $limit := .Values.rateLimits }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ $name }}-limit
+spec:
+  rateLimit:
+    average: {{ $limit.average }}
+    period: {{ $limit.period }}
+    burst: {{ $limit.burst }}
+{{- end }}

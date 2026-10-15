@@ -1,0 +1,20 @@
+{{- if .Values.grafanaDashboard.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clinicflow-gateway-dashboard
+  labels: {grafana_dashboard: "1"}
+data:
+  clinicflow-gateway.json: |
+    {
+      "uid":"clinicflow-gateway", "title":"ClinicFlow Gateway", "schemaVersion":39,
+      "version":1, "refresh":"15s", "tags":["clinicflow","gateway"],
+      "time":{"from":"now-30m","to":"now"},
+      "panels":[
+        {"id":1,"type":"timeseries","title":"Request volume by listener","gridPos":{"h":8,"w":12,"x":0,"y":0},"datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"sum by (entrypoint) (rate(traefik_entrypoint_requests_total{namespace=\"ingress-system\"}[5m]))","refId":"A"}]},
+        {"id":2,"type":"timeseries","title":"P95 gateway latency","gridPos":{"h":8,"w":12,"x":12,"y":0},"datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"histogram_quantile(0.95, sum by (le,entrypoint) (rate(traefik_entrypoint_request_duration_seconds_bucket{namespace=\"ingress-system\"}[5m])))","refId":"A"}]},
+        {"id":3,"type":"timeseries","title":"Throttled requests (429)","gridPos":{"h":8,"w":12,"x":0,"y":8},"datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"sum by (entrypoint) (rate(traefik_entrypoint_requests_total{namespace=\"ingress-system\",code=\"429\"}[5m]))","refId":"A"}]},
+        {"id":4,"type":"timeseries","title":"Gateway and upstream failures (5xx)","gridPos":{"h":8,"w":12,"x":12,"y":8},"datasource":{"type":"prometheus","uid":"prometheus"},"targets":[{"expr":"sum by (entrypoint,code) (rate(traefik_entrypoint_requests_total{namespace=\"ingress-system\",code=~\"5..\"}[5m]))","refId":"A"}]}
+      ]
+    }
+{{- end }}

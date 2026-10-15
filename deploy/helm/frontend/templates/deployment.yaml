@@ -11,6 +11,8 @@ spec:
       {{- include "clinicflow-frontend.selectorLabels" . | nindent 6 }}
   template:
     metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
       labels:
         {{- include "clinicflow-frontend.labels" . | nindent 8 }}
         app.kubernetes.io/component: {{ .Values.name }}

@@ -15,6 +15,8 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
@@ -70,6 +72,12 @@ public class ApiExceptionHandler {
     ProblemDetail unsupportedMediaType(HttpMediaTypeNotSupportedException ex) {
         return ApiProblems.create(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "unsupported_media_type", "Unsupported media type",
                 "The request media type is not supported");
+    }
+
+    @ExceptionHandler({NoHandlerFoundException.class, NoResourceFoundException.class})
+    ProblemDetail unknownEndpoint(Exception ex) {
+        return ApiProblems.create(HttpStatus.NOT_FOUND, "endpoint_not_found", "Resource not found",
+                "The requested endpoint does not exist");
     }
 
     @ExceptionHandler(Exception.class)

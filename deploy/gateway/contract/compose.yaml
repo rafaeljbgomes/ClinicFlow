@@ -1,0 +1,46 @@
+services:
+  certificate-bootstrap:
+    image: alpine/openssl:3.5.7@sha256:47f40fac08a77cbdfb02444e543808aa36b9e31e21a261f4d94ffaf0c5c73832
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        umask 077
+        openssl req -x509 -newkey rsa:2048 -nodes -keyout /tmp/ca.key -out /certs/ca.crt -days 1 -subj '/CN=ClinicFlow ephemeral contract CA' -addext 'basicConstraints=critical,CA:TRUE'
+        openssl req -new -newkey rsa:2048 -nodes -keyout /certs/edge.key -out /tmp/edge.csr -subj '/CN=clinicflow.localhost'
+        printf '%s\n' 'subjectAltName=DNS:clinicflow.localhost,DNS:api.clinicflow.localhost' 'extendedKeyUsage=serverAuth' 'basicConstraints=critical,CA:FALSE' > /tmp/edge.ext
+        openssl x509 -req -in /tmp/edge.csr -CA /certs/ca.crt -CAkey /tmp/ca.key -CAcreateserial -out /certs/edge.crt -days 1 -extfile /tmp/edge.ext
+        chmod 644 /certs/edge.crt /certs/ca.crt
+        chown 65532:65532 /certs/edge.key
+        chmod 400 /certs/edge.key
+    volumes: [gateway-certificates:/certs]
+    restart: "no"
+  fixture:
+    build: .
+    networks:
+      default:
+        aliases: [auth-service,patient-service,appointment-service,clinical-service,notification-service,frontend]
+  gateway:
+    build: ..
+    environment:
+      CLINICFLOW_GATEWAY_TLS: "${GATEWAY_TEST_TLS:-false}"
+      CLINICFLOW_GATEWAY_HTTPS_PORT: "${GATEWAY_TEST_HTTPS_PORT:-19443}"
+      CLINICFLOW_GATEWAY_PUBLIC_AVERAGE: "1000"
+      CLINICFLOW_GATEWAY_PUBLIC_BURST: "2000"
+      CLINICFLOW_GATEWAY_AUTH_AVERAGE: "2"
+      CLINICFLOW_GATEWAY_AUTH_PERIOD: "1s"
+      CLINICFLOW_GATEWAY_AUTH_BURST: "2"
+    ports:
+      - "${GATEWAY_TEST_HTTP_PORT:-19080}:8000"
+      - "${GATEWAY_TEST_HTTPS_PORT:-19443}:8443"
+    volumes:
+      - gateway-certificates:/certs:ro
+    group_add: ["${CLINICFLOW_TLS_GROUP:-65532}"]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    depends_on:
+      fixture: {condition: service_started}
+      certificate-bootstrap: {condition: service_completed_successfully}
+
+volumes:
+  gateway-certificates:

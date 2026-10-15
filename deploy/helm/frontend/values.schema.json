@@ -1,8 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
-  "required": ["name", "image", "port", "services", "jwt"],
+  "required": ["name", "image", "port", "services", "jwt", "gatewayUrl", "cookieSecure"],
   "properties": {
+    "gatewayUrl": { "type": "string", "pattern": "^https?://[^/]+(:[0-9]+)?$" },
+    "cookieSecure": { "type": "boolean" },
     "name": { "type": "string", "minLength": 1 },
     "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
     "image": {

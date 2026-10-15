@@ -1,0 +1,134 @@
+applicationNamespace: clinicflow
+monitoringNamespace: monitoring
+# Installer discovers API Service/endpoint addresses. Never allow all Internet egress.
+kubernetesApi:
+  cidrs: []
+  ports: [443, 6443]
+networkPolicy:
+  enabled: true
+traefik:
+  global:
+    checkNewVersion: false
+    sendAnonymousUsage: false
+  fullnameOverride: clinicflow-gateway-controller
+  versionOverride: v3.7.13
+  image:
+    tag: v3.7.13
+    digest: sha256:24841fe2de7304c149343d877d2923b4c8800a38ba015dea9174c23b20e344a0
+  updateStrategy:
+    type: Recreate
+  deployment:
+    replicas: 1
+    terminationGracePeriodSeconds: 45
+    podLabels:
+      clinicflow.io/edge: gateway
+  autoscaling:
+    enabled: false
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 256Mi}
+  gateway:
+    enabled: false
+  gatewayClass:
+    enabled: true
+    name: clinicflow-traefik
+  ingressClass:
+    enabled: false
+  api:
+    dashboard: false
+    insecure: false
+  ingressRoute:
+    dashboard:
+      enabled: false
+    healthcheck:
+      enabled: false
+  providers:
+    kubernetesIngress:
+      enabled: false
+    kubernetesCRD:
+      enabled: true
+      namespaces: [clinicflow, ingress-system]
+      allowCrossNamespace: false
+      allowExternalNameServices: false
+    kubernetesGateway:
+      enabled: true
+      namespaces: [clinicflow, ingress-system]
+      experimentalChannel: false
+      crossProviderNamespaces: []
+      statusAddress:
+        service:
+          name: clinicflow-gateway-controller
+          namespace: ingress-system
+  ports:
+    traefik:
+      port: 9001
+      expose: {default: false, api: false}
+    web:
+      port: 8000
+      exposedPort: 80
+      expose: {default: true, api: false}
+      forwardedHeaders: {insecure: false, trustedIPs: []}
+      transport:
+        respondingTimeouts: {readTimeout: 15s, writeTimeout: 30s, idleTimeout: 60s}
+    websecure:
+      port: 8443
+      exposedPort: 443
+      expose: {default: true, api: false}
+      http:
+        tls:
+          enabled: false
+      forwardedHeaders: {insecure: false, trustedIPs: []}
+      transport:
+        respondingTimeouts: {readTimeout: 15s, writeTimeout: 30s, idleTimeout: 60s}
+    api:
+      port: 8080
+      exposedPort: 8080
+      protocol: TCP
+      expose: {default: false, api: false}
+      forwardedHeaders: {insecure: false, trustedIPs: []}
+      transport:
+        respondingTimeouts: {readTimeout: 15s, writeTimeout: 30s, idleTimeout: 60s}
+    metrics:
+      port: 9100
+      expose: {default: false, api: false}
+  service:
+    nameOverride: clinicflow-gateway-controller
+    spec:
+      type: LoadBalancer
+    additionalServices: {}
+  metrics:
+    prometheus:
+      service:
+        enabled: true
+      serviceMonitor:
+        enabled: true
+        interval: 15s
+        additionalLabels:
+          release: clinicflow-observability
+  log:
+    format: json
+    level: INFO
+  accessLog:
+    enabled: true
+    format: json
+    fields:
+      defaultMode: drop
+      names:
+        StartUTC: keep
+        RequestMethod: keep
+        RouterName: keep
+        ServiceName: keep
+        DownstreamStatus: keep
+        OriginStatus: keep
+        Duration: keep
+      headers:
+        defaultMode: drop
+      queryParameters:
+        defaultMode: drop
+  additionalArguments:
+    - --serversTransport.forwardingTimeouts.dialTimeout=2s
+    - --serversTransport.forwardingTimeouts.responseHeaderTimeout=15s
+    - --serversTransport.forwardingTimeouts.idleConnTimeout=60s
+    - --entrypoints.web.transport.lifecycle.gracetimeout=30s
+    - --entrypoints.websecure.transport.lifecycle.gracetimeout=30s
+    - --entrypoints.api.transport.lifecycle.gracetimeout=30s

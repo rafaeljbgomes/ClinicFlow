@@ -28,6 +28,10 @@ resources until the timeout before continuing a fresh installation.
   `clinicflow-clinical`, and `clinicflow-notification` each install the reusable
   Spring-service chart with service-specific values.
 - `clinicflow-frontend` owns the Next.js frontend and BFF resources.
+- `clinicflow-gateway-controller` in `ingress-system` owns the pinned Traefik edge.
+- `clinicflow-gateway` owns Gateway API routes and policy in `clinicflow`.
+
+See the [gateway guide](gateway.md) for CRD/TLS lifecycle and live isolation acceptance.
 
 Application releases use their own immutable image tag or digest. The local
 script derives a commit/timestamp tag by default. Docker Desktop Kubernetes can
@@ -167,10 +171,9 @@ kubectl rollout status deployment/notification-service -n clinicflow
 kubectl rollout status deployment/frontend -n clinicflow
 ```
 
-Port-forward the UI and Grafana:
+Open the UI at `https://clinicflow.localhost` through the gateway. Port-forward Grafana:
 
 ```powershell
-kubectl port-forward svc/frontend 3000:3000 -n clinicflow
 kubectl port-forward svc/clinicflow-observability-grafana 3001:80 -n monitoring
 ```
 

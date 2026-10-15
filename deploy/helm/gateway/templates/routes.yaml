@@ -1,0 +1,79 @@
+{{- range $route := (.Files.Get "routes.json" | fromJsonArray) }}
+{{- range $visibility := list "public" "internal" }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $visibility }}-{{ $route.id }}
+spec:
+  parentRefs:
+    - name: clinicflow-gateway
+      sectionName: {{ if eq $visibility "internal" }}internal-api{{ else if $.Values.tls.enabled }}public-api-https{{ else }}public-api-http{{ end }}
+  {{- if eq $visibility "public" }}
+  hostnames: [{{ $.Values.apiHostname | quote }}]
+  {{- end }}
+  rules:
+    - matches:
+        - path:
+            type: {{ $route.match }}
+            value: {{ $route.path }}
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: {{ if eq $route.match "Exact" }}ReplaceFullPath{{ else }}ReplacePrefixMatch{{ end }}
+              {{ if eq $route.match "Exact" }}replaceFullPath{{ else }}replacePrefixMatch{{ end }}: {{ $route.upstream }}
+        - type: ExtensionRef
+          extensionRef: {group: traefik.io, kind: Middleware, name: {{ if and $.Values.tls.enabled (eq $visibility "public") }}secure-headers{{ else }}headers{{ end }}}
+        - type: ExtensionRef
+          extensionRef: {group: traefik.io, kind: Middleware, name: {{ if eq $visibility "internal" }}internal{{ else }}{{ $route.policy }}{{ end }}-limit}
+      backendRefs:
+        - name: {{ $route.backend }}
+          port: {{ $route.port }}
+{{- end }}
+{{- end }}
+{{- range $item := list (dict "name" "ui" "path" "/" "policy" "") (dict "name" "bff-api" "path" "/api" "policy" "public") (dict "name" "bff-login" "path" "/api/auth/login" "policy" "auth") (dict "name" "bff-register" "path" "/api/auth/register" "policy" "auth") }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $item.name }}
+spec:
+  parentRefs:
+    - name: clinicflow-gateway
+      sectionName: ui-{{ if $.Values.tls.enabled }}https{{ else }}http{{ end }}
+  hostnames: [{{ $.Values.uiHostname | quote }}]
+  rules:
+    - matches:
+        - path:
+            type: {{ if eq $item.policy "auth" }}Exact{{ else }}PathPrefix{{ end }}
+            value: {{ $item.path | quote }}
+      filters:
+        - type: ExtensionRef
+          extensionRef: {group: traefik.io, kind: Middleware, name: {{ if $.Values.tls.enabled }}secure-headers{{ else }}headers{{ end }}}
+        {{- if $item.policy }}
+        - type: ExtensionRef
+          extensionRef: {group: traefik.io, kind: Middleware, name: {{ $item.policy }}-limit}
+        {{- end }}
+      backendRefs:
+        - name: frontend
+          port: 3000
+{{- end }}
+{{- if .Values.tls.enabled }}
+{{- range $name, $hostname := dict "ui" .Values.uiHostname "public-api" .Values.apiHostname }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $name }}-redirect
+spec:
+  parentRefs:
+    - name: clinicflow-gateway
+      sectionName: {{ $name }}-http
+  hostnames: [{{ $hostname | quote }}]
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect: {scheme: https, port: 443, statusCode: 308}
+{{- end }}
+{{- end }}

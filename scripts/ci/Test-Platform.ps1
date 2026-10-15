@@ -14,6 +14,22 @@ try {
     & docker compose --file docker-compose.yml --file docker-compose.ci.yml config --quiet
     if ($LASTEXITCODE -ne 0) { throw "CI Docker Compose override validation failed." }
 
+    $Python = if (Get-Command python3 -ErrorAction SilentlyContinue) { 'python3' } else { 'python' }
+    & $Python ./scripts/gateway/render-config.py --check
+    if ($LASTEXITCODE -ne 0) { throw 'Generated gateway provider configuration is stale.' }
+    & helm lint ./deploy/helm/gateway-controller
+    if ($LASTEXITCODE -ne 0) { throw 'Gateway controller Helm lint failed.' }
+    & helm lint ./deploy/helm/gateway
+    if ($LASTEXITCODE -ne 0) { throw 'Gateway routes Helm lint failed.' }
+    $ControllerPath = Join-Path $ReportsDirectory 'gateway-controller-rendered.yaml'
+    $GatewayPath = Join-Path $ReportsDirectory 'gateway-rendered.yaml'
+    & helm template clinicflow-gateway-controller ./deploy/helm/gateway-controller --namespace ingress-system --api-versions monitoring.coreos.com/v1 | Set-Content $ControllerPath
+    if ($LASTEXITCODE -ne 0) { throw 'Gateway controller render failed.' }
+    & helm template clinicflow-gateway ./deploy/helm/gateway --namespace clinicflow | Set-Content $GatewayPath
+    if ($LASTEXITCODE -ne 0) { throw 'Gateway routes render failed.' }
+    & node ./scripts/gateway/validate-manifests.cjs $ControllerPath $GatewayPath
+    if ($LASTEXITCODE -ne 0) { throw 'Pinned gateway CRD/schema/contract validation failed.' }
+
     $serviceReleases = [ordered]@{
         auth = "auth-service"
         patient = "patient-service"
@@ -22,6 +38,8 @@ try {
         notification = "notification-service"
     }
     $renderedManifests = [System.Collections.Generic.List[string]]::new()
+    $renderedManifests.Add($ControllerPath)
+    $renderedManifests.Add($GatewayPath)
 
     & helm lint ./deploy/helm/observability --values ./deploy/helm/observability/values-docker-desktop.yaml
     if ($LASTEXITCODE -ne 0) { throw "Observability Helm lint failed." }
@@ -70,6 +88,14 @@ try {
     Set-Content -Path $frontendPath -Value $frontendManifest
     $renderedManifests.Add($frontendPath)
 
+    & node ./scripts/gateway/validate-manifests.cjs @renderedManifests
+    if ($LASTEXITCODE -ne 0) { throw 'Full gateway/network boundary validation failed.' }
+    & helm template invalid ./deploy/helm/gateway-controller --set traefik.deployment.replicas=2 *> $null
+    if ($LASTEXITCODE -eq 0) { throw 'Local quota schema accepted multiple proxy replicas.' }
+    & helm template invalid ./deploy/helm/gateway --set rateLimits.public.average=0 *> $null
+    if ($LASTEXITCODE -eq 0) { throw 'Gateway schema accepted a disabled public quota.' }
+    & helm template invalid ./deploy/helm/frontend --set-string gatewayUrl= *> $null
+    if ($LASTEXITCODE -eq 0) { throw 'Frontend schema accepted missing GATEWAY_URL.' }
     & helm template invalid ./deploy/helm/service --set-string image.tag=latest *> $null
     if ($LASTEXITCODE -eq 0) { throw "Service schema accepted mutable image tag 'latest'." }
     & helm template invalid ./deploy/helm/service --set-string image.tag= --set-string image.digest= *> $null
