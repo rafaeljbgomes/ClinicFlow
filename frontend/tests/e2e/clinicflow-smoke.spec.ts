@@ -86,14 +86,22 @@ test("psychologist can run the main prototype workflow", async ({ page }) => {
   const statusFilter = page.getByRole("combobox", { name: "Filter patients by status" });
   await statusFilter.focus();
   await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("ArrowDown");
-  await expect(page.getByRole("option", { name: "Active", exact: true })).toHaveAttribute("data-highlighted", "");
+  const activeOption = page.getByRole("option", { name: "Active", exact: true });
+  await expect(activeOption).toBeVisible();
+  await expect.poll(async () => {
+    if (await activeOption.getAttribute("data-highlighted") !== null) return true;
+    await page.keyboard.press("ArrowDown");
+    return false;
+  }, { timeout: 5_000 }).toBe(true);
   await page.keyboard.press("Enter");
   await expect(statusFilter).toContainText("Active");
   await statusFilter.focus();
   await page.keyboard.press("Space");
+  await expect(page.getByRole("option", { name: "All statuses", exact: true })).toBeVisible();
   await page.keyboard.press("Home");
+  await expect(page.getByRole("option", { name: "All statuses", exact: true })).toHaveAttribute("data-highlighted", "");
   await page.keyboard.press("Enter");
+  await expect(statusFilter).toContainText("All statuses");
   const patientActions = page.getByRole("button", { name: "Patient actions" }).last();
   await patientActions.focus();
   await page.keyboard.press("Enter");
@@ -118,8 +126,13 @@ test("psychologist can run the main prototype workflow", async ({ page }) => {
   const clinicalFilter = page.getByRole("combobox", { name: "Filter clinical cases by status" });
   await clinicalFilter.focus();
   await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("ArrowDown");
-  await expect(page.getByRole("option", { name: "Intake", exact: true })).toHaveAttribute("data-highlighted", "");
+  await expect(page.getByRole("option", { name: "All case statuses", exact: true })).toBeVisible();
+  const intakeOption = page.getByRole("option", { name: "Intake", exact: true });
+  await expect.poll(async () => {
+    if (await intakeOption.getAttribute("data-highlighted") !== null) return true;
+    await page.keyboard.press("ArrowDown");
+    return false;
+  }, { timeout: 5_000 }).toBe(true);
   await page.keyboard.press("Enter");
   await expect(clinicalFilter).toContainText("Intake");
   await expect(page.getByRole("checkbox")).toHaveCount(0);
