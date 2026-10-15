@@ -3,24 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { ACCESS_TOKEN_COOKIE, CSRF_COOKIE } from "@/lib/server/auth-cookies";
 import { verifyAccessToken, type VerifiedAccessTokenClaims } from "@/lib/server/jwt";
 import type { Role } from "@/lib/types";
-
-type ServiceName = "auth" | "patient" | "appointment" | "clinical" | "notification";
-
-const serviceUrls: Record<ServiceName, string> = {
-  auth: process.env.AUTH_SERVICE_URL ?? "http://localhost:8081",
-  patient: process.env.PATIENT_SERVICE_URL ?? "http://localhost:8082",
-  appointment: process.env.APPOINTMENT_SERVICE_URL ?? "http://localhost:8083",
-  clinical: process.env.CLINICAL_SERVICE_URL ?? "http://localhost:8085",
-  notification: process.env.NOTIFICATION_SERVICE_URL ?? "http://localhost:8084",
-};
-
-const serviceHealthUrls: Record<ServiceName, string> = {
-  auth: process.env.AUTH_SERVICE_HEALTH_URL ?? serviceUrls.auth,
-  patient: process.env.PATIENT_SERVICE_HEALTH_URL ?? serviceUrls.patient,
-  appointment: process.env.APPOINTMENT_SERVICE_HEALTH_URL ?? serviceUrls.appointment,
-  clinical: process.env.CLINICAL_SERVICE_HEALTH_URL ?? serviceUrls.clinical,
-  notification: process.env.NOTIFICATION_SERVICE_HEALTH_URL ?? serviceUrls.notification,
-};
+import { backendUrl, backendHealthUrl, type ServiceName } from "@/lib/server/backend-url";
 
 type ProxyOptions = {
   auth?: boolean;
@@ -84,7 +67,7 @@ export async function proxyRequest(
 
   try {
     const body = await request.text();
-    const response = await fetch(`${serviceUrls[service]}${path}`, {
+    const response = await fetch(backendUrl(service, path), {
       method: request.method,
       headers: backendHeaders(request, token),
       body: body.length > 0 ? body : undefined,
@@ -93,7 +76,7 @@ export async function proxyRequest(
     });
 
     if (response.ok && response.status !== 204 && options.project) {
-      return NextResponse.json(options.project(await readJson(response), verifiedPrincipal), { status: response.status });
+      return NextResponse.json(options.project(await readJson(response), verifiedPrincipal), { status: response.status, headers: responseHeaders(response) });
     }
     return normalizeBackendResponse(response);
   } catch {
@@ -102,17 +85,17 @@ export async function proxyRequest(
 }
 
 export async function backendGet(service: ServiceName, path: string, token?: string) {
-  return backendGetFromBaseUrl(serviceUrls[service], path, token);
+  return backendGetFromUrl(() => backendUrl(service, path), token);
 }
 
 export async function backendHealthGet(service: ServiceName, path: string, token?: string) {
-  return backendGetFromBaseUrl(serviceHealthUrls[service], path, token);
+  return backendGetFromUrl(() => backendHealthUrl(service, path), token);
 }
 
-async function backendGetFromBaseUrl(baseUrl: string, path: string, token?: string) {
+async function backendGetFromUrl(url: () => string, token?: string) {
   const started = performance.now();
   try {
-    const response = await fetch(`${baseUrl}${path}`, {
+    const response = await fetch(url(), {
       method: "GET",
       headers: backendHeaders(undefined, token),
       cache: "no-store",
@@ -161,17 +144,26 @@ function backendHeaders(request?: NextRequest, token?: string): HeadersInit {
 
 async function normalizeBackendResponse(response: Response) {
   const payload = await readJson(response);
+  const forwardedHeaders = responseHeaders(response);
   if (!response.ok) {
-    return jsonError(
-      response.status,
-      safeMessage(payload, response.status),
-      sanitizeProblemFields(payload)
+    return NextResponse.json<ApiError>(
+      { status: response.status, message: safeMessage(payload, response.status), ...sanitizeProblemFields(payload) },
+      { status: response.status, headers: forwardedHeaders }
     );
   }
   if (response.status === 204) {
-    return new NextResponse(null, { status: 204 });
+    return new NextResponse(null, { status: 204, headers: forwardedHeaders });
   }
-  return NextResponse.json(payload ?? {}, { status: response.status });
+  return NextResponse.json(payload ?? {}, { status: response.status, headers: forwardedHeaders });
+}
+
+function responseHeaders(response: Response) {
+  const forwardedHeaders = new Headers();
+  for (const name of ["retry-after", "x-correlation-id"]) {
+    const value = response.headers.get(name);
+    if (value) forwardedHeaders.set(name, value);
+  }
+  return forwardedHeaders;
 }
 
 async function readJson(response: Response) {
@@ -209,6 +201,8 @@ function safeMessage(payload: unknown, status: number) {
   if (status === 403) {
     return "You are not allowed to perform this action";
   }
+  if (status === 429) return "Too many requests. Please try again shortly.";
+  if (status >= 500) return "The service is temporarily unavailable";
   return "The request could not be completed";
 }
 
