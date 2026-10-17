@@ -19,6 +19,10 @@ spring:
     port: ${SPRING_RABBITMQ_PORT:5672}
     username: ${SPRING_RABBITMQ_USERNAME:clinicflow}
     password: ${SPRING_RABBITMQ_PASSWORD:clinicflow}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
 
 management:
   metrics:
@@ -48,3 +52,12 @@ clinicflow:
       public-key-path: ${CLINICFLOW_SECURITY_JWT_PUBLIC_KEY_PATH:}
   messaging:
     exchange: therapy.events.exchange
+  outbox:
+    enabled: ${CLINICFLOW_OUTBOX_ENABLED:true}
+    poll-interval: ${CLINICFLOW_OUTBOX_POLL_INTERVAL:1s}
+    batch-size: ${CLINICFLOW_OUTBOX_BATCH_SIZE:20}
+    confirm-timeout: ${CLINICFLOW_OUTBOX_CONFIRM_TIMEOUT:5s}
+    retry-initial: ${CLINICFLOW_OUTBOX_RETRY_INITIAL:1s}
+    retry-max: ${CLINICFLOW_OUTBOX_RETRY_MAX:1m}
+    cleanup-interval: ${CLINICFLOW_OUTBOX_CLEANUP_INTERVAL:1h}
+    published-retention: ${CLINICFLOW_OUTBOX_PUBLISHED_RETENTION:7d}

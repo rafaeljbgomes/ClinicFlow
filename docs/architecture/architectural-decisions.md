@@ -247,3 +247,38 @@ The independently managed controller and application gateway releases preserve A
 service delivery. See [ADR-018](decisions/ADR-018-traefik-gateway.md) for the route contract,
 CRD lifecycle, TLS, local quotas, telemetry, and acceptance limitations. ADR-018 supersedes
 ADR-013's direct UI exposure and ADR-014's unchanged frontend service URLs.
+
+## ADR-019: Transactional Outbox for Producer Reliability
+
+Decision: patient-service and appointment-service persist outbound domain events
+to a service-local PostgreSQL outbox in the same transaction as their aggregate
+changes. Only a scheduled relay may select and publish outbox records; request
+transactions never publish directly to RabbitMQ.
+
+The relay claims one due `PENDING` or `FAILED` record per short transaction
+with `FOR UPDATE SKIP LOCKED`, allowing multiple service replicas to poll
+without concurrently publishing the same claimed row. It sends the stored JSON
+payload without re-encoding it, restores the original event id and correlation
+id as message metadata, and marks the record `PUBLISHED` only after a correlated
+publisher acknowledgement with no mandatory return.
+
+Rationale: an aggregate write and a direct broker send cannot be committed
+atomically. The outbox makes the database transaction the durable handoff:
+serialization or persistence failure rolls back both changes, while RabbitMQ
+unavailability does not fail an otherwise valid API transaction. Publisher
+confirms and mandatory returns distinguish broker acceptance from negative
+acknowledgements and unroutable messages.
+
+Consequences: delivery is at least once, not exactly once. A broker acknowledgement
+followed by a database status-update failure can cause the relay to publish the
+same event again. The original event id remains stable across retries, and the
+existing notification and clinical persistence uniqueness constraints suppress
+duplicate effects.
+
+Failed records remain retryable indefinitely with exponential backoff from one
+second to one minute. Each polling cycle processes at most 20 records.
+`PUBLISHED` records are retained for seven days and removed by an hourly cleanup;
+pending and failed records are never removed by retention cleanup. Backlog and
+failure metrics plus structured event-id, routing-key, retry-count, and outcome
+logs make the relay observable. This implementation is intentionally duplicated
+inside the two bounded services instead of creating a shared runtime module.
