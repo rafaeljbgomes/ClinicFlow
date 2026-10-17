@@ -119,6 +119,24 @@ class PatientApiIT {
     }
 
     @Test
+    void replacesOversizedCorrelationIdInsteadOfRollingBackTheWrite() {
+        HttpHeaders headers = bearer("psychologist-token");
+        headers.set("X-Correlation-Id", "a".repeat(129));
+        var created = http.exchange("/patients", HttpMethod.POST, new HttpEntity<>(Map.of(
+                "email", "correlation@example.com",
+                "fullName", "Correlation Patient",
+                "phone", "+351912345678",
+                "contactPreference", "EMAIL",
+                "consentStatus", "GRANTED"), headers), Map.class);
+
+        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        String correlationId = created.getHeaders().getFirst("X-Correlation-Id");
+        assertThat(UUID.fromString(correlationId)).isNotNull();
+        assertThat(jdbc.queryForObject("SELECT correlation_id FROM outbox_events", String.class))
+                .isEqualTo(correlationId);
+    }
+
+    @Test
     void enforcesValidationAuthenticationAndRoleAtTheFunctionalBoundary() {
         assertThat(http.getForEntity("/patients", Map.class).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
         var forbidden = http.exchange("/patients", HttpMethod.GET,

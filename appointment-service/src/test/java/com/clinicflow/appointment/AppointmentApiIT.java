@@ -112,6 +112,22 @@ class AppointmentApiIT {
     }
 
     @Test
+    void replacesOversizedCorrelationIdInsteadOfRollingBackTheWrite() {
+        HttpHeaders headers = bearer("psychologist-token");
+        headers.set("X-Correlation-Id", "a".repeat(129));
+        var created = http.exchange("/appointments", HttpMethod.POST, new HttpEntity<>(Map.of(
+                "patientId", PATIENT_ID.toString(),
+                "scheduledAt", Instant.now().plus(3, ChronoUnit.DAYS).toString(),
+                "type", "ONLINE"), headers), Map.class);
+
+        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        String correlationId = created.getHeaders().getFirst("X-Correlation-Id");
+        assertThat(UUID.fromString(correlationId)).isNotNull();
+        assertThat(jdbc.queryForObject("SELECT correlation_id FROM outbox_events", String.class))
+                .isEqualTo(correlationId);
+    }
+
+    @Test
     void rejectsPastDatesMissingAuthenticationAndWrongRoles() {
         var invalid = exchange("/appointments", HttpMethod.POST, Map.of(
                 "patientId", PATIENT_ID.toString(),
