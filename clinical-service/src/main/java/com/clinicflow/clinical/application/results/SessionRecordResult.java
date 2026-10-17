@@ -11,5 +11,6 @@ public record SessionRecordResult(UUID id, UUID clinicalCaseId, UUID psychologis
                                   UUID appointmentId, Instant sessionDate, SessionModality modality,
                                   int durationMinutes, AttendanceStatus attendanceStatus, NoteStatus noteStatus,
                                   String summary, String focusAreas, String interventions, String homework,
-                                  String nextSteps, Instant createdAt, Instant updatedAt) {
+                                  String nextSteps, Instant createdAt, Instant updatedAt,
+                                  Instant signedAt, UUID signedBy) {
 }

@@ -3,6 +3,9 @@ package com.clinicflow.clinical.adapters.inbound.rest;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import com.clinicflow.clinical.domain.InvalidNoteTransitionException;
+import com.clinicflow.clinical.domain.SessionRecordNotSignableException;
+import com.clinicflow.clinical.domain.SignedSessionRecordException;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.HttpStatus;
@@ -36,6 +39,16 @@ class ApiProblemContractTest {
                 HttpStatus.METHOD_NOT_ALLOWED, "method_not_allowed");
         assertProblem(handler.unsupportedMediaType(new HttpMediaTypeNotSupportedException("text/plain")),
                 HttpStatus.UNSUPPORTED_MEDIA_TYPE, "unsupported_media_type");
+    }
+
+    @Test
+    void mapsSignedNoteRulesToStableProblemCodes() {
+        assertProblem(handler.signedSessionRecord(new SignedSessionRecordException()),
+                HttpStatus.CONFLICT, "session_record_signed");
+        assertProblem(handler.sessionRecordNotSignable(new SessionRecordNotSignableException()),
+                HttpStatus.CONFLICT, "session_record_not_signable");
+        assertProblem(handler.invalidNoteTransition(new InvalidNoteTransitionException()),
+                HttpStatus.BAD_REQUEST, "invalid_note_transition");
     }
 
     @Test

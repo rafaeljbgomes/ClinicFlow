@@ -138,8 +138,12 @@ public class DemoDataBootstrap implements ApplicationRunner {
         }
     }
 
+    // Session records are only inserted once: signed notes are locked in the database, and notes edited or signed
+    // in the demo must survive a restart.
     private void seedSessionRecords(List<ClinicalCase> cases, Instant now) {
-        sessionRecords.save(SessionRecord.fromCompletedAppointment(
+        Instant signedSessionDate = now.minus(10, ChronoUnit.DAYS);
+        Instant signedAt = signedSessionDate.plus(2, ChronoUnit.HOURS);
+        saveIfAbsent(SessionRecord.fromCompletedAppointment(
                 new SessionRecordId(uuid("33000000-0000-4000-8000-000000000001")),
                 cases.get(2).id(),
                 new PsychologistId(PSYCHOLOGIST_SOFIA),
@@ -150,13 +154,13 @@ public class DemoDataBootstrap implements ApplicationRunner {
                 50,
                 now
         ));
-        sessionRecords.save(SessionRecord.rehydrate(
+        saveIfAbsent(SessionRecord.rehydrate(
                 new SessionRecordId(uuid("33000000-0000-4000-8000-000000000002")),
                 cases.get(0).id(),
                 new PsychologistId(PSYCHOLOGIST_SOFIA),
                 new PatientId(patient(1)),
                 null,
-                now.minus(10, ChronoUnit.DAYS),
+                signedSessionDate,
                 SessionModality.IN_PERSON,
                 50,
                 AttendanceStatus.ATTENDED,
@@ -166,10 +170,12 @@ public class DemoDataBootstrap implements ApplicationRunner {
                 "Psicoeducacao, respiracao diafragmatica, planeamento de exposicao gradual",
                 "Registar situacoes de ansiedade e resposta fisiologica.",
                 "Rever registos e introduzir exposicoes breves.",
-                now.minus(10, ChronoUnit.DAYS),
-                now
+                signedSessionDate,
+                signedAt,
+                signedAt,
+                new PsychologistId(PSYCHOLOGIST_SOFIA)
         ));
-        sessionRecords.save(SessionRecord.manual(
+        saveIfAbsent(SessionRecord.manual(
                 new SessionRecordId(uuid("33000000-0000-4000-8000-000000000003")),
                 cases.get(3),
                 null,
@@ -184,7 +190,7 @@ public class DemoDataBootstrap implements ApplicationRunner {
                 "Confirmar disponibilidade antes da proxima consulta.",
                 now
         ));
-        sessionRecords.save(SessionRecord.fromCompletedAppointment(
+        saveIfAbsent(SessionRecord.fromCompletedAppointment(
                 new SessionRecordId(uuid("33000000-0000-4000-8000-000000000004")),
                 cases.get(5).id(),
                 new PsychologistId(PSYCHOLOGIST_MIGUEL),
@@ -195,7 +201,7 @@ public class DemoDataBootstrap implements ApplicationRunner {
                 60,
                 now
         ));
-        sessionRecords.save(SessionRecord.rehydrate(
+        saveIfAbsent(SessionRecord.rehydrate(
                 new SessionRecordId(uuid("33000000-0000-4000-8000-000000000005")),
                 cases.get(1).id(),
                 new PsychologistId(PSYCHOLOGIST_SOFIA),
@@ -212,8 +218,16 @@ public class DemoDataBootstrap implements ApplicationRunner {
                 null,
                 "Reagendar e confirmar plano de continuidade.",
                 now.minus(2, ChronoUnit.DAYS),
-                now
+                now,
+                null,
+                null
         ));
+    }
+
+    private void saveIfAbsent(SessionRecord sessionRecord) {
+        if (sessionRecords.findById(sessionRecord.id()).isEmpty()) {
+            sessionRecords.save(sessionRecord);
+        }
     }
 
     private static ClinicalCase clinicalCase(int suffix, UUID psychologistId, UUID patientId, String concern,
