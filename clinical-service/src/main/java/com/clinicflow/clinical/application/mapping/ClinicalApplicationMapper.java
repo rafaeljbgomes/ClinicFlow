@@ -46,6 +46,7 @@ public abstract class ClinicalApplicationMapper {
                 session.appointmentId().map(id -> id.value()).orElse(null), session.sessionDate(),
                 session.modality(), session.durationMinutes(), session.attendanceStatus(), session.noteStatus(),
                 session.summary(), session.focusAreas(), session.interventions(), session.homework(),
-                session.nextSteps(), session.createdAt(), session.updatedAt());
+                session.nextSteps(), session.createdAt(), session.updatedAt(), session.signedAt().orElse(null),
+                session.signedBy().map(id -> id.value()).orElse(null));
     }
 }

@@ -164,6 +164,31 @@ test("psychologist can run the main prototype workflow", async ({ page }) => {
   });
   await expect(page.locator("main")).toContainText(sessionSummary, { timeout: 30_000 });
 
+  const recordActions = page.getByRole("button", { name: "Session record actions" });
+  await expect(recordActions).toHaveCount(1);
+  await recordActions.click();
+  await expect(page.getByRole("menuitem", { name: "Edit" })).toBeVisible();
+  await page.getByRole("menuitem", { name: "Sign note" }).click();
+  const signDialog = page.getByRole("dialog", { name: "Sign session note?" });
+  await expect(signDialog).toContainText("Signed notes can't be edited");
+  await expect(signDialog).toContainText(sessionSummary);
+  await signDialog.getByRole("button", { name: "Sign note" }).click();
+  await expect(signDialog).toBeHidden({ timeout: 30_000 });
+  await expect(page.locator("main")).toContainText("Signed by ClinicFlow Demo Psychologist", { timeout: 30_000 });
+
+  await recordActions.click();
+  await expect(page.getByRole("menuitem", { name: "View note" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Edit" })).toHaveCount(0);
+  await expect(page.getByRole("menuitem", { name: "Sign note" })).toHaveCount(0);
+  await page.getByRole("menuitem", { name: "View note" }).click();
+  const noteDialog = page.getByRole("dialog", { name: "Session note" });
+  await expect(noteDialog).toContainText(sessionSummary);
+  await expect(noteDialog).toContainText("read-only");
+  await expect(noteDialog.getByRole("textbox")).toHaveCount(0);
+  await expect(noteDialog.getByRole("combobox")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(noteDialog).toBeHidden();
+
   const historyHref = await page
     .locator('a[href$="/clinical-history"]')
     .first()
@@ -173,6 +198,28 @@ test("psychologist can run the main prototype workflow", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Clinical history" })).toBeVisible();
   await expect(page.locator("main")).toContainText(therapeuticFocus);
   await expect(page.locator("main")).toContainText(sessionSummary);
+  await expect(page.locator("main")).toContainText("Signed by the treating psychologist");
+
+  const patientId = historyHref!.split("/").at(-2)!;
+  const lockedEdit = await page.evaluate(async (id) => {
+    const history = await fetch(`/api/patients/${id}/clinical-history`).then((response) => response.json());
+    const record = history.sessionRecords[0];
+    const csrf = document.cookie.split("; ").find((entry) => entry.startsWith("clinicflow_csrf="))?.split("=")[1] ?? "";
+    const response = await fetch(`/api/session-records/${record.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
+      body: JSON.stringify({
+        sessionDate: record.sessionDate,
+        modality: record.modality,
+        durationMinutes: record.durationMinutes,
+        attendanceStatus: record.attendanceStatus,
+        noteStatus: "DRAFT",
+        summary: "Rewritten after signing",
+      }),
+    });
+    return { status: response.status, code: (await response.json()).code, noteStatus: record.noteStatus };
+  }, patientId);
+  expect(lockedEdit).toEqual({ status: 409, code: "session_record_signed", noteStatus: "SIGNED" });
 
   await page.getByRole("link", { name: "Messages" }).click();
   await expect(page.locator("main")).toContainText("Patient profile created");

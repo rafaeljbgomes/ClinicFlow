@@ -156,6 +156,96 @@ class ClinicalApiIT {
                 .isEqualTo(HttpStatus.BAD_REQUEST);
     }
 
+    @Test
+    void signsDraftNotesOnceThroughTheSignActionAndLocksThem() {
+        String caseId = createCase("psychologist-token", PATIENT_ID);
+        String sessionId = createSession(caseId, "Initial formulation");
+
+        var signedThroughEdit = exchange("/session-records/" + sessionId, HttpMethod.PATCH,
+                sessionUpdate("SIGNED", "Initial formulation"));
+        assertProblem(signedThroughEdit, HttpStatus.BAD_REQUEST, "invalid_note_transition");
+
+        var foreignSign = http.exchange("/session-records/" + sessionId + "/sign", HttpMethod.POST,
+                new HttpEntity<>(null, bearer("other-psychologist-token")), Map.class);
+        assertThat(foreignSign.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(storedSession(sessionId)).containsEntry("note_status", "DRAFT").containsEntry("signed_at", null);
+
+        var signed = exchange("/session-records/" + sessionId + "/sign", HttpMethod.POST, null);
+        assertThat(signed.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(signed.getBody()).containsEntry("noteStatus", "SIGNED")
+                .containsEntry("signedBy", PSYCHOLOGIST_ID.toString());
+        assertThat(signed.getBody().get("signedAt")).isNotNull();
+        Map<String, Object> signedRow = storedSession(sessionId);
+        assertThat(signedRow).containsEntry("note_status", "SIGNED").containsEntry("signed_by", PSYCHOLOGIST_ID);
+
+        assertProblem(exchange("/session-records/" + sessionId + "/sign", HttpMethod.POST, null),
+                HttpStatus.CONFLICT, "session_record_signed");
+        assertProblem(exchange("/session-records/" + sessionId, HttpMethod.PATCH,
+                sessionUpdate("DRAFT", "Rewritten after signing")), HttpStatus.CONFLICT, "session_record_signed");
+        assertProblem(exchange("/session-records/" + sessionId, HttpMethod.PATCH,
+                sessionUpdate("PENDING_NOTE", "Initial formulation")), HttpStatus.CONFLICT, "session_record_signed");
+        assertThat(storedSession(sessionId)).isEqualTo(signedRow);
+
+        var history = exchange("/patients/" + PATIENT_ID + "/clinical-history", HttpMethod.GET, null);
+        Map<?, ?> listed = (Map<?, ?>) ((List<?>) history.getBody().get("sessionRecords")).getFirst();
+        assertThat(listed.get("noteStatus")).isEqualTo("SIGNED");
+        assertThat(listed.get("signedBy")).isEqualTo(PSYCHOLOGIST_ID.toString());
+    }
+
+    @Test
+    void rejectsSigningNotesThatAreNotDraftsWithASummary() {
+        String caseId = createCase("psychologist-token", PATIENT_ID);
+        String pendingId = createSession(caseId, null);
+        assertProblem(exchange("/session-records/" + pendingId + "/sign", HttpMethod.POST, null),
+                HttpStatus.CONFLICT, "session_record_not_signable");
+
+        assertThat(exchange("/session-records/" + pendingId, HttpMethod.PATCH, sessionUpdate("DRAFT", null))
+                .getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertProblem(exchange("/session-records/" + pendingId + "/sign", HttpMethod.POST, null),
+                HttpStatus.CONFLICT, "session_record_not_signable");
+        assertThat(storedSession(pendingId)).containsEntry("note_status", "DRAFT").containsEntry("signed_at", null);
+
+        assertThat(exchange("/session-records/" + UUID.randomUUID() + "/sign", HttpMethod.POST, null)
+                .getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    private String createSession(String caseId, String summary) {
+        Map<String, Object> body = new java.util.HashMap<>(Map.of(
+                "sessionDate", Instant.now().toString(),
+                "modality", "ONLINE",
+                "durationMinutes", 50,
+                "attendanceStatus", "ATTENDED"));
+        if (summary != null) {
+            body.put("summary", summary);
+        }
+        var session = exchange("/clinical-cases/" + caseId + "/session-records", HttpMethod.POST, body);
+        assertThat(session.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        return session.getBody().get("id").toString();
+    }
+
+    private Map<String, Object> sessionUpdate(String noteStatus, String summary) {
+        Map<String, Object> body = new java.util.HashMap<>(Map.of(
+                "sessionDate", Instant.now().toString(),
+                "modality", "IN_PERSON",
+                "durationMinutes", 45,
+                "attendanceStatus", "ATTENDED",
+                "noteStatus", noteStatus));
+        if (summary != null) {
+            body.put("summary", summary);
+        }
+        return body;
+    }
+
+    private Map<String, Object> storedSession(String sessionId) {
+        return jdbc.queryForMap("SELECT * FROM session_records WHERE id = ?::uuid", sessionId);
+    }
+
+    private void assertProblem(org.springframework.http.ResponseEntity<Map> response, HttpStatus status,
+                               String code) {
+        assertThat(response.getStatusCode()).isEqualTo(status);
+        assertThat(response.getBody()).containsEntry("code", code);
+    }
+
     private String createCase(String token, UUID patientId) {
         var response = http.exchange("/clinical-cases", HttpMethod.POST, new HttpEntity<>(Map.of(
                 "patientId", patientId.toString(), "presentingConcern", "Anxiety and avoidance"),

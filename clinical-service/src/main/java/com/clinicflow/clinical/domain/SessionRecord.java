@@ -22,18 +22,25 @@ public final class SessionRecord {
     private String nextSteps;
     private final Instant createdAt;
     private Instant updatedAt;
+    private Instant signedAt;
+    private PsychologistId signedBy;
 
     private SessionRecord(SessionRecordId id, ClinicalCaseId clinicalCaseId, PsychologistId psychologistId,
                           PatientId patientId, AppointmentId appointmentId, Instant sessionDate,
                           SessionModality modality, int durationMinutes, AttendanceStatus attendanceStatus,
                           NoteStatus noteStatus, String summary, String focusAreas, String interventions,
-                          String homework, String nextSteps, Instant createdAt, Instant updatedAt) {
+                          String homework, String nextSteps, Instant createdAt, Instant updatedAt,
+                          Instant signedAt, PsychologistId signedBy) {
         if (id == null || psychologistId == null || patientId == null || sessionDate == null
                 || modality == null || attendanceStatus == null || noteStatus == null
                 || createdAt == null || updatedAt == null) {
             throw new IllegalArgumentException("Session record required fields are missing");
         }
         requireDuration(durationMinutes);
+        boolean signed = noteStatus == NoteStatus.SIGNED;
+        if (signed != (signedAt != null) || signed != (signedBy != null)) {
+            throw new IllegalArgumentException("Session record signature is inconsistent with its note status");
+        }
         this.id = id;
         this.clinicalCaseId = clinicalCaseId;
         this.psychologistId = psychologistId;
@@ -51,6 +58,8 @@ public final class SessionRecord {
         this.nextSteps = TextFields.optional(nextSteps, 1000, "Session next steps are invalid");
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
+        this.signedAt = signedAt;
+        this.signedBy = signedBy;
     }
 
     public static SessionRecord manual(SessionRecordId id, ClinicalCase clinicalCase, AppointmentId appointmentId,
@@ -60,7 +69,7 @@ public final class SessionRecord {
         NoteStatus noteStatus = summary == null || summary.isBlank() ? NoteStatus.PENDING_NOTE : NoteStatus.DRAFT;
         return new SessionRecord(id, clinicalCase.id(), clinicalCase.psychologistId(), clinicalCase.patientId(),
                 appointmentId, sessionDate, modality, durationMinutes, attendanceStatus, noteStatus, summary,
-                focusAreas, interventions, homework, nextSteps, now, now);
+                focusAreas, interventions, homework, nextSteps, now, now, null, null);
     }
 
     public static SessionRecord fromCompletedAppointment(SessionRecordId id, ClinicalCaseId clinicalCaseId,
@@ -69,7 +78,7 @@ public final class SessionRecord {
                                                         SessionModality modality, int durationMinutes, Instant now) {
         return new SessionRecord(id, clinicalCaseId, psychologistId, patientId, appointmentId, sessionDate,
                 modality, durationMinutes, AttendanceStatus.ATTENDED, NoteStatus.PENDING_NOTE,
-                null, null, null, null, null, now, now);
+                null, null, null, null, null, now, now, null, null);
     }
 
     public static SessionRecord rehydrate(SessionRecordId id, ClinicalCaseId clinicalCaseId,
@@ -77,19 +86,25 @@ public final class SessionRecord {
                                           AppointmentId appointmentId, Instant sessionDate, SessionModality modality,
                                           int durationMinutes, AttendanceStatus attendanceStatus, NoteStatus noteStatus,
                                           String summary, String focusAreas, String interventions, String homework,
-                                          String nextSteps, Instant createdAt, Instant updatedAt) {
+                                          String nextSteps, Instant createdAt, Instant updatedAt,
+                                          Instant signedAt, PsychologistId signedBy) {
         return new SessionRecord(id, clinicalCaseId, psychologistId, patientId, appointmentId, sessionDate,
                 modality, durationMinutes, attendanceStatus, noteStatus, summary, focusAreas, interventions,
-                homework, nextSteps, createdAt, updatedAt);
+                homework, nextSteps, createdAt, updatedAt, signedAt, signedBy);
     }
 
+    // Edits only move a note between PENDING_NOTE and DRAFT; signing is a separate, one-way action.
     public SessionRecord update(ClinicalCaseId clinicalCaseId, Instant sessionDate, SessionModality modality,
                                 int durationMinutes, AttendanceStatus attendanceStatus, NoteStatus noteStatus,
                                 String summary, String focusAreas, String interventions, String homework,
                                 String nextSteps, Instant now) {
+        requireUnsigned();
         if (now == null || now.isBefore(createdAt) || sessionDate == null || modality == null
                 || attendanceStatus == null || noteStatus == null) {
             throw new IllegalArgumentException("Session record update fields are missing");
+        }
+        if (noteStatus == NoteStatus.SIGNED) {
+            throw new InvalidNoteTransitionException();
         }
         requireDuration(durationMinutes);
         this.clinicalCaseId = clinicalCaseId;
@@ -105,6 +120,30 @@ public final class SessionRecord {
         this.nextSteps = TextFields.optional(nextSteps, 1000, "Session next steps are invalid");
         this.updatedAt = now;
         return this;
+    }
+
+    public SessionRecord sign(PsychologistId signer, Instant now) {
+        requireUnsigned();
+        if (signer == null || now == null || now.isBefore(createdAt)) {
+            throw new IllegalArgumentException("Session record signature fields are missing");
+        }
+        if (!signer.equals(psychologistId)) {
+            throw new IllegalArgumentException("Only the treating psychologist can sign a session note");
+        }
+        if (noteStatus != NoteStatus.DRAFT || summary == null) {
+            throw new SessionRecordNotSignableException();
+        }
+        this.noteStatus = NoteStatus.SIGNED;
+        this.signedAt = now;
+        this.signedBy = signer;
+        this.updatedAt = now;
+        return this;
+    }
+
+    private void requireUnsigned() {
+        if (noteStatus == NoteStatus.SIGNED) {
+            throw new SignedSessionRecordException();
+        }
     }
 
     private static void requireDuration(int value) {
@@ -134,6 +173,10 @@ public final class SessionRecord {
     public String nextSteps() { return nextSteps; }
     public Instant createdAt() { return createdAt; }
     public Instant updatedAt() { return updatedAt; }
+    public Optional<Instant> signedAt() { return Optional.ofNullable(signedAt); }
+    public Optional<PsychologistId> signedBy() {
+        return Optional.ofNullable(signedBy).map(value -> new PsychologistId(value.value()));
+    }
 
     @Override
     public boolean equals(Object other) {
