@@ -60,6 +60,12 @@ class ClinicalDomainTest {
         assertThatThrownBy(() -> CarePlan.create(new CarePlanId(UUID.randomUUID()), clinicalCase,
                 "Focus", "Weekly", LocalDate.now(), List.of(), NOW))
                 .isInstanceOf(IllegalArgumentException.class);
+        CareGoal duplicate = new CareGoal(goal.id(), "Same id", null, GoalStatus.NOT_STARTED, 0);
+        assertThatThrownBy(() -> CarePlan.create(new CarePlanId(UUID.randomUUID()), clinicalCase,
+                "Focus", "Weekly", LocalDate.now(), List.of(goal, duplicate), NOW))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> plan.replace("Focus", "Weekly", LocalDate.now(), List.of(goal, duplicate),
+                NOW.plusSeconds(60))).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

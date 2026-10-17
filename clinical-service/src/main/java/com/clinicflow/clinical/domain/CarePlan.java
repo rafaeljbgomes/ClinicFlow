@@ -3,6 +3,7 @@ package com.clinicflow.clinical.domain;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.HashSet;
 import java.util.Objects;
 
 public final class CarePlan {
@@ -34,7 +35,7 @@ public final class CarePlan {
         this.therapeuticFocus = TextFields.required(therapeuticFocus, 1000, "Therapeutic focus is invalid");
         this.plannedFrequency = TextFields.required(plannedFrequency, 120, "Planned frequency is invalid");
         this.reviewDate = reviewDate;
-        this.goals = List.copyOf(goals);
+        this.goals = distinctGoals(goals);
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
     }
@@ -64,9 +65,16 @@ public final class CarePlan {
         this.therapeuticFocus = TextFields.required(therapeuticFocus, 1000, "Therapeutic focus is invalid");
         this.plannedFrequency = TextFields.required(plannedFrequency, 120, "Planned frequency is invalid");
         this.reviewDate = reviewDate;
-        this.goals = List.copyOf(goals);
+        this.goals = distinctGoals(goals);
         this.updatedAt = now;
         return this;
+    }
+
+    private static List<CareGoal> distinctGoals(List<CareGoal> goals) {
+        if (new HashSet<>(goals.stream().map(CareGoal::id).toList()).size() != goals.size()) {
+            throw new IllegalArgumentException("Care plan goals must have unique ids");
+        }
+        return List.copyOf(goals);
     }
 
     public CarePlanId id() { return new CarePlanId(id.value()); }
