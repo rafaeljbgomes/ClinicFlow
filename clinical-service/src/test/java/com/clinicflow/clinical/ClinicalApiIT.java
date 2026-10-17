@@ -36,6 +36,8 @@ import static org.mockito.Mockito.when;
 class ClinicalApiIT {
     private static final UUID PSYCHOLOGIST_ID = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     private static final UUID PATIENT_ID = UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    private static final UUID OTHER_PSYCHOLOGIST_ID = UUID.fromString("dddddddd-dddd-dddd-dddd-dddddddddddd");
+    private static final UUID OTHER_PATIENT_ID = UUID.fromString("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee");
 
     @Container
     @ServiceConnection(name = "postgres")
@@ -52,8 +54,10 @@ class ClinicalApiIT {
     void cleanDatabaseAndConfigureSecurity() {
         jdbc.execute("TRUNCATE TABLE session_records, care_goals, care_plans, clinical_cases, practice_profiles CASCADE");
         reset(jwtDecoder);
-        when(jwtDecoder.decode("psychologist-token")).thenReturn(jwt("PSYCHOLOGIST"));
-        when(jwtDecoder.decode("patient-token")).thenReturn(jwt("PATIENT"));
+        when(jwtDecoder.decode("psychologist-token")).thenReturn(jwt("psychologist-token", "PSYCHOLOGIST", PSYCHOLOGIST_ID));
+        when(jwtDecoder.decode("patient-token")).thenReturn(jwt("patient-token", "PATIENT", PSYCHOLOGIST_ID));
+        when(jwtDecoder.decode("other-psychologist-token"))
+                .thenReturn(jwt("other-psychologist-token", "PSYCHOLOGIST", OTHER_PSYCHOLOGIST_ID));
     }
 
     @Test
@@ -113,6 +117,68 @@ class ClinicalApiIT {
         assertThat(forbidden.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
     }
 
+    @Test
+    void rejectsCareGoalIdsOwnedByAnotherPsychologistsPlan() {
+        String ownerCaseId = createCase("psychologist-token", PATIENT_ID);
+        var ownerPlan = putCarePlan("psychologist-token", ownerCaseId, List.of(Map.of(
+                "description", "Owner goal", "status", "IN_PROGRESS", "progressPercentage", 30)));
+        assertThat(ownerPlan.getStatusCode()).isEqualTo(HttpStatus.OK);
+        String ownerPlanId = ownerPlan.getBody().get("id").toString();
+        String ownerGoalId = goalIds(ownerPlan.getBody()).getFirst();
+
+        String attackerCaseId = createCase("other-psychologist-token", OTHER_PATIENT_ID);
+        Map<String, Object> hijack = Map.of("id", ownerGoalId, "description", "Hijacked goal",
+                "status", "ACHIEVED", "progressPercentage", 100);
+        assertThat(putCarePlan("other-psychologist-token", attackerCaseId, List.of(hijack)).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(putCarePlan("other-psychologist-token", attackerCaseId, List.of(Map.of(
+                "description", "Attacker goal", "status", "NOT_STARTED", "progressPercentage", 0)))
+                .getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(putCarePlan("other-psychologist-token", attackerCaseId, List.of(hijack)).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+
+        Map<String, Object> storedGoal = jdbc.queryForMap(
+                "SELECT care_plan_id, description, progress_percentage FROM care_goals WHERE id = ?::uuid",
+                ownerGoalId);
+        assertThat(storedGoal.get("care_plan_id").toString()).isEqualTo(ownerPlanId);
+        assertThat(storedGoal).containsEntry("description", "Owner goal").containsEntry("progress_percentage", 30);
+
+        var ownerUpdate = putCarePlan("psychologist-token", ownerCaseId, List.of(
+                Map.of("id", ownerGoalId, "description", "Owner goal", "status", "IN_PROGRESS",
+                        "progressPercentage", 60),
+                Map.of("description", "Second goal", "status", "NOT_STARTED", "progressPercentage", 0)));
+        assertThat(ownerUpdate.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(goalIds(ownerUpdate.getBody())).hasSize(2).first().isEqualTo(ownerGoalId);
+
+        Map<String, Object> duplicate = Map.of("id", ownerGoalId, "description", "Owner goal",
+                "status", "IN_PROGRESS", "progressPercentage", 60);
+        assertThat(putCarePlan("psychologist-token", ownerCaseId, List.of(duplicate, duplicate)).getStatusCode())
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    private String createCase(String token, UUID patientId) {
+        var response = http.exchange("/clinical-cases", HttpMethod.POST, new HttpEntity<>(Map.of(
+                "patientId", patientId.toString(), "presentingConcern", "Anxiety and avoidance"),
+                bearer(token)), Map.class);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        return response.getBody().get("id").toString();
+    }
+
+    private org.springframework.http.ResponseEntity<Map> putCarePlan(String token, String caseId,
+                                                                     List<Map<String, Object>> goals) {
+        return http.exchange("/clinical-cases/" + caseId + "/care-plan", HttpMethod.PUT, new HttpEntity<>(Map.of(
+                "therapeuticFocus", "Reduce avoidance",
+                "plannedFrequency", "Weekly",
+                "reviewDate", LocalDate.now().plusMonths(1).toString(),
+                "goals", goals), bearer(token)), Map.class);
+    }
+
+    private List<String> goalIds(Map<?, ?> carePlan) {
+        return ((List<?>) carePlan.get("goals")).stream()
+                .map(goal -> ((Map<?, ?>) goal).get("id").toString())
+                .toList();
+    }
+
     private org.springframework.http.ResponseEntity<Map> exchange(String path, HttpMethod method, Object body) {
         return http.exchange(path, method, new HttpEntity<>(body, bearer("psychologist-token")), Map.class);
     }
@@ -123,12 +189,12 @@ class ClinicalApiIT {
         return headers;
     }
 
-    private Jwt jwt(String role) {
+    private Jwt jwt(String token, String role, UUID userId) {
         Instant now = Instant.now();
-        return Jwt.withTokenValue(role.toLowerCase() + "-token")
+        return Jwt.withTokenValue(token)
                 .header("alg", "none")
                 .issuedAt(now).expiresAt(now.plusSeconds(3600))
-                .claim("userId", PSYCHOLOGIST_ID.toString())
+                .claim("userId", userId.toString())
                 .claim("role", role)
                 .build();
     }

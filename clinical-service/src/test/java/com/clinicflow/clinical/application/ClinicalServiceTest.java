@@ -26,7 +26,10 @@ import com.clinicflow.clinical.application.queries.ListClinicalCasesQuery;
 import com.clinicflow.clinical.application.queries.ListSessionRecordsQuery;
 import com.clinicflow.clinical.domain.AppointmentId;
 import com.clinicflow.clinical.domain.AttendanceStatus;
+import com.clinicflow.clinical.domain.CareGoal;
+import com.clinicflow.clinical.domain.CareGoalId;
 import com.clinicflow.clinical.domain.CarePlan;
+import com.clinicflow.clinical.domain.CarePlanId;
 import com.clinicflow.clinical.domain.ClinicalCase;
 import com.clinicflow.clinical.domain.ClinicalCaseId;
 import com.clinicflow.clinical.domain.DomainEventId;
@@ -56,6 +59,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -266,20 +270,47 @@ class ClinicalServiceTest {
     }
 
     @Test
-    void mapsExplicitGoalIdentityAndDefaultStatus() {
+    void keepsExistingGoalIdentityGeneratesNewIdsAndDefaultsStatus() {
         ClinicalCase clinicalCase = clinicalCase();
-        UUID goalId = UUID.randomUUID();
+        CareGoalId existingGoalId = new CareGoalId(UUID.randomUUID());
+        CarePlan existing = CarePlan.create(new CarePlanId(UUID.randomUUID()), clinicalCase, "Focus", "Weekly",
+                LocalDate.of(2026, 7, 1), List.of(new CareGoal(existingGoalId, "Goal", null,
+                        GoalStatus.IN_PROGRESS, 10)), NOW);
         when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(clinicalCase));
-        when(carePlans.findByClinicalCaseId(CASE_ID)).thenReturn(Optional.empty());
+        when(carePlans.findByClinicalCaseId(CASE_ID)).thenReturn(Optional.of(existing));
 
         var result = service.putCarePlan(new PutCarePlanCommand(PSYCHOLOGIST_ID, CASE_ID,
                 "Focus", "Weekly", LocalDate.of(2026, 7, 1),
-                List.of(new CareGoalInput(goalId, "Goal", null, null, 0))));
+                List.of(new CareGoalInput(existingGoalId.value(), "Goal", null, GoalStatus.ACHIEVED, 100),
+                        new CareGoalInput(null, "New goal", null, null, 0))));
 
-        assertThat(result.goals()).singleElement().satisfies(goal -> {
-            assertThat(goal.id()).isEqualTo(goalId);
-            assertThat(goal.status()).isEqualTo(GoalStatus.NOT_STARTED);
-        });
+        assertThat(result.goals()).hasSize(2);
+        assertThat(result.goals().get(0).id()).isEqualTo(existingGoalId.value());
+        assertThat(result.goals().get(1).id()).isNotNull().isNotEqualTo(existingGoalId.value());
+        assertThat(result.goals().get(1).status()).isEqualTo(GoalStatus.NOT_STARTED);
+    }
+
+    @Test
+    void rejectsGoalIdsThatDoNotBelongToTheAuthorizedPlan() {
+        ClinicalCase clinicalCase = clinicalCase();
+        UUID foreignGoalId = UUID.randomUUID();
+        when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(clinicalCase));
+        when(carePlans.findByClinicalCaseId(CASE_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.putCarePlan(new PutCarePlanCommand(PSYCHOLOGIST_ID, CASE_ID,
+                "Focus", "Weekly", LocalDate.of(2026, 7, 1),
+                List.of(new CareGoalInput(foreignGoalId, "Hijacked goal", null, null, 0)))))
+                .isInstanceOf(ClinicalAccessDeniedException.class);
+
+        CarePlan existing = CarePlan.create(new CarePlanId(UUID.randomUUID()), clinicalCase, "Focus", "Weekly",
+                LocalDate.of(2026, 7, 1), List.of(new CareGoal(new CareGoalId(UUID.randomUUID()), "Goal", null,
+                        GoalStatus.IN_PROGRESS, 10)), NOW);
+        when(carePlans.findByClinicalCaseId(CASE_ID)).thenReturn(Optional.of(existing));
+        assertThatThrownBy(() -> service.putCarePlan(new PutCarePlanCommand(PSYCHOLOGIST_ID, CASE_ID,
+                "Focus", "Weekly", LocalDate.of(2026, 7, 1),
+                List.of(new CareGoalInput(foreignGoalId, "Hijacked goal", null, null, 0)))))
+                .isInstanceOf(ClinicalAccessDeniedException.class);
+        verify(carePlans, never()).save(any());
     }
 
     @Test
