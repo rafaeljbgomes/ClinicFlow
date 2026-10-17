@@ -22,6 +22,12 @@ import {
 import { ErrorAlert } from "@/components/error-alert";
 import { LoadingTable } from "@/components/loading-table";
 import { SectionHeader } from "@/components/section-header";
+import {
+  isSignable,
+  SessionNoteDetails,
+  SignatureLine,
+  SignSessionNoteConfirmation,
+} from "@/components/session-note-signature";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -66,6 +72,7 @@ import type {
   Patient,
   PracticeProfile,
   SessionRecord,
+  UserView,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -80,10 +87,13 @@ export default function ClinicalPage() {
   const cases = useSWR<ClinicalCase[]>("/api/clinical-cases", swrFetcher);
   const patients = useSWR<Patient[]>("/api/patients", swrFetcher);
   const profile = useSWR<PracticeProfile>("/api/practice-profile", swrFetcher);
+  const currentUser = useSWR<UserView>("/api/auth/me", swrFetcher);
   const [createCaseOpen, setCreateCaseOpen] = useState(false);
   const [carePlanOpen, setCarePlanOpen] = useState(false);
   const [newSessionOpen, setNewSessionOpen] = useState(false);
   const [editingSession, setEditingSession] = useState<SessionRecord | null>(null);
+  const [signingSession, setSigningSession] = useState<SessionRecord | null>(null);
+  const [viewingSession, setViewingSession] = useState<SessionRecord | null>(null);
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
   const [goalsOpen, setGoalsOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -192,6 +202,30 @@ export default function ClinicalPage() {
     await sessions.mutate();
   }
 
+  async function signSession() {
+    if (!signingSession) return;
+    try {
+      await apiFetch<SessionRecord>(`/api/session-records/${signingSession.id}/sign`, {
+        method: "POST",
+      });
+      toast.success("Session note signed");
+    } catch (signFailure) {
+      toast.error(
+        signFailure instanceof ApiClientError
+          ? signFailure.message
+          : "The session note could not be signed"
+      );
+    }
+    setSigningSession(null);
+    await sessions.mutate();
+  }
+
+  function signerName(record: SessionRecord) {
+    return record.signedBy && record.signedBy === currentUser.data?.id
+      ? currentUser.data.fullName
+      : undefined;
+  }
+
   if (isLoading) {
     return <LoadingTable />;
   }
@@ -285,6 +319,9 @@ export default function ClinicalPage() {
             onCreateSession={() => setNewSessionOpen(true)}
             onEditCarePlan={() => setCarePlanOpen(true)}
             onEditSession={setEditingSession}
+            onSignSession={setSigningSession}
+            onViewSession={setViewingSession}
+            signerName={signerName}
             onViewAllGoals={() => setGoalsOpen(true)}
           />
         ) : (
@@ -356,7 +393,8 @@ export default function ClinicalPage() {
           <DialogHeader>
             <DialogTitle>Edit session record</DialogTitle>
             <DialogDescription>
-              Complete notes, attendance, and signature status for this session.
+              Complete notes and attendance for this session. Sign the note from the record menu once the
+              draft is final.
             </DialogDescription>
           </DialogHeader>
           {editingSession ? (
@@ -366,6 +404,40 @@ export default function ClinicalPage() {
               submitLabel="Save session record"
               onSubmit={updateSession}
             />
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!signingSession}
+        onOpenChange={(open) => !open && setSigningSession(null)}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Sign session note?</DialogTitle>
+            <DialogDescription>
+              Signed notes can&apos;t be edited or returned to draft. Check the note before signing.
+            </DialogDescription>
+          </DialogHeader>
+          {signingSession ? (
+            <SignSessionNoteConfirmation record={signingSession} onConfirm={signSession} />
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!viewingSession}
+        onOpenChange={(open) => !open && setViewingSession(null)}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Session note</DialogTitle>
+            <DialogDescription>
+              This note is signed and read-only.
+            </DialogDescription>
+          </DialogHeader>
+          {viewingSession ? (
+            <SessionNoteDetails record={viewingSession} signerName={signerName(viewingSession)} />
           ) : null}
         </DialogContent>
       </Dialog>
@@ -387,6 +459,9 @@ function CaseDetail({
   onCreateSession,
   onEditCarePlan,
   onEditSession,
+  onSignSession,
+  onViewSession,
+  signerName,
   onViewAllGoals,
 }: {
   carePlan?: CarePlan;
@@ -402,6 +477,9 @@ function CaseDetail({
   onCreateSession: () => void;
   onEditCarePlan: () => void;
   onEditSession: (record: SessionRecord) => void;
+  onSignSession: (record: SessionRecord) => void;
+  onViewSession: (record: SessionRecord) => void;
+  signerName: (record: SessionRecord) => string | undefined;
   onViewAllGoals: () => void;
 }) {
   const orderedSessions = useMemo(
@@ -505,7 +583,10 @@ function CaseDetail({
                   key={record.id}
                   record={record}
                   showDivider={index < orderedSessions.length - 1}
+                  signerName={signerName(record)}
                   onEdit={() => onEditSession(record)}
+                  onSign={() => onSignSession(record)}
+                  onView={() => onViewSession(record)}
                 />
               ))
             )}
@@ -548,11 +629,17 @@ function CaseDetail({
 function SessionRecordRow({
   record,
   showDivider,
+  signerName,
   onEdit,
+  onSign,
+  onView,
 }: {
   record: SessionRecord;
   showDivider: boolean;
+  signerName?: string;
   onEdit: () => void;
+  onSign: () => void;
+  onView: () => void;
 }) {
   return (
     <div className="flex flex-col">
@@ -580,6 +667,7 @@ function SessionRecordRow({
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
             {record.summary ?? "No summary has been added yet."}
           </p>
+          <SignatureLine record={record} signerName={signerName} />
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" />}>
@@ -589,7 +677,16 @@ function SessionRecordRow({
           <DropdownMenuContent align="end">
             <DropdownMenuGroup>
               <DropdownMenuLabel>Session record</DropdownMenuLabel>
-              <DropdownMenuItem onClick={onEdit}>Edit</DropdownMenuItem>
+              {record.noteStatus === "SIGNED" ? (
+                <DropdownMenuItem onClick={onView}>View note</DropdownMenuItem>
+              ) : (
+                <>
+                  <DropdownMenuItem onClick={onEdit}>Edit</DropdownMenuItem>
+                  {isSignable(record) ? (
+                    <DropdownMenuItem onClick={onSign}>Sign note</DropdownMenuItem>
+                  ) : null}
+                </>
+              )}
             </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>

@@ -31,8 +31,8 @@ import { formatEnum } from "@/lib/format";
 import type {
   AttendanceStatus,
   CarePlan,
+  EditableNoteStatus,
   GoalStatus,
-  NoteStatus,
   Patient,
   PracticeProfile,
   SessionModality,
@@ -64,7 +64,7 @@ const sessionRecordSchema = z.object({
   modality: z.enum(["IN_PERSON", "ONLINE"]),
   durationMinutes: z.number().min(0).max(480),
   attendanceStatus: z.enum(["ATTENDED", "NO_SHOW", "CANCELLED_LATE"]),
-  noteStatus: z.enum(["PENDING_NOTE", "DRAFT", "SIGNED"]),
+  noteStatus: z.enum(["PENDING_NOTE", "DRAFT"]),
   summary: z.string().trim().max(2000).optional(),
   focusAreas: z.string().trim().max(1000).optional(),
   interventions: z.string().trim().max(1000).optional(),
@@ -366,7 +366,7 @@ export function SessionRecordForm({
       modality: record?.modality ?? "ONLINE",
       durationMinutes: record?.durationMinutes ?? defaultDuration ?? 50,
       attendanceStatus: record?.attendanceStatus ?? "ATTENDED",
-      noteStatus: record?.noteStatus ?? "DRAFT",
+      noteStatus: record?.noteStatus === "PENDING_NOTE" ? "PENDING_NOTE" : "DRAFT",
       summary: record?.summary ?? "",
       focusAreas: record?.focusAreas ?? "",
       interventions: record?.interventions ?? "",
@@ -481,14 +481,14 @@ export function SessionRecordForm({
                   <FieldLabel>Note status</FieldLabel>
                   <Select
                     value={field.value}
-                    onValueChange={(value) => field.onChange(value as NoteStatus)}
+                    onValueChange={(value) => field.onChange(value as EditableNoteStatus)}
                   >
                     <SelectTrigger className="w-full">
                       <SelectValue>{formatEnum(field.value)}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
-                        {noteStatuses.map((status) => (
+                        {editableNoteStatuses.map((status) => (
                           <SelectItem key={status} value={status}>
                             {formatEnum(status)}
                           </SelectItem>
@@ -714,4 +714,4 @@ const attendanceStatuses: AttendanceStatus[] = [
   "CANCELLED_LATE",
 ];
 
-const noteStatuses: NoteStatus[] = ["PENDING_NOTE", "DRAFT", "SIGNED"];
+const editableNoteStatuses: EditableNoteStatus[] = ["PENDING_NOTE", "DRAFT"];
