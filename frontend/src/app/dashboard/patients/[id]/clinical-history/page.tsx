@@ -7,6 +7,7 @@ import { ArrowLeftIcon, ClipboardListIcon } from "lucide-react";
 import { ErrorAlert } from "@/components/error-alert";
 import { LoadingTable } from "@/components/loading-table";
 import { SectionHeader } from "@/components/section-header";
+import { SignatureLine } from "@/components/session-note-signature";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -192,6 +193,7 @@ function SessionHistoryRow({
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
             {record.summary ?? "No summary has been added yet."}
           </p>
+          <SignatureLine record={record} />
         </div>
         <span className="text-xs text-muted-foreground">
           {record.durationMinutes} min

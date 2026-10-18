@@ -76,7 +76,8 @@ public abstract class ClinicalPersistenceMapper {
                 session.appointmentId().map(AppointmentId::value).orElse(null), session.sessionDate(),
                 session.modality(), session.durationMinutes(), session.attendanceStatus(), session.noteStatus(),
                 session.summary(), session.focusAreas(), session.interventions(), session.homework(),
-                session.nextSteps(), session.createdAt(), session.updatedAt());
+                session.nextSteps(), session.createdAt(), session.updatedAt(), session.signedAt().orElse(null),
+                session.signedBy().map(PsychologistId::value).orElse(null));
     }
 
     public SessionRecord toDomain(JpaSessionRecordEntity entity) {
@@ -86,6 +87,7 @@ public abstract class ClinicalPersistenceMapper {
                 entity.appointmentId() == null ? null : new AppointmentId(entity.appointmentId()),
                 entity.sessionDate(), entity.modality(), entity.durationMinutes(), entity.attendanceStatus(),
                 entity.noteStatus(), entity.summary(), entity.focusAreas(), entity.interventions(),
-                entity.homework(), entity.nextSteps(), entity.createdAt(), entity.updatedAt());
+                entity.homework(), entity.nextSteps(), entity.createdAt(), entity.updatedAt(), entity.signedAt(),
+                entity.signedBy() == null ? null : new PsychologistId(entity.signedBy()));
     }
 }

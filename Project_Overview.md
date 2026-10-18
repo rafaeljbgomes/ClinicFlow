@@ -250,6 +250,7 @@ Responsible for clinical workflow records owned by the psychologist.
 - create and track clinical cases for patients;
 - maintain care plans and care goals;
 - create manual session records;
+- sign session notes as an explicit, one-way action that records the signer and time; signed notes are read-only;
 - consume completed appointment events to create pending session-record shells;
 - expose patient clinical history without sharing clinical details over RabbitMQ.
 
@@ -275,6 +276,7 @@ PUT /clinical-cases/{id}/care-plan
 GET /clinical-cases/{id}/session-records
 POST /clinical-cases/{id}/session-records
 PATCH /session-records/{id}
+POST /session-records/{id}/sign
 GET /patients/{patientId}/clinical-history
 ```
 

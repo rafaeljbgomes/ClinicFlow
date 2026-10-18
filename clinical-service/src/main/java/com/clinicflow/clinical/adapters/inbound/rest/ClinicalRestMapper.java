@@ -18,6 +18,7 @@ import com.clinicflow.clinical.application.commands.ChangeClinicalCaseStatusComm
 import com.clinicflow.clinical.application.commands.CreateClinicalCaseCommand;
 import com.clinicflow.clinical.application.commands.CreateSessionRecordCommand;
 import com.clinicflow.clinical.application.commands.PutCarePlanCommand;
+import com.clinicflow.clinical.application.commands.SignSessionRecordCommand;
 import com.clinicflow.clinical.application.commands.UpdatePracticeProfileCommand;
 import com.clinicflow.clinical.application.commands.UpdateSessionRecordCommand;
 import com.clinicflow.clinical.application.mapping.MapperConfiguration;
@@ -109,6 +110,10 @@ public abstract class ClinicalRestMapper {
                 request.sessionDate(), request.modality(), request.durationMinutes(), request.attendanceStatus(),
                 request.noteStatus(), request.summary(), request.focusAreas(), request.interventions(),
                 request.homework(), request.nextSteps());
+    }
+
+    public SignSessionRecordCommand toSignCommand(UUID psychologistId, UUID sessionRecordId) {
+        return new SignSessionRecordCommand(new PsychologistId(psychologistId), new SessionRecordId(sessionRecordId));
     }
 
     public GetPatientClinicalHistoryQuery toHistoryQuery(UUID psychologistId, UUID patientId) {

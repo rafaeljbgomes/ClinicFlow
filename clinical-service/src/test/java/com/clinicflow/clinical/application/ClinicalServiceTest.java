@@ -6,6 +6,7 @@ import com.clinicflow.clinical.application.commands.ProcessAppointmentCompletedC
 import com.clinicflow.clinical.application.commands.PutCarePlanCommand;
 import com.clinicflow.clinical.application.commands.ChangeClinicalCaseStatusCommand;
 import com.clinicflow.clinical.application.commands.CreateSessionRecordCommand;
+import com.clinicflow.clinical.application.commands.SignSessionRecordCommand;
 import com.clinicflow.clinical.application.commands.UpdatePracticeProfileCommand;
 import com.clinicflow.clinical.application.commands.UpdateSessionRecordCommand;
 import com.clinicflow.clinical.application.exceptions.ActiveClinicalCaseExistsException;
@@ -42,6 +43,8 @@ import com.clinicflow.clinical.domain.PsychologistId;
 import com.clinicflow.clinical.domain.SessionModality;
 import com.clinicflow.clinical.domain.SessionRecord;
 import com.clinicflow.clinical.domain.SessionRecordId;
+import com.clinicflow.clinical.domain.SessionRecordNotSignableException;
+import com.clinicflow.clinical.domain.SignedSessionRecordException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -253,9 +256,11 @@ class ClinicalServiceTest {
         when(sessionRecords.findById(session.id())).thenReturn(Optional.of(session));
         var updated = service.updateSessionRecord(new UpdateSessionRecordCommand(
                 PSYCHOLOGIST_ID, session.id(), CASE_ID, NOW.plusSeconds(60), SessionModality.IN_PERSON, 55,
-                AttendanceStatus.ATTENDED, NoteStatus.SIGNED, "Updated", null, null, null, null));
-        assertThat(updated.noteStatus()).isEqualTo(NoteStatus.SIGNED);
+                AttendanceStatus.ATTENDED, NoteStatus.DRAFT, "Updated", null, null, null, null));
+        assertThat(updated.noteStatus()).isEqualTo(NoteStatus.DRAFT);
         assertThat(updated.durationMinutes()).isEqualTo(55);
+        assertThat(updated.signedAt()).isNull();
+        assertThat(updated.signedBy()).isNull();
 
         SessionRecordId missingId = new SessionRecordId(UUID.randomUUID());
         when(sessionRecords.findById(missingId)).thenReturn(Optional.empty());
@@ -267,6 +272,75 @@ class ClinicalServiceTest {
         PsychologistId other = new PsychologistId(UUID.randomUUID());
         assertThatThrownBy(() -> service.getClinicalCase(new GetClinicalCaseQuery(other, CASE_ID)))
                 .isInstanceOf(ClinicalAccessDeniedException.class);
+    }
+
+    @Test
+    void signsOwnedDraftNoteAndRecordsTheSigner() {
+        SessionRecord session = draftSession(PSYCHOLOGIST_ID, "Summary");
+        when(sessionRecords.findById(session.id())).thenReturn(Optional.of(session));
+        Instant before = Instant.now();
+
+        var signed = service.signSessionRecord(new SignSessionRecordCommand(PSYCHOLOGIST_ID, session.id()));
+
+        assertThat(signed.noteStatus()).isEqualTo(NoteStatus.SIGNED);
+        assertThat(signed.signedBy()).isEqualTo(PSYCHOLOGIST_ID.value());
+        assertThat(signed.signedAt()).isNotNull().isAfterOrEqualTo(before);
+        assertThat(signed.updatedAt()).isEqualTo(signed.signedAt());
+        verify(sessionRecords).save(session);
+    }
+
+    @Test
+    void rejectsSigningMissingForeignSignedOrIncompleteNotes() {
+        SessionRecordId missingId = new SessionRecordId(UUID.randomUUID());
+        when(sessionRecords.findById(missingId)).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> service.signSessionRecord(new SignSessionRecordCommand(PSYCHOLOGIST_ID, missingId)))
+                .isInstanceOf(SessionRecordNotFoundException.class);
+
+        PsychologistId other = new PsychologistId(UUID.randomUUID());
+        SessionRecord foreign = draftSession(other, "Summary");
+        when(sessionRecords.findById(foreign.id())).thenReturn(Optional.of(foreign));
+        assertThatThrownBy(() -> service.signSessionRecord(new SignSessionRecordCommand(PSYCHOLOGIST_ID,
+                foreign.id()))).isInstanceOf(ClinicalAccessDeniedException.class);
+        assertThat(foreign.noteStatus()).isEqualTo(NoteStatus.DRAFT);
+
+        SessionRecord signed = draftSession(PSYCHOLOGIST_ID, "Summary").sign(PSYCHOLOGIST_ID, NOW);
+        when(sessionRecords.findById(signed.id())).thenReturn(Optional.of(signed));
+        assertThatThrownBy(() -> service.signSessionRecord(new SignSessionRecordCommand(PSYCHOLOGIST_ID,
+                signed.id()))).isInstanceOf(SignedSessionRecordException.class);
+
+        SessionRecord withoutSummary = draftSession(PSYCHOLOGIST_ID, null);
+        when(sessionRecords.findById(withoutSummary.id())).thenReturn(Optional.of(withoutSummary));
+        assertThatThrownBy(() -> service.signSessionRecord(new SignSessionRecordCommand(PSYCHOLOGIST_ID,
+                withoutSummary.id()))).isInstanceOf(SessionRecordNotSignableException.class);
+
+        verify(sessionRecords, never()).save(any());
+    }
+
+    @Test
+    void rejectsEditsToAnotherPsychologistsSessionRecord() {
+        SessionRecord foreign = draftSession(new PsychologistId(UUID.randomUUID()), "Summary");
+        when(sessionRecords.findById(foreign.id())).thenReturn(Optional.of(foreign));
+
+        assertThatThrownBy(() -> service.updateSessionRecord(new UpdateSessionRecordCommand(
+                PSYCHOLOGIST_ID, foreign.id(), null, NOW.plusSeconds(60), SessionModality.ONLINE, 50,
+                AttendanceStatus.ATTENDED, NoteStatus.DRAFT, "Rewritten", null, null, null, null)))
+                .isInstanceOf(ClinicalAccessDeniedException.class);
+        assertThat(foreign.summary()).isEqualTo("Summary");
+        verify(sessionRecords, never()).save(any());
+    }
+
+    @Test
+    void rejectsEditsToSignedNotesWithoutSaving() {
+        SessionRecord signed = draftSession(PSYCHOLOGIST_ID, "Summary").sign(PSYCHOLOGIST_ID, NOW);
+        when(sessionRecords.findById(signed.id())).thenReturn(Optional.of(signed));
+
+        assertThatThrownBy(() -> service.updateSessionRecord(new UpdateSessionRecordCommand(
+                PSYCHOLOGIST_ID, signed.id(), null, NOW.plusSeconds(60), SessionModality.ONLINE, 50,
+                AttendanceStatus.ATTENDED, NoteStatus.DRAFT, "Rewritten", null, null, null, null)))
+                .isInstanceOf(SignedSessionRecordException.class);
+        assertThat(signed.noteStatus()).isEqualTo(NoteStatus.SIGNED);
+        assertThat(signed.summary()).isEqualTo("Summary");
+        verify(sessionRecords, never()).save(any());
     }
 
     @Test
@@ -332,6 +406,12 @@ class ClinicalServiceTest {
                 PSYCHOLOGIST_ID, session.id(), CASE_ID, NOW.plusSeconds(120), SessionModality.ONLINE, 50,
                 AttendanceStatus.ATTENDED, NoteStatus.DRAFT, null, null, null, null, null)))
                 .isInstanceOf(ClinicalAccessDeniedException.class);
+    }
+
+    private SessionRecord draftSession(PsychologistId owner, String summary) {
+        return SessionRecord.rehydrate(new SessionRecordId(UUID.randomUUID()), CASE_ID, owner, PATIENT_ID, null,
+                NOW, SessionModality.ONLINE, 50, AttendanceStatus.ATTENDED, NoteStatus.DRAFT, summary, null, null,
+                null, null, NOW, NOW, null, null);
     }
 
     private ClinicalCase clinicalCase() {

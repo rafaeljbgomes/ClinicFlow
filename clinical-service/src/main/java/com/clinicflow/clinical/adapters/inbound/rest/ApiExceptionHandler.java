@@ -5,6 +5,9 @@ import com.clinicflow.clinical.application.exceptions.CarePlanNotFoundException;
 import com.clinicflow.clinical.application.exceptions.ClinicalAccessDeniedException;
 import com.clinicflow.clinical.application.exceptions.ClinicalCaseNotFoundException;
 import com.clinicflow.clinical.application.exceptions.SessionRecordNotFoundException;
+import com.clinicflow.clinical.domain.InvalidNoteTransitionException;
+import com.clinicflow.clinical.domain.SessionRecordNotSignableException;
+import com.clinicflow.clinical.domain.SignedSessionRecordException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,6 +40,24 @@ public class ApiExceptionHandler {
     ProblemDetail conflict(ActiveClinicalCaseExistsException ex) {
         return ApiProblems.create(HttpStatus.CONFLICT, "active_clinical_case_exists",
                 "Active clinical case exists", "Patient already has an active clinical case for this psychologist");
+    }
+
+    @ExceptionHandler(SignedSessionRecordException.class)
+    ProblemDetail signedSessionRecord(SignedSessionRecordException ex) {
+        return ApiProblems.create(HttpStatus.CONFLICT, "session_record_signed", "Session record is signed",
+                "Signed session records cannot be changed");
+    }
+
+    @ExceptionHandler(SessionRecordNotSignableException.class)
+    ProblemDetail sessionRecordNotSignable(SessionRecordNotSignableException ex) {
+        return ApiProblems.create(HttpStatus.CONFLICT, "session_record_not_signable",
+                "Session record cannot be signed", "Only draft session notes with a summary can be signed");
+    }
+
+    @ExceptionHandler(InvalidNoteTransitionException.class)
+    ProblemDetail invalidNoteTransition(InvalidNoteTransitionException ex) {
+        return ApiProblems.create(HttpStatus.BAD_REQUEST, "invalid_note_transition", "Invalid note status",
+                "Session notes can only be signed through the sign action");
     }
 
     @ExceptionHandler({ClinicalAccessDeniedException.class, AccessDeniedException.class})

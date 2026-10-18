@@ -26,6 +26,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -67,6 +68,7 @@ class DemoDataBootstrapTest {
         bootstrap.run(null);
         bootstrap.run(null);
 
+        assertThat(sessionRecords.saves()).isEqualTo(5);
         assertThat(practiceProfiles.records()).hasSize(2);
         assertThat(clinicalCases.records()).hasSize(6);
         assertThat(carePlans.records()).hasSize(6);
@@ -76,6 +78,34 @@ class DemoDataBootstrapTest {
                         ClinicalCaseStatus.PAUSED, ClinicalCaseStatus.DISCHARGED);
         assertThat(sessionRecords.records().values()).extracting(SessionRecord::noteStatus)
                 .contains(NoteStatus.PENDING_NOTE, NoteStatus.DRAFT, NoteStatus.SIGNED);
+        assertThat(sessionRecords.records().values())
+                .filteredOn(record -> record.noteStatus() == NoteStatus.SIGNED)
+                .singleElement()
+                .satisfies(record -> {
+                    assertThat(record.signedBy()).contains(record.psychologistId());
+                    assertThat(record.signedAt()).contains(Instant.parse("2026-06-25T12:00:00Z"));
+                    assertThat(record.updatedAt()).isEqualTo(record.signedAt().orElseThrow());
+                });
+    }
+
+    @Test
+    void keepsExistingSessionRecordsOnRestartSoSignedAndEditedNotesSurvive() {
+        InMemorySessionRecordRepository sessionRecords = new InMemorySessionRecordRepository();
+        Clock firstStart = Clock.fixed(Instant.parse("2026-07-05T10:00:00Z"), ZoneOffset.UTC);
+        Clock restart = Clock.fixed(Instant.parse("2026-07-09T10:00:00Z"), ZoneOffset.UTC);
+        new DemoDataBootstrap(new InMemoryPracticeProfileRepository(), new InMemoryClinicalCaseRepository(),
+                new InMemoryCarePlanRepository(), sessionRecords, firstStart).run(null);
+        SessionRecordId draftId = new SessionRecordId(UUID.fromString("33000000-0000-4000-8000-000000000005"));
+        SessionRecord draft = sessionRecords.findById(draftId).orElseThrow();
+        draft.sign(draft.psychologistId(), Instant.parse("2026-07-06T10:00:00Z"));
+        Map<SessionRecordId, SessionRecord> beforeRestart = new LinkedHashMap<>(sessionRecords.records());
+
+        new DemoDataBootstrap(new InMemoryPracticeProfileRepository(), new InMemoryClinicalCaseRepository(),
+                new InMemoryCarePlanRepository(), sessionRecords, restart).run(null);
+
+        assertThat(sessionRecords.saves()).isEqualTo(5);
+        beforeRestart.forEach((id, record) -> assertThat(sessionRecords.records().get(id)).isSameAs(record));
+        assertThat(sessionRecords.records().get(draftId).noteStatus()).isEqualTo(NoteStatus.SIGNED);
     }
 
     private static final class InMemoryPracticeProfileRepository implements PracticeProfileRepository {
@@ -173,6 +203,7 @@ class DemoDataBootstrapTest {
 
     private static final class InMemorySessionRecordRepository implements SessionRecordRepository {
         private final Map<SessionRecordId, SessionRecord> records = new LinkedHashMap<>();
+        private int saves;
 
         @Override
         public Optional<SessionRecord> findById(SessionRecordId id) {
@@ -204,11 +235,16 @@ class DemoDataBootstrapTest {
 
         @Override
         public void save(SessionRecord sessionRecord) {
+            saves++;
             records.put(sessionRecord.id(), sessionRecord);
         }
 
         Map<SessionRecordId, SessionRecord> records() {
             return records;
+        }
+
+        int saves() {
+            return saves;
         }
     }
 }

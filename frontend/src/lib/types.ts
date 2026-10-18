@@ -74,6 +74,8 @@ export type GoalStatus =
   | "DISCONTINUED";
 export type AttendanceStatus = "ATTENDED" | "NO_SHOW" | "CANCELLED_LATE";
 export type NoteStatus = "PENDING_NOTE" | "DRAFT" | "SIGNED";
+// Edits only move notes between these states; signing is a separate, one-way action.
+export type EditableNoteStatus = Exclude<NoteStatus, "SIGNED">;
 export type SessionModality = "IN_PERSON" | "ONLINE";
 
 export type PracticeProfile = {
@@ -138,6 +140,8 @@ export type SessionRecord = {
   nextSteps: string | null;
   createdAt: string;
   updatedAt: string;
+  signedAt: string | null;
+  signedBy: string | null;
 };
 
 export type PatientClinicalHistory = {

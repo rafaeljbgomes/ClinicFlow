@@ -6,6 +6,7 @@ import com.clinicflow.clinical.application.commands.CreateClinicalCaseCommand;
 import com.clinicflow.clinical.application.commands.CreateSessionRecordCommand;
 import com.clinicflow.clinical.application.commands.ProcessAppointmentCompletedCommand;
 import com.clinicflow.clinical.application.commands.PutCarePlanCommand;
+import com.clinicflow.clinical.application.commands.SignSessionRecordCommand;
 import com.clinicflow.clinical.application.commands.UpdatePracticeProfileCommand;
 import com.clinicflow.clinical.application.commands.UpdateSessionRecordCommand;
 import com.clinicflow.clinical.application.exceptions.ActiveClinicalCaseExistsException;
@@ -188,6 +189,16 @@ public class ClinicalService {
         session.update(command.clinicalCaseId(), command.sessionDate(), command.modality(), command.durationMinutes(),
                 command.attendanceStatus(), command.noteStatus(), command.summary(), command.focusAreas(),
                 command.interventions(), command.homework(), command.nextSteps(), Instant.now());
+        sessionRecords.save(session);
+        return mapper.toResult(session);
+    }
+
+    @Transactional
+    public SessionRecordResult signSessionRecord(SignSessionRecordCommand command) {
+        SessionRecord session = sessionRecords.findById(command.sessionRecordId())
+                .orElseThrow(SessionRecordNotFoundException::new);
+        ensureOwned(command.psychologistId(), session.psychologistId());
+        session.sign(command.psychologistId(), Instant.now());
         sessionRecords.save(session);
         return mapper.toResult(session);
     }
