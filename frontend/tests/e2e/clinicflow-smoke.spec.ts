@@ -121,6 +121,7 @@ test("psychologist can run the main prototype workflow", async ({ page }) => {
   await page.getByRole("button", { name: "Create case" }).click();
   await expect(page.getByText(presentingConcern).filter({ visible: true }).first()).toBeVisible();
   await expect(page.getByText("Intake").filter({ visible: true }).first()).toBeVisible();
+  await page.getByRole("button", { name: "Browse cases" }).click();
   await page.getByPlaceholder("Search cases or patients").fill(patientName);
   await expect(page.getByText(presentingConcern).filter({ visible: true }).first()).toBeVisible();
   const clinicalFilter = page.getByRole("combobox", { name: "Filter clinical cases by status" });
@@ -135,6 +136,7 @@ test("psychologist can run the main prototype workflow", async ({ page }) => {
   }, { timeout: 5_000 }).toBe(true);
   await page.keyboard.press("Enter");
   await expect(clinicalFilter).toContainText("Intake");
+  await page.keyboard.press("Escape");
   await expect(page.getByRole("checkbox")).toHaveCount(0);
 
   await openDialog(page, "Create", "Care plan", true);
@@ -149,12 +151,14 @@ test("psychologist can run the main prototype workflow", async ({ page }) => {
   await page.getByLabel("Progress").nth(1).fill("0");
   await page.getByRole("button", { name: "Save care plan" }).click();
   await expect(page.getByText(therapeuticFocus).filter({ visible: true }).first()).toBeVisible();
+  await page.getByRole("tab", { name: "Care plan" }).click();
   await expect(page.getByText("Not started").filter({ visible: true }).first()).toBeVisible();
   await page.getByRole("button", { name: "View all 2 objectives" }).click();
   await expect(page.getByRole("dialog", { name: "Care-plan objectives" })).toContainText("Improve sleep consistency");
   await expect(page.getByRole("dialog", { name: "Care-plan objectives" })).toContainText("Create a consistent wind-down routine");
   await page.keyboard.press("Escape");
 
+  await page.getByRole("tab", { name: "Session records" }).click();
   await openDialog(page, "New record", "New session record");
   await page.getByLabel("Session date").fill(futureDatetimeLocal());
   await page.getByLabel("Summary").fill(sessionSummary);

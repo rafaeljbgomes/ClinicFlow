@@ -4,8 +4,10 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import useSWR from "swr";
 import {
+  ChevronDownIcon,
   ClipboardListIcon,
   FileTextIcon,
+  FolderOpenIcon,
   MoreHorizontalIcon,
   PlusIcon,
   SearchIcon,
@@ -53,6 +55,19 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
 import {
@@ -95,6 +110,7 @@ export default function ClinicalPage() {
   const [signingSession, setSigningSession] = useState<SessionRecord | null>(null);
   const [viewingSession, setViewingSession] = useState<SessionRecord | null>(null);
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
+  const [caseBrowserOpen, setCaseBrowserOpen] = useState(false);
   const [goalsOpen, setGoalsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<ClinicalCaseStatus | "ALL">("ALL");
@@ -126,8 +142,8 @@ export default function ClinicalPage() {
   }, [patientById, query, sortedCases, statusFilter]);
 
   const selectedCase =
-    visibleCases.find((clinicalCase) => clinicalCase.id === selectedCaseId) ??
-    visibleCases[0];
+    sortedCases.find((clinicalCase) => clinicalCase.id === selectedCaseId) ??
+    sortedCases[0];
 
   const carePlan = useSWR<CarePlan>(
     selectedCase ? `/api/clinical-cases/${selectedCase.id}/care-plan` : null,
@@ -248,63 +264,15 @@ export default function ClinicalPage() {
 
       {error ? <ErrorAlert message={error.message} /> : null}
 
-      <div className="grid items-start gap-6 xl:grid-cols-[24rem_minmax(0,1fr)]">
-        <Card tone="quiet" className="self-start border border-border/60 bg-card">
-          <CardHeader>
-            <CardTitle>Case registry</CardTitle>
-            <CardDescription>
-              Open and historical clinical cases for your patients.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            <div className="flex flex-col gap-3">
-              <label className="relative">
-                <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search cases or patients" className="pl-9" />
-                <span className="sr-only">Search clinical cases</span>
-              </label>
-              <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as ClinicalCaseStatus | "ALL")}>
-                <SelectTrigger aria-label="Filter clinical cases by status" className="w-full"><SelectValue>{statusFilter === "ALL" ? "All case statuses" : formatEnum(statusFilter)}</SelectValue></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">All case statuses</SelectItem>
-                  {caseStatuses.map((status) => <SelectItem key={status} value={status}>{formatEnum(status)}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            {sortedCases.length === 0 ? (
-              <EmptyClinicalState />
-            ) : visibleCases.length === 0 ? (
-              <p className="py-6 text-center text-sm text-muted-foreground">No clinical cases match this view.</p>
-            ) : (
-              visibleCases.map((clinicalCase) => (
-                <button
-                  key={clinicalCase.id}
-                  type="button"
-                  onClick={() => setSelectedCaseId(clinicalCase.id)}
-                  aria-pressed={selectedCase?.id === clinicalCase.id}
-                  className={cn(
-                    "w-full rounded-xl border-l-2 border-transparent px-3.5 py-3 text-left transition duration-150 hover:bg-secondary/45 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/25",
-                    selectedCase?.id === clinicalCase.id && "border-l-primary bg-secondary/80 shadow-[inset_0_0_0_1px_rgb(42_118_91/12%)]"
-                  )}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold">
-                        {patientName(patientById.get(clinicalCase.patientId), clinicalCase.patientId)}
-                      </p>
-                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                        {clinicalCase.presentingConcern}
-                      </p>
-                    </div>
-                    <StatusBadge status={clinicalCase.status} />
-                  </div>
-                </button>
-              ))
-            )}
-          </CardContent>
-        </Card>
-
-        {selectedCase ? (
+      {selectedCase ? (
+        <div className="flex flex-col gap-6">
+          <CaseWorkspaceToolbar
+            cases={sortedCases}
+            patientById={patientById}
+            selectedCase={selectedCase}
+            onBrowseCases={() => setCaseBrowserOpen(true)}
+            onSelectCase={setSelectedCaseId}
+          />
           <CaseDetail
             carePlan={carePlan.data}
             carePlanError={carePlan.error}
@@ -324,14 +292,72 @@ export default function ClinicalPage() {
             signerName={signerName}
             onViewAllGoals={() => setGoalsOpen(true)}
           />
-        ) : (
-          <Card>
-            <CardContent className="flex min-h-72 items-center justify-center text-sm text-muted-foreground">
-              Create a clinical case to start the clinical record.
-            </CardContent>
-          </Card>
-        )}
-      </div>
+        </div>
+      ) : (
+        <EmptyClinicalState />
+      )}
+
+      <Sheet open={caseBrowserOpen} onOpenChange={setCaseBrowserOpen}>
+        <SheetContent side="right" className="sm:max-w-lg">
+          <SheetHeader>
+            <SheetTitle>Browse clinical cases</SheetTitle>
+            <SheetDescription>
+              Search open and historical cases, then choose the record to work with.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-8 pb-8">
+            <label className="relative">
+              <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search cases or patients" className="pl-9" />
+              <span className="sr-only">Search clinical cases</span>
+            </label>
+            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as ClinicalCaseStatus | "ALL")}>
+              <SelectTrigger aria-label="Filter clinical cases by status" className="w-full">
+                <SelectValue>{statusFilter === "ALL" ? "All case statuses" : formatEnum(statusFilter)}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">All case statuses</SelectItem>
+                {caseStatuses.map((status) => <SelectItem key={status} value={status}>{formatEnum(status)}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <div className="flex items-center justify-between border-b border-border/70 pb-3">
+              <p className="type-label text-muted-foreground">Cases</p>
+              <p className="text-xs text-muted-foreground">{visibleCases.length} shown</p>
+            </div>
+            {visibleCases.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">No clinical cases match this view.</p>
+            ) : (
+              <div className="flex flex-col">
+                {visibleCases.map((clinicalCase, index) => (
+                  <div key={clinicalCase.id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedCaseId(clinicalCase.id);
+                        setCaseBrowserOpen(false);
+                      }}
+                      aria-pressed={selectedCase.id === clinicalCase.id}
+                      className={cn(
+                        "w-full rounded-xl border-l-2 border-transparent px-3.5 py-4 text-left transition duration-150 hover:bg-secondary/45 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/25",
+                        selectedCase.id === clinicalCase.id && "border-l-primary bg-secondary/80 shadow-[inset_0_0_0_1px_rgb(42_118_91/12%)]"
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold">{patientName(patientById.get(clinicalCase.patientId), clinicalCase.patientId)}</p>
+                          <p className="mt-1 text-xs leading-5 text-muted-foreground">{clinicalCase.presentingConcern}</p>
+                        </div>
+                        <StatusBadge status={clinicalCase.status} />
+                      </div>
+                    </button>
+                    {index < visibleCases.length - 1 ? <Separator /> : null}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
 
       <Dialog open={createCaseOpen} onOpenChange={setCreateCaseOpen}>
         <DialogContent>
@@ -445,6 +471,73 @@ export default function ClinicalPage() {
   );
 }
 
+function CaseWorkspaceToolbar({
+  cases,
+  patientById,
+  selectedCase,
+  onBrowseCases,
+  onSelectCase,
+}: {
+  cases: ClinicalCase[];
+  patientById: Map<string, Patient>;
+  selectedCase: ClinicalCase;
+  onBrowseCases: () => void;
+  onSelectCase: (caseId: string) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              variant="outline"
+              className="h-14 w-full justify-between rounded-2xl px-4 lg:w-[25rem]"
+              aria-label="Selected clinical case"
+            />
+          }
+        >
+          <span className="flex min-w-0 items-center gap-3">
+            <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
+            <span className="truncate font-semibold">
+              {patientName(patientById.get(selectedCase.patientId), selectedCase.patientId)}
+            </span>
+            <StatusBadge status={selectedCase.status} />
+          </span>
+          <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-[min(25rem,calc(100vw-2rem))]">
+          <DropdownMenuLabel>Select clinical case</DropdownMenuLabel>
+          <DropdownMenuGroup>
+            {cases.map((clinicalCase) => (
+              <DropdownMenuItem
+                key={clinicalCase.id}
+                onClick={() => onSelectCase(clinicalCase.id)}
+                className="flex items-center justify-between gap-3"
+              >
+                <span className="truncate">
+                  {patientName(patientById.get(clinicalCase.patientId), clinicalCase.patientId)}
+                </span>
+                <StatusBadge status={clinicalCase.status} />
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Button variant="outline" className="h-12 rounded-xl" onClick={onBrowseCases}>
+          <FolderOpenIcon data-icon="inline-start" />
+          Browse cases
+        </Button>
+        <Separator orientation="vertical" className="hidden h-6 lg:block" />
+        <p className="text-sm text-muted-foreground">
+          {cases.length} {cases.length === 1 ? "case" : "cases"}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function CaseDetail({
   carePlan,
   carePlanError,
@@ -482,6 +575,7 @@ function CaseDetail({
   signerName: (record: SessionRecord) => string | undefined;
   onViewAllGoals: () => void;
 }) {
+  const [activeTab, setActiveTab] = useState("sessions");
   const orderedSessions = useMemo(
     () =>
       [...sessions].sort(
@@ -493,22 +587,22 @@ function CaseDetail({
 
   return (
     <div className="flex flex-col gap-6">
-      <Card>
-        <CardHeader>
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div className="flex min-w-0 items-start gap-4">
-              <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-secondary text-base font-semibold text-secondary-foreground">
-                {patientInitials(patient)}
-              </span>
-              <div className="min-w-0">
-                <CardTitle>{patient?.fullName ?? clinicalCase.patientId}</CardTitle>
-                {patient?.preferredName && patient.preferredName !== patient.fullName ? (
-                  <p className="mt-1 text-sm text-muted-foreground">Prefers {patient.preferredName}</p>
-                ) : null}
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">{patientContext(patient)}</p>
+      <Card className="gap-4 py-5">
+        <CardContent className="grid gap-6 pt-0 lg:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.6fr)] lg:gap-0">
+          <div className="flex min-w-0 flex-col gap-4 lg:pr-8">
+            <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex min-w-0 items-start gap-4">
+                <span className="flex size-14 shrink-0 items-center justify-center rounded-full bg-secondary text-base font-semibold text-secondary-foreground">
+                  {patientInitials(patient)}
+                </span>
+                <div className="min-w-0">
+                  <CardTitle>{patient?.fullName ?? clinicalCase.patientId}</CardTitle>
+                  {patient?.preferredName && patient.preferredName !== patient.fullName ? (
+                    <p className="mt-1 text-sm text-muted-foreground">Prefers {patient.preferredName}</p>
+                  ) : null}
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{patientContext(patient)}</p>
+                </div>
               </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
               <Button
                 variant="outline"
                 render={
@@ -521,107 +615,162 @@ function CaseDetail({
                 <FileTextIcon data-icon="inline-start" />
                 Patient history
               </Button>
-              <Select
-                value={clinicalCase.status}
-                onValueChange={(value) =>
-                  onChangeStatus(value as ClinicalCaseStatus)
-                }
-              >
-                <SelectTrigger className="w-40">
-                  <SelectValue>{formatEnum(clinicalCase.status)}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {caseStatuses.map((status) => (
-                      <SelectItem key={status} value={status}>
-                        {formatEnum(status)}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
+            </div>
+            <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{clinicalCase.presentingConcern}</p>
+            <div className="grid overflow-hidden rounded-xl border border-border/70 bg-surface-subtle divide-y divide-border/70 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+              <CaseMetadata label="Opened" value={formatDateTime(clinicalCase.openedAt)} />
+              <CaseMetadata label="Default duration" value={`${defaultDuration ?? 50} minutes`} />
+              <div className="min-w-0 px-3 py-3 sm:px-4">
+                <p className="type-label text-muted-foreground">Case status</p>
+                <Select value={clinicalCase.status} onValueChange={(value) => onChangeStatus(value as ClinicalCaseStatus)}>
+                  <SelectTrigger aria-label="Change clinical case status" className="mt-1.5 w-full border-0 bg-transparent px-0 shadow-none">
+                    <SelectValue>{formatEnum(clinicalCase.status)}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {caseStatuses.map((status) => <SelectItem key={status} value={status}>{formatEnum(status)}</SelectItem>)}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <p className="max-w-4xl text-sm leading-6 text-muted-foreground">{clinicalCase.presentingConcern}</p>
-          <div className="grid overflow-hidden rounded-xl border border-border/70 bg-surface-subtle divide-y divide-border/70 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
-            <CaseMetadata label="Opened" value={formatDateTime(clinicalCase.openedAt)} />
-            <CaseMetadata label="Default duration" value={`${defaultDuration ?? 50} minutes`} />
-            <CaseMetadata label="Status" value={formatEnum(clinicalCase.status)} />
+
+          <div className="flex min-w-0 flex-col gap-4 border-t border-border/70 pt-6 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <CardTitle>Care plan</CardTitle>
+              </div>
+              {carePlan ? (
+                <Button variant="ghost" size="sm" onClick={() => setActiveTab("care-plan")}>View plan</Button>
+              ) : (
+                <Button variant="outline" size="sm" onClick={onEditCarePlan}>Create</Button>
+              )}
+            </div>
+            {carePlanError && !isNotFound(carePlanError) ? (
+              <ErrorAlert message={carePlanError.message} />
+            ) : isCarePlanLoading ? (
+              <p className="text-sm text-muted-foreground">Loading care plan…</p>
+            ) : carePlan ? (
+              <>
+                <p className="text-sm leading-6">{carePlan.therapeuticFocus}</p>
+                <div className="grid grid-cols-2 divide-x divide-border/70 border-t border-border/70 pt-4">
+                  <CaseMetadata label="Next review" value={formatDate(carePlan.reviewDate)} />
+                  <div className="min-w-0 px-3 py-3 sm:px-4">
+                    <p className="type-label text-muted-foreground">Objective progress</p>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      {carePlan.goals[0] ? <StatusBadge status={carePlan.goals[0].status} /> : <span className="text-sm font-semibold">No objectives</span>}
+                      <span className="text-xs text-muted-foreground">
+                        {carePlan.goals.filter((goal) => goal.progressPercentage >= 100).length}/{carePlan.goals.length}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <p className="text-sm leading-6 text-muted-foreground">No care plan has been created for this case.</p>
+            )}
           </div>
         </CardContent>
       </Card>
 
-      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(19rem,0.95fr)]">
-        <Card className="case-work-panel">
-          <CardHeader>
-            <div className="session-record-header">
-              <div>
-                <CardTitle>Session records</CardTitle>
-                <CardDescription>
-                  Appointment shells and manual records for the case.
-                </CardDescription>
-              </div>
-              <Button onClick={onCreateSession}>
-                <PlusIcon data-icon="inline-start" />
-                New record
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="session-record-list flex flex-col gap-1">
-            {sessionsError ? <ErrorAlert message={sessionsError.message} /> : null}
-            {isSessionsLoading ? (
-              <LoadingTable />
-            ) : orderedSessions.length === 0 ? (
-              <div className="flex min-h-36 items-center justify-center py-8 text-center text-sm text-muted-foreground">
-                No session records for this case yet.
-              </div>
-            ) : (
-              orderedSessions.map((record, index) => (
-                <SessionRecordRow
-                  key={record.id}
-                  record={record}
-                  showDivider={index < orderedSessions.length - 1}
-                  signerName={signerName(record)}
-                  onEdit={() => onEditSession(record)}
-                  onSign={() => onSignSession(record)}
-                  onView={() => onViewSession(record)}
-                />
-              ))
-            )}
-          </CardContent>
-        </Card>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-5">
+        <TabsList variant="line" className="h-auto w-full justify-start gap-6 border-b border-border/70 px-1 pb-2">
+          <TabsTrigger value="overview" className="flex-none px-2 py-2">Overview</TabsTrigger>
+          <TabsTrigger value="sessions" className="flex-none px-2 py-2">Session records</TabsTrigger>
+          <TabsTrigger value="care-plan" className="flex-none px-2 py-2">Care plan</TabsTrigger>
+        </TabsList>
 
-        <Card tone="quiet" className="border border-border/60 bg-card">
-          <CardHeader>
-            <div className="flex items-start justify-between gap-4">
+        <TabsContent value="overview">
+          <Card tone="quiet" className="border border-border/60 bg-card">
+            <CardHeader>
+              <CardTitle>Case overview</CardTitle>
+              <CardDescription>Current context for this clinical record.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-6 md:grid-cols-2">
               <div>
-                <CardTitle>Care plan</CardTitle>
-                <CardDescription>
-                  Focus, review date, and goal progress.
-                </CardDescription>
+                <p className="type-label text-muted-foreground">Presenting concern</p>
+                <p className="mt-2 text-sm leading-6">{clinicalCase.presentingConcern}</p>
               </div>
-              <Button variant="outline" onClick={onEditCarePlan}>
-                {carePlan ? "Edit" : "Create"}
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {carePlanError && !isNotFound(carePlanError) ? (
-              <ErrorAlert message={carePlanError.message} />
-            ) : isCarePlanLoading ? (
-              <LoadingTable />
-            ) : carePlan ? (
-              <CarePlanSummary carePlan={carePlan} onViewAllGoals={onViewAllGoals} />
-            ) : (
-              <div className="flex min-h-36 items-center justify-center py-8 text-center text-sm text-muted-foreground">
-                No care plan has been created for this case.
+              <div className="grid overflow-hidden rounded-xl border border-border/70 bg-surface-subtle sm:grid-cols-2 sm:divide-x sm:divide-border/70">
+                <CaseMetadata label="Session records" value={`${orderedSessions.length}`} />
+                <CaseMetadata label="Care plan" value={carePlan ? "In place" : "Not created"} />
               </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="sessions">
+          <Card className="case-work-panel">
+            <CardHeader>
+              <div className="session-record-header">
+                <div>
+                  <CardTitle>Session records</CardTitle>
+                  <CardDescription>Appointment shells and manual records for the case.</CardDescription>
+                </div>
+                <Button onClick={onCreateSession}>
+                  <PlusIcon data-icon="inline-start" />
+                  New record
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="session-record-list flex flex-col gap-1">
+              {sessionsError ? <ErrorAlert message={sessionsError.message} /> : null}
+              {isSessionsLoading ? (
+                <LoadingTable />
+              ) : orderedSessions.length === 0 ? (
+                <div className="flex min-h-36 items-center justify-center py-8 text-center text-sm text-muted-foreground">No session records for this case yet.</div>
+              ) : (
+                <>
+                  <div className="session-record-columns type-label border-y border-border/70 py-3 text-muted-foreground">
+                    <span>Date &amp; time</span>
+                    <span>Note status</span>
+                    <span>Attendance / modality</span>
+                    <span>Summary</span>
+                    <span className="sr-only">Actions</span>
+                  </div>
+                  {orderedSessions.map((record, index) => (
+                    <SessionRecordRow
+                      key={record.id}
+                      record={record}
+                      showDivider={index < orderedSessions.length - 1}
+                      signerName={signerName(record)}
+                      onEdit={() => onEditSession(record)}
+                      onSign={() => onSignSession(record)}
+                      onView={() => onViewSession(record)}
+                    />
+                  ))}
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="care-plan">
+          <Card tone="quiet" className="border border-border/60 bg-card">
+            <CardHeader>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <CardTitle>Care plan</CardTitle>
+                  <CardDescription>Focus, review date, and goal progress.</CardDescription>
+                </div>
+                <Button variant="outline" onClick={onEditCarePlan}>{carePlan ? "Edit" : "Create"}</Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {carePlanError && !isNotFound(carePlanError) ? (
+                <ErrorAlert message={carePlanError.message} />
+              ) : isCarePlanLoading ? (
+                <LoadingTable />
+              ) : carePlan ? (
+                <CarePlanSummary carePlan={carePlan} onViewAllGoals={onViewAllGoals} />
+              ) : (
+                <div className="flex min-h-36 items-center justify-center py-8 text-center text-sm text-muted-foreground">No care plan has been created for this case.</div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
@@ -644,33 +793,34 @@ function SessionRecordRow({
   return (
     <div className="flex flex-col">
       <div className="session-record-row grid gap-4 py-5">
-        <div>
+        <div className="session-record-date">
           <p className="text-sm font-semibold">
+            {new Date(record.sessionDate).toLocaleDateString("en-GB", {
+              day: "numeric",
+              month: "short",
+              year: "numeric",
+            })}
+          </p>
+          <p className="text-xs text-muted-foreground">
             {new Date(record.sessionDate).toLocaleTimeString("en-GB", {
               hour: "2-digit",
               minute: "2-digit",
             })}
           </p>
-          <p className="text-xs text-muted-foreground">
-            {new Date(record.sessionDate).toLocaleDateString("en-GB", {
-              month: "short",
-              day: "numeric",
-            })}
-          </p>
         </div>
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <StatusBadge status={record.noteStatus} />
-            <StatusBadge status={record.attendanceStatus} />
-            <StatusBadge status={record.modality} />
-          </div>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            {record.summary ?? "No summary has been added yet."}
-          </p>
+        <div className="session-record-note flex flex-wrap items-start">
+          <StatusBadge status={record.noteStatus} />
+        </div>
+        <div className="session-record-attendance flex flex-wrap items-start gap-2">
+          <StatusBadge status={record.attendanceStatus} />
+          <StatusBadge status={record.modality} />
+        </div>
+        <div className="session-record-summary min-w-0">
+          <p className="text-sm leading-6 text-muted-foreground">{record.summary ?? "No summary has been added yet."}</p>
           <SignatureLine record={record} signerName={signerName} />
         </div>
         <DropdownMenu>
-          <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" />}>
+          <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" className="session-record-actions" />}>
             <MoreHorizontalIcon />
             <span className="sr-only">Session record actions</span>
           </DropdownMenuTrigger>
