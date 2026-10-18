@@ -60,25 +60,134 @@ class ClinicalDomainTest {
         assertThatThrownBy(() -> CarePlan.create(new CarePlanId(UUID.randomUUID()), clinicalCase,
                 "Focus", "Weekly", LocalDate.now(), List.of(), NOW))
                 .isInstanceOf(IllegalArgumentException.class);
+        CareGoal duplicate = new CareGoal(goal.id(), "Same id", null, GoalStatus.NOT_STARTED, 0);
+        assertThatThrownBy(() -> CarePlan.create(new CarePlanId(UUID.randomUUID()), clinicalCase,
+                "Focus", "Weekly", LocalDate.now(), List.of(goal, duplicate), NOW))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> plan.replace("Focus", "Weekly", LocalDate.now(), List.of(goal, duplicate),
+                NOW.plusSeconds(60))).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
-    void sessionRecordSupportsAppointmentShellAndSignedUpdate() {
+    void sessionRecordMovesFromAppointmentShellToDraftToSignedNote() {
         SessionRecord session = SessionRecord.fromCompletedAppointment(new SessionRecordId(UUID.randomUUID()),
                 clinicalCase().id(), PSYCHOLOGIST_ID, PATIENT_ID, new AppointmentId(UUID.randomUUID()),
                 NOW, SessionModality.ONLINE, 50, NOW);
 
         assertThat(session.noteStatus()).isEqualTo(NoteStatus.PENDING_NOTE);
+        assertThat(session.signedAt()).isEmpty();
+        assertThat(session.signedBy()).isEmpty();
 
         session.update(session.clinicalCaseId().orElseThrow(), NOW.plusSeconds(30), SessionModality.ONLINE,
-                55, AttendanceStatus.ATTENDED, NoteStatus.SIGNED, "Summary", "Focus",
+                55, AttendanceStatus.ATTENDED, NoteStatus.DRAFT, "Summary", "Focus",
                 "Intervention", "Homework", "Next", NOW.plusSeconds(60));
 
-        assertThat(session.noteStatus()).isEqualTo(NoteStatus.SIGNED);
+        assertThat(session.noteStatus()).isEqualTo(NoteStatus.DRAFT);
         assertThat(session.summary()).isEqualTo("Summary");
         assertThatThrownBy(() -> session.update(null, NOW, SessionModality.ONLINE, 500,
                 AttendanceStatus.ATTENDED, NoteStatus.DRAFT, null, null, null, null, null, NOW))
                 .isInstanceOf(IllegalArgumentException.class);
+
+        SessionRecord signed = session.sign(PSYCHOLOGIST_ID, NOW.plusSeconds(120));
+
+        assertThat(signed).isSameAs(session);
+        assertThat(session.noteStatus()).isEqualTo(NoteStatus.SIGNED);
+        assertThat(session.signedAt()).contains(NOW.plusSeconds(120));
+        assertThat(session.signedBy()).contains(PSYCHOLOGIST_ID);
+        assertThat(session.updatedAt()).isEqualTo(NOW.plusSeconds(120));
+        assertThat(session.summary()).isEqualTo("Summary");
+    }
+
+    @Test
+    void editsMoveNotesBetweenPendingAndDraftButNeverSign() {
+        SessionRecord session = draftSession("Summary");
+
+        session.update(null, NOW, SessionModality.ONLINE, 50, AttendanceStatus.ATTENDED,
+                NoteStatus.PENDING_NOTE, "Summary", null, null, null, null, NOW.plusSeconds(10));
+        assertThat(session.noteStatus()).isEqualTo(NoteStatus.PENDING_NOTE);
+        session.update(null, NOW, SessionModality.ONLINE, 50, AttendanceStatus.ATTENDED,
+                NoteStatus.DRAFT, "Summary", null, null, null, null, NOW.plusSeconds(20));
+        assertThat(session.noteStatus()).isEqualTo(NoteStatus.DRAFT);
+
+        assertThatThrownBy(() -> session.update(null, NOW, SessionModality.ONLINE, 50, AttendanceStatus.ATTENDED,
+                NoteStatus.SIGNED, "Changed", null, null, null, null, NOW.plusSeconds(30)))
+                .isInstanceOf(InvalidNoteTransitionException.class);
+        assertThat(session.noteStatus()).isEqualTo(NoteStatus.DRAFT);
+        assertThat(session.summary()).isEqualTo("Summary");
+        assertThat(session.signedAt()).isEmpty();
+        assertThat(session.updatedAt()).isEqualTo(NOW.plusSeconds(20));
+    }
+
+    @Test
+    void signingRequiresTheTreatingPsychologistADraftAndASummary() {
+        SessionRecord pending = SessionRecord.fromCompletedAppointment(new SessionRecordId(UUID.randomUUID()),
+                null, PSYCHOLOGIST_ID, PATIENT_ID, null, NOW, SessionModality.ONLINE, 50, NOW);
+        assertThatThrownBy(() -> pending.sign(PSYCHOLOGIST_ID, NOW))
+                .isInstanceOf(SessionRecordNotSignableException.class);
+        assertThat(pending.noteStatus()).isEqualTo(NoteStatus.PENDING_NOTE);
+
+        SessionRecord pendingWithSummary = SessionRecord.rehydrate(new SessionRecordId(UUID.randomUUID()), null,
+                PSYCHOLOGIST_ID, PATIENT_ID, null, NOW, SessionModality.ONLINE, 50, AttendanceStatus.ATTENDED,
+                NoteStatus.PENDING_NOTE, "Summary", null, null, null, null, NOW, NOW, null, null);
+        assertThatThrownBy(() -> pendingWithSummary.sign(PSYCHOLOGIST_ID, NOW))
+                .isInstanceOf(SessionRecordNotSignableException.class);
+
+        SessionRecord draftWithoutSummary = draftSession("   ");
+        assertThatThrownBy(() -> draftWithoutSummary.sign(PSYCHOLOGIST_ID, NOW))
+                .isInstanceOf(SessionRecordNotSignableException.class);
+        assertThat(draftWithoutSummary.noteStatus()).isEqualTo(NoteStatus.DRAFT);
+
+        SessionRecord draft = draftSession("Summary");
+        assertThatThrownBy(() -> draft.sign(new PsychologistId(UUID.randomUUID()), NOW))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> draft.sign(null, NOW)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> draft.sign(PSYCHOLOGIST_ID, null)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> draft.sign(PSYCHOLOGIST_ID, NOW.minusSeconds(1)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(draft.noteStatus()).isEqualTo(NoteStatus.DRAFT);
+        assertThat(draft.signedAt()).isEmpty();
+        assertThat(draft.signedBy()).isEmpty();
+
+        assertThat(draft.sign(PSYCHOLOGIST_ID, NOW).signedAt()).contains(NOW);
+    }
+
+    @Test
+    void signedNotesRejectEditsResigningAndStatusRegression() {
+        SessionRecord session = draftSession("Summary").sign(PSYCHOLOGIST_ID, NOW.plusSeconds(60));
+
+        for (NoteStatus target : NoteStatus.values()) {
+            assertThatThrownBy(() -> session.update(null, NOW, SessionModality.IN_PERSON, 30,
+                    AttendanceStatus.NO_SHOW, target, "Rewritten", "Focus", null, null, null, NOW.plusSeconds(120)))
+                    .isInstanceOf(SignedSessionRecordException.class);
+        }
+        assertThatThrownBy(() -> session.update(null, null, null, 30, null, null, null, null, null, null, null,
+                null)).isInstanceOf(SignedSessionRecordException.class);
+        assertThatThrownBy(() -> session.sign(PSYCHOLOGIST_ID, NOW.plusSeconds(120)))
+                .isInstanceOf(SignedSessionRecordException.class);
+
+        assertThat(session.noteStatus()).isEqualTo(NoteStatus.SIGNED);
+        assertThat(session.summary()).isEqualTo("Summary");
+        assertThat(session.modality()).isEqualTo(SessionModality.ONLINE);
+        assertThat(session.attendanceStatus()).isEqualTo(AttendanceStatus.ATTENDED);
+        assertThat(session.durationMinutes()).isEqualTo(50);
+        assertThat(session.clinicalCaseId()).isPresent();
+        assertThat(session.signedAt()).contains(NOW.plusSeconds(60));
+        assertThat(session.updatedAt()).isEqualTo(NOW.plusSeconds(60));
+    }
+
+    @Test
+    void rehydrationRequiresSignatureExactlyForSignedNotes() {
+        assertInconsistentSignature(NoteStatus.SIGNED, null, null);
+        assertInconsistentSignature(NoteStatus.SIGNED, NOW, null);
+        assertInconsistentSignature(NoteStatus.SIGNED, null, PSYCHOLOGIST_ID);
+        assertInconsistentSignature(NoteStatus.DRAFT, NOW, PSYCHOLOGIST_ID);
+        assertInconsistentSignature(NoteStatus.DRAFT, NOW, null);
+        assertInconsistentSignature(NoteStatus.PENDING_NOTE, null, PSYCHOLOGIST_ID);
+
+        SessionRecord signed = SessionRecord.rehydrate(new SessionRecordId(UUID.randomUUID()), null,
+                PSYCHOLOGIST_ID, PATIENT_ID, null, NOW, SessionModality.ONLINE, 50, AttendanceStatus.ATTENDED,
+                NoteStatus.SIGNED, "Summary", null, null, null, null, NOW, NOW, NOW, PSYCHOLOGIST_ID);
+        assertThat(signed.signedBy()).contains(PSYCHOLOGIST_ID);
     }
 
     @Test
@@ -144,7 +253,7 @@ class ClinicalDomainTest {
         SessionRecord session = SessionRecord.rehydrate(sessionId, clinicalCase.id(), PSYCHOLOGIST_ID,
                 PATIENT_ID, appointmentId, NOW, SessionModality.ONLINE, 50,
                 AttendanceStatus.ATTENDED, NoteStatus.SIGNED, "Summary", "Focus", "CBT",
-                "Homework", "Next", NOW, NOW.plusSeconds(1));
+                "Homework", "Next", NOW, NOW.plusSeconds(1), NOW.plusSeconds(1), PSYCHOLOGIST_ID);
         SessionRecord sameSession = SessionRecord.fromCompletedAppointment(sessionId, null, PSYCHOLOGIST_ID,
                 PATIENT_ID, appointmentId, NOW, SessionModality.IN_PERSON, 45, NOW);
         assertThat(session).isEqualTo(sameSession).hasSameHashCodeAs(sameSession);
@@ -166,6 +275,8 @@ class ClinicalDomainTest {
         assertThat(session.nextSteps()).isEqualTo("Next");
         assertThat(session.createdAt()).isEqualTo(NOW);
         assertThat(session.updatedAt()).isEqualTo(NOW.plusSeconds(1));
+        assertThat(session.signedAt()).contains(NOW.plusSeconds(1));
+        assertThat(session.signedBy()).contains(PSYCHOLOGIST_ID);
     }
 
     @Test
@@ -359,8 +470,21 @@ class ClinicalDomainTest {
                                       Instant sessionDate, SessionModality modality, AttendanceStatus attendance,
                                       NoteStatus noteStatus, Instant createdAt, Instant updatedAt) {
         assertThatThrownBy(() -> SessionRecord.rehydrate(id, null, psychologistId, patientId, null, sessionDate,
-                modality, 50, attendance, noteStatus, null, null, null, null, null, createdAt, updatedAt))
+                modality, 50, attendance, noteStatus, null, null, null, null, null, createdAt, updatedAt,
+                null, null)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    private void assertInconsistentSignature(NoteStatus noteStatus, Instant signedAt, PsychologistId signedBy) {
+        assertThatThrownBy(() -> SessionRecord.rehydrate(new SessionRecordId(UUID.randomUUID()), null,
+                PSYCHOLOGIST_ID, PATIENT_ID, null, NOW, SessionModality.ONLINE, 50, AttendanceStatus.ATTENDED,
+                noteStatus, "Summary", null, null, null, null, NOW, NOW, signedAt, signedBy))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    private SessionRecord draftSession(String summary) {
+        return SessionRecord.rehydrate(new SessionRecordId(UUID.randomUUID()), clinicalCase().id(),
+                PSYCHOLOGIST_ID, PATIENT_ID, null, NOW, SessionModality.ONLINE, 50, AttendanceStatus.ATTENDED,
+                NoteStatus.DRAFT, summary, null, null, null, null, NOW, NOW, null, null);
     }
 
     private void assertInvalidUpdate(SessionRecord session, Instant sessionDate, SessionModality modality,

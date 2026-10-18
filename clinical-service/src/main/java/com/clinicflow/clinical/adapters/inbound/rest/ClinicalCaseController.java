@@ -98,6 +98,11 @@ public class ClinicalCaseController {
         return mapper.toResponse(clinicalService.updateSessionRecord(mapper.toCommand(userId(jwt), id, request)));
     }
 
+    @PostMapping("/session-records/{id}/sign")
+    public SessionRecordResponse signSession(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        return mapper.toResponse(clinicalService.signSessionRecord(mapper.toSignCommand(userId(jwt), id)));
+    }
+
     @GetMapping("/patients/{patientId}/clinical-history")
     public PatientClinicalHistoryResponse history(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID patientId) {
         return mapper.toResponse(clinicalService.getPatientClinicalHistory(mapper.toHistoryQuery(

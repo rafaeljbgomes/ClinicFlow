@@ -248,7 +248,25 @@ service delivery. See [ADR-018](decisions/ADR-018-traefik-gateway.md) for the ro
 CRD lifecycle, TLS, local quotas, telemetry, and acceptance limitations. ADR-018 supersedes
 ADR-013's direct UI exposure and ADR-014's unchanged frontend service URLs.
 
-## ADR-019: Transactional Outbox for Producer Reliability
+## ADR-019: Signed Session Notes Are Final
+
+Decision: signing a session note is its own action (`POST /session-records/{id}/sign`), allowed
+only for the treating psychologist on a `DRAFT` note with a summary. It records `signedAt` and
+`signedBy`. Edits through `PATCH /session-records/{id}` only move notes between `PENDING_NOTE`
+and `DRAFT`. They return `400 invalid_note_transition` for `SIGNED` and `409 session_record_signed`
+for a signed note. Signing an incomplete note returns `409 session_record_not_signable`.
+
+The domain enforces the lock, and PostgreSQL backs it (`V2__lock_signed_session_records.sql`). A
+CHECK constraint ties the signature columns to `note_status`. A row trigger rejects `DELETE` and
+any changing `UPDATE` of a signed row with SQLSTATE `23L01`, which the persistence adapter maps to
+the same `409`. This closes the stale-edit race that exists until optimistic locking lands, and
+covers code paths that bypass `update()`.
+
+Consequences: demo seeding inserts session records only when absent. Corrections need linked
+amendment records, which are future work; until then a signed note cannot be changed. A database
+superuser can still disable triggers, and `TRUNCATE` does not fire them.
+
+## ADR-020: Transactional Outbox for Producer Reliability
 
 Decision: patient-service and appointment-service persist outbound domain events
 to a service-local PostgreSQL outbox in the same transaction as their aggregate

@@ -11,8 +11,11 @@ import com.clinicflow.clinical.application.results.SessionRecordResult;
 import com.clinicflow.clinical.domain.AttendanceStatus;
 import com.clinicflow.clinical.domain.ClinicalCaseStatus;
 import com.clinicflow.clinical.domain.GoalStatus;
+import com.clinicflow.clinical.domain.InvalidNoteTransitionException;
 import com.clinicflow.clinical.domain.NoteStatus;
 import com.clinicflow.clinical.domain.SessionModality;
+import com.clinicflow.clinical.domain.SessionRecordNotSignableException;
+import com.clinicflow.clinical.domain.SignedSessionRecordException;
 import com.clinicflow.clinical.infrastructure.security.SecurityConfig;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -75,6 +78,7 @@ class ClinicalControllerTest {
         when(clinicalService.listSessionRecords(any())).thenReturn(List.of(session()));
         when(clinicalService.createSessionRecord(any())).thenReturn(session());
         when(clinicalService.updateSessionRecord(any())).thenReturn(session());
+        when(clinicalService.signSessionRecord(any())).thenReturn(signedSession());
         when(clinicalService.getPatientClinicalHistory(any())).thenReturn(history());
 
         mvc.perform(get("/practice-profile").with(jwtFor("ROLE_PSYCHOLOGIST")))
@@ -144,9 +148,15 @@ class ClinicalControllerTest {
                                 {"clinicalCaseId":"cccccccc-cccc-cccc-cccc-cccccccccccc",
                                  "sessionDate":"2026-06-01T10:00:00Z","modality":"ONLINE",
                                  "durationMinutes":50,"attendanceStatus":"ATTENDED",
-                                 "noteStatus":"SIGNED","summary":"Signed summary"}
+                                 "noteStatus":"DRAFT","summary":"Draft summary"}
                                 """))
                 .andExpect(status().isOk());
+
+        mvc.perform(post("/session-records/{id}/sign", SESSION_ID).with(jwtFor("ROLE_PSYCHOLOGIST")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.noteStatus").value("SIGNED"))
+                .andExpect(jsonPath("$.signedBy").value(PSYCHOLOGIST_ID.toString()))
+                .andExpect(jsonPath("$.signedAt").value("2026-06-01T11:00:00Z"));
 
         mvc.perform(get("/patients/{id}/clinical-history", PATIENT_ID).with(jwtFor("ROLE_PSYCHOLOGIST")))
                 .andExpect(status().isOk())
@@ -165,6 +175,37 @@ class ClinicalControllerTest {
                                 """))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.title").value("Active clinical case exists"));
+    }
+
+    @Test
+    void mapsSessionNoteLockFailuresToStableProblemCodes() throws Exception {
+        when(clinicalService.updateSessionRecord(any()))
+                .thenThrow(new SignedSessionRecordException())
+                .thenThrow(new InvalidNoteTransitionException());
+        when(clinicalService.signSessionRecord(any()))
+                .thenThrow(new SignedSessionRecordException())
+                .thenThrow(new SessionRecordNotSignableException());
+
+        String update = """
+                {"sessionDate":"2026-06-01T10:00:00Z","modality":"ONLINE","durationMinutes":50,
+                 "attendanceStatus":"ATTENDED","noteStatus":"SIGNED","summary":"Summary"}
+                """;
+        mvc.perform(patch("/session-records/{id}", SESSION_ID).with(jwtFor("ROLE_PSYCHOLOGIST"))
+                        .contentType(MediaType.APPLICATION_JSON).content(update))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("session_record_signed"));
+        mvc.perform(patch("/session-records/{id}", SESSION_ID).with(jwtFor("ROLE_PSYCHOLOGIST"))
+                        .contentType(MediaType.APPLICATION_JSON).content(update))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("invalid_note_transition"));
+        mvc.perform(post("/session-records/{id}/sign", SESSION_ID).with(jwtFor("ROLE_PSYCHOLOGIST")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("session_record_signed"));
+        mvc.perform(post("/session-records/{id}/sign", SESSION_ID).with(jwtFor("ROLE_PSYCHOLOGIST")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("session_record_not_signable"));
+        mvc.perform(post("/session-records/{id}/sign", SESSION_ID).with(jwtFor("ROLE_PATIENT")))
+                .andExpect(status().isForbidden());
     }
 
     private org.springframework.test.web.servlet.request.RequestPostProcessor jwtFor(String authority) {
@@ -193,7 +234,14 @@ class ClinicalControllerTest {
     private SessionRecordResult session() {
         return new SessionRecordResult(SESSION_ID, CASE_ID, PSYCHOLOGIST_ID, PATIENT_ID, null,
                 NOW, SessionModality.ONLINE, 50, AttendanceStatus.ATTENDED, NoteStatus.DRAFT,
-                "Session summary", null, null, null, null, NOW, NOW);
+                "Session summary", null, null, null, null, NOW, NOW, null, null);
+    }
+
+    private SessionRecordResult signedSession() {
+        Instant signedAt = Instant.parse("2026-06-01T11:00:00Z");
+        return new SessionRecordResult(SESSION_ID, CASE_ID, PSYCHOLOGIST_ID, PATIENT_ID, null,
+                NOW, SessionModality.ONLINE, 50, AttendanceStatus.ATTENDED, NoteStatus.SIGNED,
+                "Session summary", null, null, null, null, NOW, signedAt, signedAt, PSYCHOLOGIST_ID);
     }
 
     private PatientClinicalHistoryResult history() {

@@ -33,6 +33,8 @@ class JpaSessionRecordEntity {
     @Column(name = "next_steps", length = 1000) private String nextSteps;
     @Column(name = "created_at", nullable = false) private Instant createdAt;
     @Column(name = "updated_at", nullable = false) private Instant updatedAt;
+    @Column(name = "signed_at") private Instant signedAt;
+    @Column(name = "signed_by") private UUID signedBy;
 
     protected JpaSessionRecordEntity() {}
 
@@ -40,13 +42,14 @@ class JpaSessionRecordEntity {
                            UUID appointmentId, Instant sessionDate, SessionModality modality, int durationMinutes,
                            AttendanceStatus attendanceStatus, NoteStatus noteStatus, String summary,
                            String focusAreas, String interventions, String homework, String nextSteps,
-                           Instant createdAt, Instant updatedAt) {
+                           Instant createdAt, Instant updatedAt, Instant signedAt, UUID signedBy) {
         this.id = id; this.clinicalCaseId = clinicalCaseId; this.psychologistId = psychologistId;
         this.patientId = patientId; this.appointmentId = appointmentId; this.sessionDate = sessionDate;
         this.modality = modality; this.durationMinutes = durationMinutes;
         this.attendanceStatus = attendanceStatus; this.noteStatus = noteStatus; this.summary = summary;
         this.focusAreas = focusAreas; this.interventions = interventions; this.homework = homework;
         this.nextSteps = nextSteps; this.createdAt = createdAt; this.updatedAt = updatedAt;
+        this.signedAt = signedAt; this.signedBy = signedBy;
     }
 
     UUID id() { return id; }
@@ -66,4 +69,6 @@ class JpaSessionRecordEntity {
     String nextSteps() { return nextSteps; }
     Instant createdAt() { return createdAt; }
     Instant updatedAt() { return updatedAt; }
+    Instant signedAt() { return signedAt; }
+    UUID signedBy() { return signedBy; }
 }

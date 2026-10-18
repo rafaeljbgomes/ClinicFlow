@@ -6,6 +6,7 @@ import com.clinicflow.clinical.application.commands.CreateClinicalCaseCommand;
 import com.clinicflow.clinical.application.commands.CreateSessionRecordCommand;
 import com.clinicflow.clinical.application.commands.ProcessAppointmentCompletedCommand;
 import com.clinicflow.clinical.application.commands.PutCarePlanCommand;
+import com.clinicflow.clinical.application.commands.SignSessionRecordCommand;
 import com.clinicflow.clinical.application.commands.UpdatePracticeProfileCommand;
 import com.clinicflow.clinical.application.commands.UpdateSessionRecordCommand;
 import com.clinicflow.clinical.application.exceptions.ActiveClinicalCaseExistsException;
@@ -46,7 +47,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class ClinicalService {
@@ -133,8 +137,12 @@ public class ClinicalService {
     public CarePlanResult putCarePlan(PutCarePlanCommand command) {
         ClinicalCase clinicalCase = requireOwnedCase(command.psychologistId(), command.clinicalCaseId());
         Instant now = Instant.now();
-        List<CareGoal> goals = command.goals().stream().map(this::toGoal).toList();
-        CarePlan carePlan = carePlans.findByClinicalCaseId(clinicalCase.id())
+        Optional<CarePlan> existingPlan = carePlans.findByClinicalCaseId(clinicalCase.id());
+        Set<CareGoalId> ownedGoalIds = existingPlan
+                .map(plan -> plan.goals().stream().map(CareGoal::id).collect(Collectors.toSet()))
+                .orElseGet(Set::of);
+        List<CareGoal> goals = command.goals().stream().map(input -> toGoal(input, ownedGoalIds)).toList();
+        CarePlan carePlan = existingPlan
                 .map(existing -> existing.replace(command.therapeuticFocus(), command.plannedFrequency(),
                         command.reviewDate(), goals, now))
                 .orElseGet(() -> CarePlan.create(new CarePlanId(UUID.randomUUID()), clinicalCase,
@@ -186,6 +194,16 @@ public class ClinicalService {
     }
 
     @Transactional
+    public SessionRecordResult signSessionRecord(SignSessionRecordCommand command) {
+        SessionRecord session = sessionRecords.findById(command.sessionRecordId())
+                .orElseThrow(SessionRecordNotFoundException::new);
+        ensureOwned(command.psychologistId(), session.psychologistId());
+        session.sign(command.psychologistId(), Instant.now());
+        sessionRecords.save(session);
+        return mapper.toResult(session);
+    }
+
+    @Transactional
     public void processAppointmentCompleted(ProcessAppointmentCompletedCommand command) {
         if (sessionRecords.findByAppointmentId(command.appointmentId()).isPresent()) {
             return;
@@ -228,9 +246,18 @@ public class ClinicalService {
         }
     }
 
-    private CareGoal toGoal(CareGoalInput input) {
-        return new CareGoal(new CareGoalId(input.id() == null ? UUID.randomUUID() : input.id()),
-                input.description(), input.targetDate(),
+    // Goal IDs are only accepted when they already belong to this plan; new goals always get server IDs.
+    private CareGoal toGoal(CareGoalInput input, Set<CareGoalId> ownedGoalIds) {
+        CareGoalId goalId;
+        if (input.id() == null) {
+            goalId = new CareGoalId(UUID.randomUUID());
+        } else {
+            goalId = new CareGoalId(input.id());
+            if (!ownedGoalIds.contains(goalId)) {
+                throw new ClinicalAccessDeniedException();
+            }
+        }
+        return new CareGoal(goalId, input.description(), input.targetDate(),
                 input.status() == null ? GoalStatus.NOT_STARTED : input.status(),
                 input.progressPercentage());
     }
