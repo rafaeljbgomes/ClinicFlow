@@ -179,10 +179,32 @@
 .session-record-list { container-type: inline-size; }
 .session-record-header { display: flex; flex-direction: column; gap: .75rem; }
 .session-record-header > :last-child { align-self: flex-start; }
+.session-record-columns { display: none; }
+.session-record-row { grid-template-columns: minmax(0, 1fr) auto; }
+.session-record-note,
+.session-record-attendance,
+.session-record-summary { grid-column: 1 / -1; }
+.session-record-actions { grid-column: 2; grid-row: 1; }
 
 @container (min-width: 32rem) {
   .session-record-header { flex-direction: row; align-items: flex-start; justify-content: space-between; gap: 1rem; }
-  .session-record-row { grid-template-columns: 6rem minmax(0, 1fr) auto; align-items: start; }
+  .session-record-row { grid-template-columns: 7rem minmax(0, 1fr) auto; align-items: start; }
+  .session-record-date { grid-column: 1; grid-row: 1 / span 3; }
+  .session-record-note { grid-column: 2; grid-row: 1; }
+  .session-record-attendance { grid-column: 2; grid-row: 2; }
+  .session-record-summary { grid-column: 2; grid-row: 3; }
+  .session-record-actions { grid-column: 3; grid-row: 1; }
+}
+
+@container (min-width: 56rem) {
+  .session-record-columns,
+  .session-record-row { grid-template-columns: 8rem 10rem 14rem minmax(0, 1fr) 2rem; gap: 1rem; }
+  .session-record-columns { display: grid; align-items: center; }
+  .session-record-date,
+  .session-record-note,
+  .session-record-attendance,
+  .session-record-summary,
+  .session-record-actions { grid-column: auto; grid-row: 1; }
 }
 
 .care-plan-preview { container-type: inline-size; }
