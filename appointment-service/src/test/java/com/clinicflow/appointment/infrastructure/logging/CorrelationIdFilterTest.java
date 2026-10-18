@@ -6,6 +6,8 @@ import org.slf4j.MDC;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
+import java.util.UUID;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -43,5 +45,25 @@ class CorrelationIdFilterTest {
 
         assertThat(missingResponse.getHeader(CorrelationIdFilter.HEADER)).isNotBlank();
         assertThat(blankResponse.getHeader(CorrelationIdFilter.HEADER)).isNotBlank();
+    }
+
+    @Test
+    void replacesOversizedOrUnsafeCorrelationIdsButKeepsTheMaximumLength() throws Exception {
+        String maximum = "a".repeat(128);
+        for (String unacceptable : new String[] {"a".repeat(129), "bad id", "bad;id"}) {
+            MockHttpServletRequest request = new MockHttpServletRequest();
+            request.addHeader(CorrelationIdFilter.HEADER, unacceptable);
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            filter.doFilter(request, response, mock(FilterChain.class));
+
+            assertThat(UUID.fromString(response.getHeader(CorrelationIdFilter.HEADER))).isNotNull();
+        }
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader(CorrelationIdFilter.HEADER, maximum);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        filter.doFilter(request, response, mock(FilterChain.class));
+
+        assertThat(response.getHeader(CorrelationIdFilter.HEADER)).isEqualTo(maximum);
     }
 }

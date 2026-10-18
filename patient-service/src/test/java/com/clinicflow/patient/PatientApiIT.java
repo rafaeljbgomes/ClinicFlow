@@ -1,6 +1,11 @@
 package com.clinicflow.patient;
 
-import com.clinicflow.patient.application.ports.PatientEventPublisher;
+import com.clinicflow.patient.application.PatientService;
+import com.clinicflow.patient.application.commands.CreatePatientCommand;
+import com.clinicflow.patient.domain.ConsentStatus;
+import com.clinicflow.patient.domain.EmailAddress;
+import com.clinicflow.patient.domain.FullName;
+import com.clinicflow.patient.domain.PsychologistId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,6 +20,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -24,11 +30,13 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.when;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "clinicflow.demo.enabled=false",
+        "clinicflow.outbox.enabled=false",
         "spring.rabbitmq.listener.simple.auto-startup=false"
 })
 @Testcontainers
@@ -44,13 +52,14 @@ class PatientApiIT {
 
     @Autowired private TestRestTemplate http;
     @Autowired private JdbcTemplate jdbc;
+    @Autowired private PatientService patientService;
+    @Autowired private TransactionTemplate transactions;
     @MockitoBean private JwtDecoder jwtDecoder;
-    @MockitoBean private PatientEventPublisher eventPublisher;
 
     @BeforeEach
     void cleanDatabaseAndConfigureSecurity() {
-        jdbc.execute("TRUNCATE TABLE patients");
-        reset(jwtDecoder, eventPublisher);
+        jdbc.execute("TRUNCATE TABLE outbox_events, patients");
+        reset(jwtDecoder);
         when(jwtDecoder.decode("psychologist-token")).thenReturn(jwt(PSYCHOLOGIST_ID, "PSYCHOLOGIST"));
         when(jwtDecoder.decode("patient-token")).thenReturn(jwt(UUID.randomUUID(), "PATIENT"));
     }
@@ -65,6 +74,7 @@ class PatientApiIT {
                 "consentStatus", "GRANTED"));
         assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         String id = created.getBody().get("id").toString();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM outbox_events", Long.class)).isEqualTo(1);
 
         var updated = exchange("/patients/" + id, HttpMethod.PUT, Map.of(
                 "fullName", "Updated Name",
@@ -87,6 +97,43 @@ class PatientApiIT {
                 new HttpEntity<>(bearer("psychologist-token")), Object[].class);
         assertThat(listed.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(listed.getBody()).hasSize(1);
+    }
+
+    @Test
+    void rollsBackPatientAndOutboxEventTogether() {
+        CreatePatientCommand command = new CreatePatientCommand(
+                new PsychologistId(PSYCHOLOGIST_ID),
+                new EmailAddress("rollback@example.com"),
+                new FullName("Rollback Patient"),
+                null, null, null, null, null,
+                ConsentStatus.GRANTED
+        );
+
+        assertThatThrownBy(() -> transactions.executeWithoutResult(status -> {
+            patientService.create(command);
+            throw new IllegalStateException("force rollback");
+        })).isInstanceOf(IllegalStateException.class);
+
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM patients", Long.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM outbox_events", Long.class)).isZero();
+    }
+
+    @Test
+    void replacesOversizedCorrelationIdInsteadOfRollingBackTheWrite() {
+        HttpHeaders headers = bearer("psychologist-token");
+        headers.set("X-Correlation-Id", "a".repeat(129));
+        var created = http.exchange("/patients", HttpMethod.POST, new HttpEntity<>(Map.of(
+                "email", "correlation@example.com",
+                "fullName", "Correlation Patient",
+                "phone", "+351912345678",
+                "contactPreference", "EMAIL",
+                "consentStatus", "GRANTED"), headers), Map.class);
+
+        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        String correlationId = created.getHeaders().getFirst("X-Correlation-Id");
+        assertThat(UUID.fromString(correlationId)).isNotNull();
+        assertThat(jdbc.queryForObject("SELECT correlation_id FROM outbox_events", String.class))
+                .isEqualTo(correlationId);
     }
 
     @Test

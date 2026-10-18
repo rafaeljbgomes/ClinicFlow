@@ -1,6 +1,11 @@
 package com.clinicflow.appointment;
 
-import com.clinicflow.appointment.application.ports.AppointmentEventPublisher;
+import com.clinicflow.appointment.application.AppointmentService;
+import com.clinicflow.appointment.application.commands.ScheduleAppointmentCommand;
+import com.clinicflow.appointment.domain.AppointmentDate;
+import com.clinicflow.appointment.domain.AppointmentType;
+import com.clinicflow.appointment.domain.PatientId;
+import com.clinicflow.appointment.domain.PsychologistId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,6 +20,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -25,11 +31,13 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.when;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "clinicflow.demo.enabled=false",
+        "clinicflow.outbox.enabled=false",
         "spring.rabbitmq.listener.simple.auto-startup=false"
 })
 @Testcontainers
@@ -46,13 +54,14 @@ class AppointmentApiIT {
 
     @Autowired private TestRestTemplate http;
     @Autowired private JdbcTemplate jdbc;
+    @Autowired private AppointmentService appointmentService;
+    @Autowired private TransactionTemplate transactions;
     @MockitoBean private JwtDecoder jwtDecoder;
-    @MockitoBean private AppointmentEventPublisher eventPublisher;
 
     @BeforeEach
     void cleanDatabaseAndConfigureSecurity() {
-        jdbc.execute("TRUNCATE TABLE appointments");
-        reset(jwtDecoder, eventPublisher);
+        jdbc.execute("TRUNCATE TABLE outbox_events, appointments");
+        reset(jwtDecoder);
         when(jwtDecoder.decode("psychologist-token")).thenReturn(jwt("PSYCHOLOGIST"));
         when(jwtDecoder.decode("patient-token")).thenReturn(jwt("PATIENT"));
     }
@@ -77,10 +86,45 @@ class AppointmentApiIT {
         var completed = exchange("/appointments/" + id + "/complete", HttpMethod.PATCH, null);
         assertThat(completed.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(completed.getBody()).containsEntry("status", "COMPLETED");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM outbox_events", Long.class)).isEqualTo(3);
 
         var listed = http.exchange("/appointments", HttpMethod.GET,
                 new HttpEntity<>(bearer("psychologist-token")), Object[].class);
         assertThat(listed.getBody()).hasSize(1);
+    }
+
+    @Test
+    void rollsBackAppointmentAndOutboxEventTogether() {
+        ScheduleAppointmentCommand command = new ScheduleAppointmentCommand(
+                new PsychologistId(PSYCHOLOGIST_ID),
+                new PatientId(PATIENT_ID),
+                new AppointmentDate(Instant.now().plus(3, ChronoUnit.DAYS)),
+                AppointmentType.ONLINE
+        );
+
+        assertThatThrownBy(() -> transactions.executeWithoutResult(status -> {
+            appointmentService.schedule(command);
+            throw new IllegalStateException("force rollback");
+        })).isInstanceOf(IllegalStateException.class);
+
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM appointments", Long.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM outbox_events", Long.class)).isZero();
+    }
+
+    @Test
+    void replacesOversizedCorrelationIdInsteadOfRollingBackTheWrite() {
+        HttpHeaders headers = bearer("psychologist-token");
+        headers.set("X-Correlation-Id", "a".repeat(129));
+        var created = http.exchange("/appointments", HttpMethod.POST, new HttpEntity<>(Map.of(
+                "patientId", PATIENT_ID.toString(),
+                "scheduledAt", Instant.now().plus(3, ChronoUnit.DAYS).toString(),
+                "type", "ONLINE"), headers), Map.class);
+
+        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        String correlationId = created.getHeaders().getFirst("X-Correlation-Id");
+        assertThat(UUID.fromString(correlationId)).isNotNull();
+        assertThat(jdbc.queryForObject("SELECT correlation_id FROM outbox_events", String.class))
+                .isEqualTo(correlationId);
     }
 
     @Test
