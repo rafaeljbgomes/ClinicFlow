@@ -9,39 +9,55 @@ const user = {
 };
 
 describe("classifySession", () => {
-  it("treats a missing cookie and an authentication rejection as anonymous", () => {
-    expect(classifySession(undefined)).toEqual({ status: "anonymous" });
-    expect(classifySession("stale", { ok: false, status: 401, data: null })).toEqual({
-      status: "anonymous",
-    });
+  it("treats a missing cookie as anonymous", () => {
+    // Act
+    const session = classifySession(undefined);
+
+    // Assert
+    expect(session).toEqual({ status: "anonymous" });
   });
 
-  it("distinguishes upstream failures from invalid authentication payloads", () => {
-    expect(
-      classifySession("token", {
-        ok: false,
-        status: 503,
-        data: null,
-        unavailable: true,
-      })
-    ).toEqual({ status: "unavailable" });
-    expect(classifySession("token", { ok: true, status: 200, data: {} })).toEqual({
-      status: "invalid-response",
-    });
-    expect(
-      classifySession("token", {
-        ok: true,
-        status: 200,
-        data: null,
-        invalidJson: true,
-      })
-    ).toEqual({ status: "invalid-response" });
+  it("treats an authentication rejection as anonymous", () => {
+    // Arrange
+    const rejection = { ok: false, status: 401, data: null };
+
+    // Act
+    const session = classifySession("stale", rejection);
+
+    // Assert
+    expect(session).toEqual({ status: "anonymous" });
+  });
+
+  it("reports an upstream failure as unavailable", () => {
+    // Arrange
+    const failure = { ok: false, status: 503, data: null, unavailable: true };
+
+    // Act
+    const session = classifySession("token", failure);
+
+    // Assert
+    expect(session).toEqual({ status: "unavailable" });
+  });
+
+  it.each([
+    ["an empty user payload", { ok: true, status: 200, data: {} }],
+    ["an unparseable payload", { ok: true, status: 200, data: null, invalidJson: true }],
+  ])("reports %s as an invalid response", (_payload, result) => {
+    // Act
+    const session = classifySession("token", result);
+
+    // Assert
+    expect(session).toEqual({ status: "invalid-response" });
   });
 
   it("returns a validated authenticated user", () => {
-    expect(classifySession("token", { ok: true, status: 200, data: user })).toEqual({
-      status: "authenticated",
-      user,
-    });
+    // Arrange
+    const result = { ok: true, status: 200, data: user };
+
+    // Act
+    const session = classifySession("token", result);
+
+    // Assert
+    expect(session).toEqual({ status: "authenticated", user });
   });
 });

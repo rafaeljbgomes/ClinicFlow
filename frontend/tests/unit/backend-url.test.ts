@@ -15,19 +15,54 @@ describe("gateway routing", () => {
     ["clinical", "/practice-profile", "/api/v1/clinical/practice-profile"],
     ["notification", "/notifications", "/api/v1/notifications"],
   ] as const)("maps %s %s", (service, path, expected) => {
+    // Arrange
     vi.stubEnv("GATEWAY_URL", "http://gateway:8080/");
-    expect(backendUrl(service, path)).toBe(`http://gateway:8080${expected}`);
+
+    // Act
+    const url = backendUrl(service, path);
+
+    // Assert
+    expect(url).toBe(`http://gateway:8080${expected}`);
   });
+
   it("requires a gateway in production", () => {
-    vi.stubEnv("NODE_ENV", "production"); vi.stubEnv("GATEWAY_URL", "");
-    expect(() => backendUrl("patient", "/patients")).toThrow("GATEWAY_URL is required");
+    // Arrange
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("GATEWAY_URL", "");
+
+    // Act
+    const error = captureError(() => backendUrl("patient", "/patients"));
+
+    // Assert
+    expect(error).toMatchObject({ message: expect.stringContaining("GATEWAY_URL is required") });
   });
+
   it("keeps management traffic separate", () => {
+    // Arrange
     vi.stubEnv("GATEWAY_URL", "http://gateway:8080");
     vi.stubEnv("CLINICAL_SERVICE_HEALTH_URL", "http://clinical-service:9000");
-    expect(backendHealthUrl("clinical", "/actuator/health")).toBe("http://clinical-service:9000/actuator/health");
+
+    // Act
+    const url = backendHealthUrl("clinical", "/actuator/health");
+
+    // Assert
+    expect(url).toBe("http://clinical-service:9000/actuator/health");
   });
+
   it.each(["/actuator/health", "//evil.test/path", "/patients/../actuator", "/patients\\..\\actuator"])("rejects %s", (path) => {
-    expect(() => gatewayPath("patient", path)).toThrow();
+    // Act
+    const error = captureError(() => gatewayPath("patient", path));
+
+    // Assert
+    expect(error).toBeInstanceOf(Error);
   });
 });
+
+function captureError(action: () => unknown) {
+  try {
+    action();
+  } catch (error) {
+    return error;
+  }
+  return undefined;
+}

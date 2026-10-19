@@ -38,7 +38,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -55,6 +56,7 @@ class AppointmentServiceTest {
     private static final PatientId PATIENT_ID =
             new PatientId(UUID.fromString("dddddddd-dddd-dddd-dddd-dddddddddddd"));
     private static final Instant CREATED_AT = Instant.parse("2026-06-01T10:00:00Z");
+    private static final CancellationReason REASON = new CancellationReason("Patient requested cancellation");
 
     @Mock
     private AppointmentRepository repository;
@@ -70,106 +72,276 @@ class AppointmentServiceTest {
     }
 
     @Test
-    void schedulesAppointmentThenPublishesEvent() {
-        AppointmentDate date = new AppointmentDate(Instant.now().plusSeconds(3600));
-        ScheduleAppointmentCommand command =
-                new ScheduleAppointmentCommand(OWNER, PATIENT_ID, date, AppointmentType.ONLINE);
+    void scheduleSavesAppointmentBeforePublishingEvent() {
+        // Arrange
+        ScheduleAppointmentCommand command = scheduleCommand();
 
+        // Act
+        service.schedule(command);
+
+        // Assert
+        InOrder order = inOrder(repository, publisher);
+        order.verify(repository).save(any(Appointment.class));
+        order.verify(publisher).publish(any(AppointmentScheduledEvent.class));
+    }
+
+    @Test
+    void schedulePublishesEventForTheSavedAppointment() {
+        // Arrange
+        ScheduleAppointmentCommand command = scheduleCommand();
+
+        // Act
+        service.schedule(command);
+
+        // Assert
+        AppointmentScheduledEvent event = publishedScheduledEvent();
+        assertThat(event.appointmentId()).isEqualTo(savedAppointment().id());
+    }
+
+    @Test
+    void scheduleReturnsScheduledAppointment() {
+        // Arrange
+        ScheduleAppointmentCommand command = scheduleCommand();
+
+        // Act
         var result = service.schedule(command);
 
-        ArgumentCaptor<Appointment> appointmentCaptor = ArgumentCaptor.forClass(Appointment.class);
-        ArgumentCaptor<AppointmentScheduledEvent> eventCaptor =
-                ArgumentCaptor.forClass(AppointmentScheduledEvent.class);
-        InOrder order = inOrder(repository, publisher);
-        order.verify(repository).save(appointmentCaptor.capture());
-        order.verify(publisher).publish(eventCaptor.capture());
-        assertThat(eventCaptor.getValue().appointmentId()).isEqualTo(appointmentCaptor.getValue().id());
+        // Assert
         assertThat(result.status()).isEqualTo(AppointmentStatus.SCHEDULED);
     }
 
     @Test
-    void listsAndGetsOwnedAppointments() {
+    void listReturnsOwnedAppointments() {
+        // Arrange
         when(repository.findByPsychologistId(OWNER)).thenReturn(List.of(appointment()));
-        when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment()));
 
-        assertThat(service.listForPsychologist(new ListAppointmentsQuery(OWNER)))
-                .extracting(result -> result.id())
-                .containsExactly(APPOINTMENT_ID.value());
-        assertThat(service.get(new GetAppointmentQuery(OWNER, APPOINTMENT_ID)).id())
-                .isEqualTo(APPOINTMENT_ID.value());
+        // Act
+        var results = service.listForPsychologist(new ListAppointmentsQuery(OWNER));
+
+        // Assert
+        assertThat(results).extracting(result -> result.id()).containsExactly(APPOINTMENT_ID.value());
     }
 
     @Test
-    void reschedulesAndPublishesPreviousAndNewDates() {
+    void getReturnsOwnedAppointment() {
+        // Arrange
+        when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment()));
+
+        // Act
+        var result = service.get(new GetAppointmentQuery(OWNER, APPOINTMENT_ID));
+
+        // Assert
+        assertThat(result.id()).isEqualTo(APPOINTMENT_ID.value());
+    }
+
+    @Test
+    void reschedulePersistsTheLoadedAppointment() {
+        // Arrange
         Appointment appointment = appointment();
-        AppointmentDate previousDate = appointment.scheduledAt();
-        AppointmentDate newDate = new AppointmentDate(Instant.now().plusSeconds(7200));
         when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment));
 
-        var result = service.reschedule(new RescheduleAppointmentCommand(OWNER, APPOINTMENT_ID, newDate));
+        // Act
+        service.reschedule(new RescheduleAppointmentCommand(OWNER, APPOINTMENT_ID, laterDate()));
 
+        // Assert
         verify(repository).save(appointment);
-        ArgumentCaptor<AppointmentRescheduledEvent> captor =
-                ArgumentCaptor.forClass(AppointmentRescheduledEvent.class);
-        verify(publisher).publish(captor.capture());
-        assertThat(captor.getValue().previousDate()).isEqualTo(previousDate);
-        assertThat(captor.getValue().newDate()).isEqualTo(newDate);
+    }
+
+    @Test
+    void reschedulePublishesPreviousAndNewDates() {
+        // Arrange
+        Appointment appointment = appointment();
+        AppointmentDate previousDate = appointment.scheduledAt();
+        AppointmentDate newDate = laterDate();
+        when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment));
+
+        // Act
+        service.reschedule(new RescheduleAppointmentCommand(OWNER, APPOINTMENT_ID, newDate));
+
+        // Assert
+        AppointmentRescheduledEvent event = publishedRescheduledEvent();
+        assertThat(event.previousDate()).isEqualTo(previousDate);
+        assertThat(event.newDate()).isEqualTo(newDate);
+    }
+
+    @Test
+    void rescheduleReturnsRescheduledAppointment() {
+        // Arrange
+        when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment()));
+
+        // Act
+        var result = service.reschedule(new RescheduleAppointmentCommand(OWNER, APPOINTMENT_ID, laterDate()));
+
+        // Assert
         assertThat(result.status()).isEqualTo(AppointmentStatus.RESCHEDULED);
     }
 
     @Test
-    void cancelsAndPublishesReason() {
+    void cancelPersistsTheLoadedAppointment() {
+        // Arrange
         Appointment appointment = appointment();
-        CancellationReason reason = new CancellationReason("Patient requested cancellation");
         when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment));
 
-        var result = service.cancel(new CancelAppointmentCommand(OWNER, APPOINTMENT_ID, reason));
+        // Act
+        service.cancel(new CancelAppointmentCommand(OWNER, APPOINTMENT_ID, REASON));
 
+        // Assert
         verify(repository).save(appointment);
-        ArgumentCaptor<AppointmentCancelledEvent> captor =
-                ArgumentCaptor.forClass(AppointmentCancelledEvent.class);
-        verify(publisher).publish(captor.capture());
-        assertThat(captor.getValue().reason()).isEqualTo(reason);
-        assertThat(captor.getValue().cancelledBy().value()).isEqualTo("psychologist");
+    }
+
+    @Test
+    void cancelPublishesReasonAndPsychologistActor() {
+        // Arrange
+        when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment()));
+
+        // Act
+        service.cancel(new CancelAppointmentCommand(OWNER, APPOINTMENT_ID, REASON));
+
+        // Assert
+        AppointmentCancelledEvent event = publishedCancelledEvent();
+        assertThat(event.reason()).isEqualTo(REASON);
+        assertThat(event.cancelledBy().value()).isEqualTo("psychologist");
+    }
+
+    @Test
+    void cancelReturnsCancelledAppointment() {
+        // Arrange
+        when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment()));
+
+        // Act
+        var result = service.cancel(new CancelAppointmentCommand(OWNER, APPOINTMENT_ID, REASON));
+
+        // Assert
         assertThat(result.status()).isEqualTo(AppointmentStatus.CANCELLED);
     }
 
     @Test
-    void completesAndPublishesEvent() {
+    void completePersistsTheLoadedAppointment() {
+        // Arrange
         Appointment appointment = appointment();
         when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment));
 
+        // Act
+        service.complete(new CompleteAppointmentCommand(OWNER, APPOINTMENT_ID));
+
+        // Assert
+        verify(repository).save(appointment);
+    }
+
+    @Test
+    void completePublishesEventWithAppointmentDetails() {
+        // Arrange
+        when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment()));
+
+        // Act
+        service.complete(new CompleteAppointmentCommand(OWNER, APPOINTMENT_ID));
+
+        // Assert
+        AppointmentCompletedEvent event = publishedCompletedEvent();
+        assertThat(event.appointmentId()).isEqualTo(APPOINTMENT_ID);
+        assertThat(event.patientId()).isEqualTo(PATIENT_ID);
+        assertThat(event.psychologistId()).isEqualTo(OWNER);
+        assertThat(event.appointmentType()).isEqualTo(AppointmentType.IN_PERSON);
+    }
+
+    @Test
+    void completeReturnsCompletedAppointment() {
+        // Arrange
+        when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment()));
+
+        // Act
         var result = service.complete(new CompleteAppointmentCommand(OWNER, APPOINTMENT_ID));
 
-        verify(repository).save(appointment);
-        ArgumentCaptor<AppointmentCompletedEvent> captor =
-                ArgumentCaptor.forClass(AppointmentCompletedEvent.class);
-        verify(publisher).publish(captor.capture());
-        assertThat(captor.getValue().appointmentId()).isEqualTo(APPOINTMENT_ID);
-        assertThat(captor.getValue().patientId()).isEqualTo(PATIENT_ID);
-        assertThat(captor.getValue().psychologistId()).isEqualTo(OWNER);
-        assertThat(captor.getValue().appointmentType()).isEqualTo(AppointmentType.IN_PERSON);
+        // Assert
         assertThat(result.status()).isEqualTo(AppointmentStatus.COMPLETED);
     }
 
     @Test
     void rejectsMissingAppointment() {
+        // Arrange
         when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.get(new GetAppointmentQuery(OWNER, APPOINTMENT_ID)))
-                .isInstanceOf(AppointmentNotFoundException.class);
+        // Act
+        Throwable thrown = catchThrowable(() -> service.get(new GetAppointmentQuery(OWNER, APPOINTMENT_ID)));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(AppointmentNotFoundException.class);
     }
 
     @Test
-    void rejectsAppointmentOwnedByAnotherPsychologistWithoutMutation() {
+    void completeRejectsAppointmentOwnedByAnotherPsychologist() {
+        // Arrange
+        when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment()));
+
+        // Act
+        Throwable thrown = catchThrowable(() -> service.complete(new CompleteAppointmentCommand(OTHER, APPOINTMENT_ID)));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(AppointmentAccessDeniedException.class);
+    }
+
+    @Test
+    void foreignCompletionIsNeverSaved() {
+        // Arrange
+        when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment()));
+
+        // Act
+        catchThrowable(() -> service.complete(new CompleteAppointmentCommand(OTHER, APPOINTMENT_ID)));
+
+        // Assert
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void foreignCompletionLeavesAppointmentScheduled() {
+        // Arrange
         Appointment appointment = appointment();
         when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment));
 
-        assertThatThrownBy(() -> service.complete(new CompleteAppointmentCommand(OTHER, APPOINTMENT_ID)))
-                .isInstanceOf(AppointmentAccessDeniedException.class);
+        // Act
+        catchThrowable(() -> service.complete(new CompleteAppointmentCommand(OTHER, APPOINTMENT_ID)));
 
-        verify(repository, never()).save(org.mockito.ArgumentMatchers.any());
+        // Assert
         assertThat(appointment.status()).isEqualTo(AppointmentStatus.SCHEDULED);
+    }
+
+    private Appointment savedAppointment() {
+        ArgumentCaptor<Appointment> captor = ArgumentCaptor.forClass(Appointment.class);
+        verify(repository).save(captor.capture());
+        return captor.getValue();
+    }
+
+    private AppointmentScheduledEvent publishedScheduledEvent() {
+        ArgumentCaptor<AppointmentScheduledEvent> captor = ArgumentCaptor.forClass(AppointmentScheduledEvent.class);
+        verify(publisher).publish(captor.capture());
+        return captor.getValue();
+    }
+
+    private AppointmentRescheduledEvent publishedRescheduledEvent() {
+        ArgumentCaptor<AppointmentRescheduledEvent> captor = ArgumentCaptor.forClass(AppointmentRescheduledEvent.class);
+        verify(publisher).publish(captor.capture());
+        return captor.getValue();
+    }
+
+    private AppointmentCancelledEvent publishedCancelledEvent() {
+        ArgumentCaptor<AppointmentCancelledEvent> captor = ArgumentCaptor.forClass(AppointmentCancelledEvent.class);
+        verify(publisher).publish(captor.capture());
+        return captor.getValue();
+    }
+
+    private AppointmentCompletedEvent publishedCompletedEvent() {
+        ArgumentCaptor<AppointmentCompletedEvent> captor = ArgumentCaptor.forClass(AppointmentCompletedEvent.class);
+        verify(publisher).publish(captor.capture());
+        return captor.getValue();
+    }
+
+    private ScheduleAppointmentCommand scheduleCommand() {
+        return new ScheduleAppointmentCommand(OWNER, PATIENT_ID,
+                new AppointmentDate(Instant.now().plusSeconds(3600)), AppointmentType.ONLINE);
+    }
+
+    private AppointmentDate laterDate() {
+        return new AppointmentDate(Instant.now().plusSeconds(7200));
     }
 
     private Appointment appointment() {

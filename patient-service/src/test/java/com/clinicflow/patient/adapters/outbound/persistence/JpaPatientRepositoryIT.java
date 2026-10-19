@@ -22,10 +22,12 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 @DataJpaTest(properties = {
         "spring.jpa.hibernate.ddl-auto=validate",
@@ -50,35 +52,59 @@ class JpaPatientRepositoryIT {
     private JdbcTemplate jdbcTemplate;
 
     @Test
-    void persistsFindsAndFiltersPatientsByPsychologist() {
+    void findByIdReturnsPersistedPatient() {
+        // Arrange
+        Patient patient = patient(UUID.randomUUID(), new PsychologistId(UUID.randomUUID()), "owned@example.com");
+        persist(patient);
+
+        // Act
+        Optional<Patient> found = repository.findById(patient.id());
+
+        // Assert
+        assertThat(found).contains(patient);
+    }
+
+    @Test
+    void findByPsychologistIdReturnsOnlyOwnedPatients() {
+        // Arrange
         PsychologistId owner = new PsychologistId(UUID.randomUUID());
         Patient owned = patient(UUID.randomUUID(), owner, "owned@example.com");
         Patient other = patient(UUID.randomUUID(), new PsychologistId(UUID.randomUUID()), "other@example.com");
+        persist(owned, other);
 
-        repository.save(owned);
-        repository.save(other);
-        delegate.flush();
+        // Act
+        List<Patient> found = repository.findByPsychologistId(owner);
 
-        assertThat(repository.findById(owned.id())).contains(owned);
-        assertThat(repository.findByPsychologistId(owner)).containsExactly(owned);
+        // Assert
+        assertThat(found).containsExactly(owned);
     }
 
     @Test
     void flywayConstraintRejectsNonE164Phone() {
-        assertThatThrownBy(() -> jdbcTemplate.update("""
-                        INSERT INTO patients (
-                            id, psychologist_id, email, full_name, phone,
-                            contact_preference, consent_status, consent_updated_at,
-                            status, created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        UUID.randomUUID(), UUID.randomUUID(), "patient@example.com", "Patient Name",
-                        "912345678", "EMAIL", "GRANTED",
-                        OffsetDateTime.parse("2026-06-01T10:00:00Z"),
-                        "ACTIVE",
-                        OffsetDateTime.parse("2026-06-01T10:00:00Z"),
-                        OffsetDateTime.parse("2026-06-01T10:00:00Z")))
-                .isInstanceOf(DataIntegrityViolationException.class);
+        // Arrange
+        String insert = """
+                INSERT INTO patients (
+                    id, psychologist_id, email, full_name, phone,
+                    contact_preference, consent_status, consent_updated_at,
+                    status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """;
+        OffsetDateTime timestamp = OffsetDateTime.parse("2026-06-01T10:00:00Z");
+
+        // Act
+        Throwable thrown = catchThrowable(() -> jdbcTemplate.update(insert,
+                UUID.randomUUID(), UUID.randomUUID(), "patient@example.com", "Patient Name",
+                "912345678", "EMAIL", "GRANTED", timestamp, "ACTIVE", timestamp, timestamp));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    private void persist(Patient... patients) {
+        for (Patient patient : patients) {
+            repository.save(patient);
+        }
+        delegate.flush();
     }
 
     private Patient patient(UUID id, PsychologistId owner, String email) {

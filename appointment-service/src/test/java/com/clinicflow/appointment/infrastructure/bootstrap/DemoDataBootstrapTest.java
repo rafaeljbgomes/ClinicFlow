@@ -25,37 +25,71 @@ class DemoDataBootstrapTest {
     @Test
     void canBeConstructedBySpring() {
         try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            // Arrange
             context.getEnvironment().getPropertySources().addFirst(demoBootstrapProperty());
             context.registerBean(AppointmentRepository.class, InMemoryAppointmentRepository::new);
             context.registerBean(DemoDataBootstrap.class);
 
+            // Act
             context.refresh();
 
+            // Assert
             assertThat(context.getBean(DemoDataBootstrap.class)).isNotNull();
         }
     }
 
-    private static MapPropertySource demoBootstrapProperty() {
-        return new MapPropertySource("test", Map.of("clinicflow.demo.bootstrap.enabled", "true"));
-    }
-
     @Test
-    void seedsDemoAppointmentsIdempotently() throws Exception {
+    void seedsAppointmentsInEveryLifecycleStatus() throws Exception {
+        // Arrange
         InMemoryAppointmentRepository appointments = new InMemoryAppointmentRepository();
-        DemoDataBootstrap bootstrap = new DemoDataBootstrap(
-                appointments,
-                Clock.fixed(Instant.parse("2026-07-05T10:00:00Z"), ZoneOffset.UTC)
-        );
+        DemoDataBootstrap bootstrap = bootstrap(appointments);
 
-        bootstrap.run(null);
+        // Act
         bootstrap.run(null);
 
-        assertThat(appointments.records()).hasSize(6);
+        // Assert
         assertThat(appointments.records().values()).extracting(Appointment::status)
                 .contains(AppointmentStatus.SCHEDULED, AppointmentStatus.RESCHEDULED,
                         AppointmentStatus.CANCELLED, AppointmentStatus.COMPLETED);
+    }
+
+    @Test
+    void seedsAppointmentsOfEveryType() throws Exception {
+        // Arrange
+        InMemoryAppointmentRepository appointments = new InMemoryAppointmentRepository();
+        DemoDataBootstrap bootstrap = bootstrap(appointments);
+
+        // Act
+        bootstrap.run(null);
+
+        // Assert
         assertThat(appointments.records().values()).extracting(Appointment::type)
                 .contains(AppointmentType.ONLINE, AppointmentType.IN_PERSON);
+    }
+
+    @Test
+    void repeatedRunDoesNotDuplicateDemoAppointments() throws Exception {
+        // Arrange
+        InMemoryAppointmentRepository appointments = new InMemoryAppointmentRepository();
+        DemoDataBootstrap bootstrap = bootstrap(appointments);
+        bootstrap.run(null);
+
+        // Act
+        bootstrap.run(null);
+
+        // Assert
+        assertThat(appointments.records()).hasSize(6);
+    }
+
+    private static DemoDataBootstrap bootstrap(InMemoryAppointmentRepository appointments) {
+        return new DemoDataBootstrap(
+                appointments,
+                Clock.fixed(Instant.parse("2026-07-05T10:00:00Z"), ZoneOffset.UTC)
+        );
+    }
+
+    private static MapPropertySource demoBootstrapProperty() {
+        return new MapPropertySource("test", Map.of("clinicflow.demo.bootstrap.enabled", "true"));
     }
 
     private static final class InMemoryAppointmentRepository implements AppointmentRepository {

@@ -14,6 +14,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
 
 import java.time.Instant;
 import java.util.List;
@@ -44,34 +45,68 @@ class NotificationControllerTest {
     private JwtDecoder jwtDecoder;
 
     @Test
-    void restrictsEndpointsToAdminOrPsychologist() throws Exception {
-        mvc.perform(get("/notifications"))
-                .andExpect(status().isUnauthorized());
+    void rejectsRequestWithoutToken() throws Exception {
+        // Arrange
+        var request = get("/notifications");
 
-        mvc.perform(get("/notifications").with(jwtFor("ROLE_PATIENT")))
-                .andExpect(status().isForbidden());
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isUnauthorized());
     }
 
     @Test
-    void listsAndGetsNotificationsForAuthorizedRoles() throws Exception {
+    void rejectsPatientRole() throws Exception {
+        // Arrange
+        var request = get("/notifications").with(jwtFor("ROLE_PATIENT"));
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isForbidden());
+    }
+
+    @Test
+    void listReturnsNotificationsForPsychologist() throws Exception {
+        // Arrange
         when(notificationService.listForPsychologist(any())).thenReturn(List.of(result()));
-        when(notificationService.get(any())).thenReturn(result());
+        var request = get("/notifications").with(jwtFor("ROLE_PSYCHOLOGIST"));
 
-        mvc.perform(get("/notifications").with(jwtFor("ROLE_PSYCHOLOGIST")))
-                .andExpect(status().isOk())
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value(NOTIFICATION_ID.toString()));
+    }
 
-        mvc.perform(get("/notifications/{id}", NOTIFICATION_ID).with(jwtFor("ROLE_ADMIN")))
-                .andExpect(status().isOk())
+    @Test
+    void getReturnsNotificationForAdministrator() throws Exception {
+        // Arrange
+        when(notificationService.get(any())).thenReturn(result());
+        var request = get("/notifications/{id}", NOTIFICATION_ID).with(jwtFor("ROLE_ADMIN"));
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isOk())
                 .andExpect(jsonPath("$.eventId").value(EVENT_ID.toString()));
     }
 
     @Test
     void mapsMissingNotificationToNotFoundProblemDetail() throws Exception {
+        // Arrange
         when(notificationService.get(any())).thenThrow(new NotificationNotFoundException());
+        var request = get("/notifications/{id}", NOTIFICATION_ID).with(jwtFor("ROLE_ADMIN"));
 
-        mvc.perform(get("/notifications/{id}", NOTIFICATION_ID).with(jwtFor("ROLE_ADMIN")))
-                .andExpect(status().isNotFound())
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.title").value("Resource not found"));
     }
 

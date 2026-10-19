@@ -13,19 +13,39 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class PatientEventMapperTest {
+    private final PatientEventMapper mapper = Mappers.getMapper(PatientEventMapper.class);
+    private final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
+
     @Test
-    void preservesTheExistingRabbitPayloadShape() throws Exception {
-        PatientCreatedEvent event = PatientCreatedEvent.of(
+    void serializedPayloadKeepsTheExistingRabbitFields() throws Exception {
+        // Arrange
+        PatientCreatedEvent event = event();
+
+        // Act
+        String payload = json.writeValueAsString(mapper.toPayload(event));
+
+        // Assert
+        assertThat(payload).contains("\"eventId\"", "\"eventType\":\"PatientCreated\"",
+                "\"patientId\"", "\"psychologistId\"", "\"patientEmail\":\"patient@example.com\"");
+    }
+
+    @Test
+    void serializedPayloadFlattensValueObjects() throws Exception {
+        // Arrange
+        PatientCreatedEvent event = event();
+
+        // Act
+        String payload = json.writeValueAsString(mapper.toPayload(event));
+
+        // Assert
+        assertThat(payload).doesNotContain("\"value\"");
+    }
+
+    private PatientCreatedEvent event() {
+        return PatientCreatedEvent.of(
                 new PatientId(UUID.randomUUID()),
                 new PsychologistId(UUID.randomUUID()),
                 new EmailAddress("patient@example.com")
         );
-
-        PatientCreatedPayload payload = Mappers.getMapper(PatientEventMapper.class).toPayload(event);
-        String json = new ObjectMapper().findAndRegisterModules().writeValueAsString(payload);
-
-        assertThat(json).contains("\"eventId\"", "\"eventType\":\"PatientCreated\"",
-                "\"patientId\"", "\"psychologistId\"", "\"patientEmail\":\"patient@example.com\"");
-        assertThat(json).doesNotContain("\"value\"");
     }
 }

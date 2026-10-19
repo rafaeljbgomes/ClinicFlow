@@ -20,10 +20,12 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 @DataJpaTest(properties = {
         "spring.jpa.hibernate.ddl-auto=validate",
@@ -46,27 +48,59 @@ class JpaNotificationRepositoryIT {
     private SpringDataNotificationJpaRepository delegate;
 
     @Test
-    void persistsFindsAndListsNotification() {
-        Notification notification = notification(UUID.randomUUID(), UUID.randomUUID());
+    void existsByEventIdFindsPersistedNotification() {
+        // Arrange
+        Notification notification = persisted(notification(UUID.randomUUID(), UUID.randomUUID()));
 
-        repository.save(notification);
-        delegate.flush();
+        // Act
+        boolean exists = repository.existsByEventId(notification.eventId());
 
-        assertThat(repository.existsByEventId(notification.eventId())).isTrue();
-        assertThat(repository.findById(notification.id())).contains(notification);
-        assertThat(repository.findAll()).containsExactly(notification);
+        // Assert
+        assertThat(exists).isTrue();
+    }
+
+    @Test
+    void findByIdReturnsPersistedNotification() {
+        // Arrange
+        Notification notification = persisted(notification(UUID.randomUUID(), UUID.randomUUID()));
+
+        // Act
+        Optional<Notification> found = repository.findById(notification.id());
+
+        // Assert
+        assertThat(found).contains(notification);
+    }
+
+    @Test
+    void findAllReturnsPersistedNotifications() {
+        // Arrange
+        Notification notification = persisted(notification(UUID.randomUUID(), UUID.randomUUID()));
+
+        // Act
+        List<Notification> found = repository.findAll();
+
+        // Assert
+        assertThat(found).containsExactly(notification);
     }
 
     @Test
     void enforcesEventIdIdempotencyAtDatabaseBoundary() {
+        // Arrange
         UUID eventId = UUID.randomUUID();
+        persisted(notification(UUID.randomUUID(), eventId));
         repository.save(notification(UUID.randomUUID(), eventId));
+
+        // Act
+        Throwable thrown = catchThrowable(delegate::flush);
+
+        // Assert
+        assertThat(thrown).isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    private Notification persisted(Notification notification) {
+        repository.save(notification);
         delegate.flush();
-
-        repository.save(notification(UUID.randomUUID(), eventId));
-
-        assertThatThrownBy(delegate::flush)
-                .isInstanceOf(DataIntegrityViolationException.class);
+        return notification;
     }
 
     private Notification notification(UUID notificationId, UUID eventId) {

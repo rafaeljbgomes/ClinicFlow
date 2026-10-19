@@ -33,55 +33,127 @@ describe("proxyRequest role checks", () => {
     vi.clearAllMocks();
   });
 
-  it("forwards an allowed request without a /users/me roundtrip", async () => {
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({ deliveries: [] }), { status: 200 }));
-    const project = vi.fn((payload, verifiedPrincipal) => ({ payload, verifiedPrincipal }));
-
-    const response = await proxyRequest(
-      new NextRequest("http://localhost/api/notifications"),
-      "notification",
-      "/notifications",
-      { csrf: false, roles: ["ADMIN"], project }
-    );
-
-    expect(response.status).toBe(200);
-    expect(verifyAccessTokenMock).toHaveBeenCalledWith("signed-access-token");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:8084/notifications");
-    expect(project).toHaveBeenCalledWith({ deliveries: [] }, principal);
-  });
-
-  it("rejects a valid but unauthorized role before any downstream request", async () => {
-    verifyAccessTokenMock.mockResolvedValue({
-      status: "verified",
-      principal: { ...principal, role: "PATIENT" },
+  describe("for an allowed role", () => {
+    beforeEach(() => {
+      fetchMock.mockResolvedValue(new Response(JSON.stringify({ deliveries: [] }), { status: 200 }));
     });
 
-    const response = await proxyRequest(
-      new NextRequest("http://localhost/api/users/123"),
-      "auth",
-      "/users/123",
-      { csrf: false, roles: ["ADMIN"] }
-    );
+    it("verifies the access token from the session cookie", async () => {
+      // Arrange
+      const request = notificationsRequest();
 
-    expect(response.status).toBe(403);
-    expect(fetchMock).not.toHaveBeenCalled();
+      // Act
+      await proxyRequest(request, "notification", "/notifications", { csrf: false, roles: ["ADMIN"] });
+
+      // Assert
+      expect(verifyAccessTokenMock).toHaveBeenCalledWith("signed-access-token");
+    });
+
+    it("forwards the request once without a /users/me roundtrip", async () => {
+      // Arrange
+      const request = notificationsRequest();
+
+      // Act
+      await proxyRequest(request, "notification", "/notifications", { csrf: false, roles: ["ADMIN"] });
+
+      // Assert
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:8084/notifications");
+    });
+
+    it("returns the downstream status", async () => {
+      // Arrange
+      const request = notificationsRequest();
+
+      // Act
+      const response = await proxyRequest(request, "notification", "/notifications", {
+        csrf: false,
+        roles: ["ADMIN"],
+      });
+
+      // Assert
+      expect(response.status).toBe(200);
+    });
+
+    it("projects the downstream payload with the verified principal", async () => {
+      // Arrange
+      const request = notificationsRequest();
+      const project = vi.fn((payload, verifiedPrincipal) => ({ payload, verifiedPrincipal }));
+
+      // Act
+      await proxyRequest(request, "notification", "/notifications", { csrf: false, roles: ["ADMIN"], project });
+
+      // Assert
+      expect(project).toHaveBeenCalledWith({ deliveries: [] }, principal);
+    });
+  });
+
+  describe("for a valid but unauthorized role", () => {
+    beforeEach(() => {
+      verifyAccessTokenMock.mockResolvedValue({
+        status: "verified",
+        principal: { ...principal, role: "PATIENT" },
+      });
+    });
+
+    it("responds with 403", async () => {
+      // Arrange
+      const request = userLookupRequest();
+
+      // Act
+      const response = await proxyRequest(request, "auth", "/users/123", { csrf: false, roles: ["ADMIN"] });
+
+      // Assert
+      expect(response.status).toBe(403);
+    });
+
+    it("rejects before any downstream request", async () => {
+      // Arrange
+      const request = userLookupRequest();
+
+      // Act
+      await proxyRequest(request, "auth", "/users/123", { csrf: false, roles: ["ADMIN"] });
+
+      // Assert
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
   });
 
   it.each([
     ["invalid", 401],
     ["unavailable", 503],
-  ] as const)("fails closed for a %s token verification result", async (status, expectedStatus) => {
+  ] as const)("fails closed with %s token verification as %i", async (status, expectedStatus) => {
+    // Arrange
     verifyAccessTokenMock.mockResolvedValue({ status });
+    const request = userLookupRequest();
 
-    const response = await proxyRequest(
-      new NextRequest("http://localhost/api/users/123"),
-      "auth",
-      "/users/123",
-      { csrf: false, roles: ["ADMIN"] }
-    );
+    // Act
+    const response = await proxyRequest(request, "auth", "/users/123", { csrf: false, roles: ["ADMIN"] });
 
+    // Assert
     expect(response.status).toBe(expectedStatus);
-    expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it.each(["invalid", "unavailable"] as const)(
+    "does not call downstream after %s token verification",
+    async (status) => {
+      // Arrange
+      verifyAccessTokenMock.mockResolvedValue({ status });
+      const request = userLookupRequest();
+
+      // Act
+      await proxyRequest(request, "auth", "/users/123", { csrf: false, roles: ["ADMIN"] });
+
+      // Assert
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+  );
 });
+
+function notificationsRequest() {
+  return new NextRequest("http://localhost/api/notifications");
+}
+
+function userLookupRequest() {
+  return new NextRequest("http://localhost/api/users/123");
+}

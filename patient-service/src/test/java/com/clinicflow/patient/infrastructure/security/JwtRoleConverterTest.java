@@ -1,6 +1,7 @@
 package com.clinicflow.patient.infrastructure.security;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.security.authentication.AbstractAuthenticationToken;
 import org.springframework.security.oauth2.jwt.Jwt;
 
 import java.time.Instant;
@@ -12,11 +13,29 @@ class JwtRoleConverterTest {
     private final JwtRoleConverter converter = new JwtRoleConverter();
 
     @Test
-    void mapsRoleClaimAndHandlesMissingRole() {
-        assertThat(converter.convert(jwt(Map.of("sub", "user", "role", "PSYCHOLOGIST"))).getAuthorities())
+    void mapsRoleClaimToPrefixedAuthority() {
+        // Arrange
+        Jwt token = jwt(Map.of("sub", "user", "role", "PSYCHOLOGIST"));
+
+        // Act
+        AbstractAuthenticationToken authentication = converter.convert(token);
+
+        // Assert
+        assertThat(authentication.getAuthorities())
                 .extracting(Object::toString)
                 .containsExactly("ROLE_PSYCHOLOGIST");
-        assertThat(converter.convert(jwt(Map.of("sub", "user"))).getAuthorities()).isEmpty();
+    }
+
+    @Test
+    void grantsNoAuthorityWhenRoleClaimIsMissing() {
+        // Arrange
+        Jwt token = jwt(Map.of("sub", "user"));
+
+        // Act
+        AbstractAuthenticationToken authentication = converter.convert(token);
+
+        // Assert
+        assertThat(authentication.getAuthorities()).isEmpty();
     }
 
     private Jwt jwt(Map<String, Object> claims) {

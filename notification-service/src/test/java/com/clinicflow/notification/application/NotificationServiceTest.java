@@ -27,7 +27,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -55,6 +56,7 @@ class NotificationServiceTest {
 
     @Test
     void createsNotificationForNewEvent() {
+        // Arrange
         ProcessNotificationEventCommand command = new ProcessNotificationEventCommand(
                 EVENT_ID,
                 new EventType("PatientCreated"),
@@ -62,8 +64,10 @@ class NotificationServiceTest {
                 new RecipientAddress("patient@example.com")
         );
 
+        // Act
         service.processEvent(command);
 
+        // Assert
         ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
         verify(repository).save(captor.capture());
         Notification saved = captor.getValue();
@@ -74,32 +78,52 @@ class NotificationServiceTest {
 
     @Test
     void skipsDuplicateEventId() {
+        // Arrange
         when(repository.existsByEventId(EVENT_ID)).thenReturn(true);
+        ProcessNotificationEventCommand command = new ProcessNotificationEventCommand(
+                EVENT_ID, new EventType("PatientCreated"), PSYCHOLOGIST_ID, null);
 
-        service.processEvent(new ProcessNotificationEventCommand(
-                EVENT_ID, new EventType("PatientCreated"), PSYCHOLOGIST_ID, null));
+        // Act
+        service.processEvent(command);
 
-        verify(repository, never()).save(org.mockito.ArgumentMatchers.any());
+        // Assert
+        verify(repository, never()).save(any());
     }
 
     @Test
-    void listsAndGetsNotifications() {
-        Notification notification = notification();
-        when(repository.findAll()).thenReturn(List.of(notification));
-        when(repository.findById(NOTIFICATION_ID)).thenReturn(Optional.of(notification));
+    void listReturnsEveryNotification() {
+        // Arrange
+        when(repository.findAll()).thenReturn(List.of(notification()));
 
-        assertThat(service.list()).extracting(result -> result.id())
-                .containsExactly(NOTIFICATION_ID.value());
-        assertThat(service.get(new GetNotificationQuery(NOTIFICATION_ID)).eventId())
-                .isEqualTo(EVENT_ID.value());
+        // Act
+        var results = service.list();
+
+        // Assert
+        assertThat(results).extracting(result -> result.id()).containsExactly(NOTIFICATION_ID.value());
+    }
+
+    @Test
+    void getReturnsTheRequestedNotification() {
+        // Arrange
+        when(repository.findById(NOTIFICATION_ID)).thenReturn(Optional.of(notification()));
+
+        // Act
+        var result = service.get(new GetNotificationQuery(NOTIFICATION_ID));
+
+        // Assert
+        assertThat(result.eventId()).isEqualTo(EVENT_ID.value());
     }
 
     @Test
     void throwsWhenNotificationDoesNotExist() {
+        // Arrange
         when(repository.findById(NOTIFICATION_ID)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.get(new GetNotificationQuery(NOTIFICATION_ID)))
-                .isInstanceOf(NotificationNotFoundException.class);
+        // Act
+        Throwable thrown = catchThrowable(() -> service.get(new GetNotificationQuery(NOTIFICATION_ID)));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(NotificationNotFoundException.class);
     }
 
     private Notification notification() {

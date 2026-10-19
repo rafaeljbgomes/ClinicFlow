@@ -25,38 +25,84 @@ class DemoDataBootstrapTest {
     @Test
     void canBeConstructedBySpring() {
         try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            // Arrange
             context.getEnvironment().getPropertySources().addFirst(demoBootstrapProperty());
             context.registerBean(PatientRepository.class, InMemoryPatientRepository::new);
             context.registerBean(DemoDataBootstrap.class);
 
+            // Act
             context.refresh();
 
+            // Assert
             assertThat(context.getBean(DemoDataBootstrap.class)).isNotNull();
         }
     }
 
-    private static MapPropertySource demoBootstrapProperty() {
-        return new MapPropertySource("test", Map.of("clinicflow.demo.bootstrap.enabled", "true"));
+    @Test
+    void seedsPatientsInEveryLifecycleStatus() throws Exception {
+        // Arrange
+        InMemoryPatientRepository patients = new InMemoryPatientRepository();
+        DemoDataBootstrap bootstrap = bootstrap(patients);
+
+        // Act
+        bootstrap.run(null);
+
+        // Assert
+        assertThat(patients.records().values()).extracting(Patient::status)
+                .contains(PatientStatus.ACTIVE, PatientStatus.INACTIVE, PatientStatus.ARCHIVED);
     }
 
     @Test
-    void seedsDemoPatientsIdempotently() throws Exception {
+    void seedsPatientsInEveryConsentStatus() throws Exception {
+        // Arrange
         InMemoryPatientRepository patients = new InMemoryPatientRepository();
-        DemoDataBootstrap bootstrap = new DemoDataBootstrap(
+        DemoDataBootstrap bootstrap = bootstrap(patients);
+
+        // Act
+        bootstrap.run(null);
+
+        // Assert
+        assertThat(patients.records().values()).extracting(Patient::consentStatus)
+                .contains(ConsentStatus.GRANTED, ConsentStatus.PENDING, ConsentStatus.REVOKED);
+    }
+
+    @Test
+    void seedsPatientsWithEveryContactPreference() throws Exception {
+        // Arrange
+        InMemoryPatientRepository patients = new InMemoryPatientRepository();
+        DemoDataBootstrap bootstrap = bootstrap(patients);
+
+        // Act
+        bootstrap.run(null);
+
+        // Assert
+        assertThat(patients.records().values()).extracting(Patient::contactPreference)
+                .contains(ContactPreference.EMAIL, ContactPreference.PHONE, ContactPreference.SMS);
+    }
+
+    @Test
+    void repeatedRunDoesNotDuplicateDemoPatients() throws Exception {
+        // Arrange
+        InMemoryPatientRepository patients = new InMemoryPatientRepository();
+        DemoDataBootstrap bootstrap = bootstrap(patients);
+        bootstrap.run(null);
+
+        // Act
+        bootstrap.run(null);
+
+        // Assert
+        assertThat(patients.records()).hasSize(6);
+    }
+
+    private static DemoDataBootstrap bootstrap(InMemoryPatientRepository patients) {
+        return new DemoDataBootstrap(
                 patients,
                 Clock.fixed(Instant.parse("2026-07-05T10:00:00Z"), ZoneOffset.UTC)
         );
+    }
 
-        bootstrap.run(null);
-        bootstrap.run(null);
-
-        assertThat(patients.records()).hasSize(6);
-        assertThat(patients.records().values()).extracting(Patient::status)
-                .contains(PatientStatus.ACTIVE, PatientStatus.INACTIVE, PatientStatus.ARCHIVED);
-        assertThat(patients.records().values()).extracting(Patient::consentStatus)
-                .contains(ConsentStatus.GRANTED, ConsentStatus.PENDING, ConsentStatus.REVOKED);
-        assertThat(patients.records().values()).extracting(Patient::contactPreference)
-                .contains(ContactPreference.EMAIL, ContactPreference.PHONE, ContactPreference.SMS);
+    private static MapPropertySource demoBootstrapProperty() {
+        return new MapPropertySource("test", Map.of("clinicflow.demo.bootstrap.enabled", "true"));
     }
 
     private static final class InMemoryPatientRepository implements PatientRepository {

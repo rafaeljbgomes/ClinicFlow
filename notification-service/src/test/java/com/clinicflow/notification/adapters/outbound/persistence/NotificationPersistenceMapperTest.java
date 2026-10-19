@@ -24,25 +24,45 @@ class NotificationPersistenceMapperTest {
 
     @Test
     void roundTripsDomainAndPersistenceModels() {
+        // Arrange
         Notification notification = notification();
 
+        // Act
         Notification restored = mapper.toDomain(mapper.toJpa(notification));
 
+        // Assert
         assertThat(restored).isEqualTo(notification);
         assertThat(restored.subject()).isEqualTo(notification.subject());
     }
 
     @Test
-    void repositorySaveKeepsTheSuppliedDomainInstance() {
+    void repositorySavePersistsTheMappedEntity() {
+        // Arrange
         SpringDataNotificationJpaRepository delegate = mock(SpringDataNotificationJpaRepository.class);
         NotificationPersistenceMapper mockedMapper = mock(NotificationPersistenceMapper.class);
         Notification notification = notification();
         JpaNotificationEntity jpa = mapper.toJpa(notification);
         when(mockedMapper.toJpa(notification)).thenReturn(jpa);
+        JpaNotificationRepository repository = new JpaNotificationRepository(delegate, mockedMapper);
 
-        new JpaNotificationRepository(delegate, mockedMapper).save(notification);
+        // Act
+        repository.save(notification);
 
+        // Assert
         verify(delegate).save(jpa);
+    }
+
+    @Test
+    void repositorySaveKeepsTheSuppliedDomainInstance() {
+        // Arrange
+        SpringDataNotificationJpaRepository delegate = mock(SpringDataNotificationJpaRepository.class);
+        Notification notification = notification();
+        JpaNotificationRepository repository = new JpaNotificationRepository(delegate, mapper);
+
+        // Act
+        repository.save(notification);
+
+        // Assert
         assertThat(notification.eventType()).isEqualTo(new EventType("PatientCreated"));
     }
 

@@ -17,6 +17,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -42,24 +44,59 @@ class JpaAppointmentRepositoryIT {
     private SpringDataAppointmentJpaRepository delegate;
 
     @Test
-    void persistsAndFiltersAppointmentsByOwnerAndPatient() {
-        PsychologistId owner = new PsychologistId(UUID.randomUUID());
-        PatientId patientId = new PatientId(UUID.randomUUID());
-        Appointment expected = appointment(UUID.randomUUID(), owner, patientId);
-        Appointment other = appointment(UUID.randomUUID(), new PsychologistId(UUID.randomUUID()),
-                new PatientId(UUID.randomUUID()));
+    void findByIdReturnsPersistedAppointment() {
+        // Arrange
+        Appointment expected = appointment(new PsychologistId(UUID.randomUUID()), new PatientId(UUID.randomUUID()));
+        persist(expected, unrelatedAppointment());
 
-        repository.save(expected);
-        repository.save(other);
-        delegate.flush();
+        // Act
+        Optional<Appointment> found = repository.findById(expected.id());
 
-        assertThat(repository.findById(expected.id())).contains(expected);
-        assertThat(repository.findByPsychologistId(owner)).containsExactly(expected);
-        assertThat(repository.findByPatientId(patientId)).containsExactly(expected);
+        // Assert
+        assertThat(found).contains(expected);
     }
 
-    private Appointment appointment(UUID id, PsychologistId owner, PatientId patientId) {
-        return Appointment.create(new AppointmentId(id), owner, patientId,
+    @Test
+    void findByPsychologistIdReturnsOnlyOwnedAppointments() {
+        // Arrange
+        PsychologistId owner = new PsychologistId(UUID.randomUUID());
+        Appointment expected = appointment(owner, new PatientId(UUID.randomUUID()));
+        persist(expected, unrelatedAppointment());
+
+        // Act
+        List<Appointment> found = repository.findByPsychologistId(owner);
+
+        // Assert
+        assertThat(found).containsExactly(expected);
+    }
+
+    @Test
+    void findByPatientIdReturnsOnlyThatPatientsAppointments() {
+        // Arrange
+        PatientId patientId = new PatientId(UUID.randomUUID());
+        Appointment expected = appointment(new PsychologistId(UUID.randomUUID()), patientId);
+        persist(expected, unrelatedAppointment());
+
+        // Act
+        List<Appointment> found = repository.findByPatientId(patientId);
+
+        // Assert
+        assertThat(found).containsExactly(expected);
+    }
+
+    private void persist(Appointment... appointments) {
+        for (Appointment appointment : appointments) {
+            repository.save(appointment);
+        }
+        delegate.flush();
+    }
+
+    private Appointment unrelatedAppointment() {
+        return appointment(new PsychologistId(UUID.randomUUID()), new PatientId(UUID.randomUUID()));
+    }
+
+    private Appointment appointment(PsychologistId owner, PatientId patientId) {
+        return Appointment.create(new AppointmentId(UUID.randomUUID()), owner, patientId,
                 new AppointmentDate(Instant.parse("2099-07-01T10:00:00Z")),
                 AppointmentType.ONLINE, Instant.parse("2026-06-01T10:00:00Z"));
     }

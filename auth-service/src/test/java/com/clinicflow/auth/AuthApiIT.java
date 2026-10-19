@@ -32,6 +32,9 @@ import static org.mockito.Mockito.when;
         properties = "clinicflow.demo.enabled=false")
 @Testcontainers
 class AuthApiIT {
+    private static final String EMAIL = "psychologist@example.com";
+    private static final String PASSWORD = "correct-horse-battery-staple";
+
     @Container
     @ServiceConnection(name = "postgres")
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(
@@ -52,44 +55,95 @@ class AuthApiIT {
     }
 
     @Test
-    void registerLoginAndReadAuthenticatedProfileThroughTheRealHttpStack() {
-        Map<String, Object> registration = Map.of(
-                "email", "psychologist@example.com",
-                "password", "correct-horse-battery-staple",
-                "role", "PSYCHOLOGIST",
-                "fullName", "Dr. Functional Test");
+    void registerCreatesAccountThroughTheRealHttpStack() {
+        // Arrange
+        Map<String, Object> registration = psychologistRegistration();
 
-        var created = http.postForEntity("/auth/register", registration, Map.class);
-        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(created.getBody()).containsEntry("email", "psychologist@example.com");
+        // Act
+        var response = http.postForEntity("/auth/register", registration, Map.class);
 
-        var login = http.postForEntity("/auth/login", Map.of(
-                "email", "psychologist@example.com",
-                "password", "correct-horse-battery-staple"), Map.class);
-        assertThat(login.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(login.getBody()).containsEntry("accessToken", "functional-token");
-
-        String userId = created.getBody().get("id").toString();
-        when(jwtDecoder.decode("functional-token")).thenReturn(jwt(userId, "PSYCHOLOGIST"));
-        var profile = http.exchange("/users/me", HttpMethod.GET,
-                new HttpEntity<>(bearer("functional-token")), Map.class);
-
-        assertThat(profile.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(profile.getBody()).containsEntry("id", userId)
-                .containsEntry("email", "psychologist@example.com");
+        // Assert
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(response.getBody()).containsEntry("email", EMAIL);
     }
 
     @Test
-    void rejectsInvalidDuplicateAndUnauthenticatedRequests() {
-        var invalid = http.postForEntity("/auth/register", Map.of(
-                "email", "not-an-email", "password", "short", "role", "PATIENT", "fullName", ""), Map.class);
-        assertThat(invalid.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    void loginReturnsIssuedTokenForRegisteredCredentials() {
+        // Arrange
+        register(psychologistRegistration());
+        Map<String, Object> credentials = Map.of("email", EMAIL, "password", PASSWORD);
 
-        Map<String, Object> valid = Map.of(
-                "email", "duplicate@example.com", "password", "a-secure-password", "role", "PATIENT", "fullName", "Patient");
-        assertThat(http.postForEntity("/auth/register", valid, Map.class).getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(http.postForEntity("/auth/register", valid, Map.class).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
-        assertThat(http.getForEntity("/users/me", Map.class).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        // Act
+        var response = http.postForEntity("/auth/login", credentials, Map.class);
+
+        // Assert
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).containsEntry("accessToken", "functional-token");
+    }
+
+    @Test
+    void currentUserProfileReturnsTheAuthenticatedAccount() {
+        // Arrange
+        String userId = register(psychologistRegistration());
+        when(jwtDecoder.decode("functional-token")).thenReturn(jwt(userId, "PSYCHOLOGIST"));
+        var request = new HttpEntity<>(bearer("functional-token"));
+
+        // Act
+        var response = http.exchange("/users/me", HttpMethod.GET, request, Map.class);
+
+        // Assert
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).containsEntry("id", userId)
+                .containsEntry("email", EMAIL);
+    }
+
+    @Test
+    void registerRejectsInvalidPayload() {
+        // Arrange
+        Map<String, Object> invalid = Map.of(
+                "email", "not-an-email", "password", "short", "role", "PATIENT", "fullName", "");
+
+        // Act
+        var response = http.postForEntity("/auth/register", invalid, Map.class);
+
+        // Assert
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
+    void registerRejectsDuplicateEmail() {
+        // Arrange
+        Map<String, Object> registration = Map.of(
+                "email", "duplicate@example.com", "password", "a-secure-password", "role", "PATIENT",
+                "fullName", "Patient");
+        register(registration);
+
+        // Act
+        var response = http.postForEntity("/auth/register", registration, Map.class);
+
+        // Assert
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    void currentUserProfileRequiresAuthentication() {
+        // Act
+        var response = http.getForEntity("/users/me", Map.class);
+
+        // Assert
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    private Map<String, Object> psychologistRegistration() {
+        return Map.of(
+                "email", EMAIL,
+                "password", PASSWORD,
+                "role", "PSYCHOLOGIST",
+                "fullName", "Dr. Functional Test");
+    }
+
+    private String register(Map<String, Object> registration) {
+        return http.postForEntity("/auth/register", registration, Map.class).getBody().get("id").toString();
     }
 
     private HttpHeaders bearer(String token) {

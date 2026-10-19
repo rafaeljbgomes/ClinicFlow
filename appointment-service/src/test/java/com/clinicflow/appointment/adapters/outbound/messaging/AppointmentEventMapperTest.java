@@ -18,26 +18,36 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class AppointmentEventMapperTest {
     private final AppointmentEventMapper mapper = Mappers.getMapper(AppointmentEventMapper.class);
+    private final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
 
     @Test
-    void preservesTheExistingRabbitPayloadShape() throws Exception {
-        AppointmentScheduledEvent event = AppointmentScheduledEvent.of(
-                new AppointmentId(UUID.randomUUID()),
-                new PatientId(UUID.randomUUID()),
-                new PsychologistId(UUID.randomUUID()),
-                new AppointmentDate(Instant.parse("2026-05-27T10:00:00Z"))
-        );
+    void serializedScheduledPayloadKeepsTheExistingRabbitFields() throws Exception {
+        // Arrange
+        AppointmentScheduledEvent event = scheduledEvent();
 
-        AppointmentScheduledPayload payload = mapper.toPayload(event);
-        String json = new ObjectMapper().findAndRegisterModules().writeValueAsString(payload);
+        // Act
+        String payload = json.writeValueAsString(mapper.toPayload(event));
 
-        assertThat(json).contains("\"eventId\"", "\"eventType\":\"AppointmentScheduled\"",
+        // Assert
+        assertThat(payload).contains("\"eventId\"", "\"eventType\":\"AppointmentScheduled\"",
                 "\"appointmentId\"", "\"patientId\"", "\"psychologistId\"", "\"appointmentDate\"");
-        assertThat(json).doesNotContain("\"value\"");
+    }
+
+    @Test
+    void serializedScheduledPayloadFlattensValueObjects() throws Exception {
+        // Arrange
+        AppointmentScheduledEvent event = scheduledEvent();
+
+        // Act
+        String payload = json.writeValueAsString(mapper.toPayload(event));
+
+        // Assert
+        assertThat(payload).doesNotContain("\"value\"");
     }
 
     @Test
     void mapsCompletedEventToScalarPayload() {
+        // Arrange
         AppointmentCompletedEvent event = AppointmentCompletedEvent.of(
                 new AppointmentId(UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")),
                 new PatientId(UUID.fromString("cccccccc-cccc-cccc-cccc-cccccccccccc")),
@@ -46,13 +56,24 @@ class AppointmentEventMapperTest {
                 AppointmentType.ONLINE
         );
 
+        // Act
         AppointmentCompletedPayload payload = mapper.toPayload(event);
 
+        // Assert
         assertThat(payload.eventType()).isEqualTo("AppointmentCompleted");
         assertThat(payload.appointmentId()).isEqualTo(event.appointmentId().value());
         assertThat(payload.patientId()).isEqualTo(event.patientId().value());
         assertThat(payload.psychologistId()).isEqualTo(event.psychologistId().value());
         assertThat(payload.appointmentDate()).isEqualTo(event.appointmentDate().value());
         assertThat(payload.appointmentType()).isEqualTo(AppointmentType.ONLINE);
+    }
+
+    private AppointmentScheduledEvent scheduledEvent() {
+        return AppointmentScheduledEvent.of(
+                new AppointmentId(UUID.randomUUID()),
+                new PatientId(UUID.randomUUID()),
+                new PsychologistId(UUID.randomUUID()),
+                new AppointmentDate(Instant.parse("2026-05-27T10:00:00Z"))
+        );
     }
 }

@@ -1,5 +1,6 @@
 package com.clinicflow.notification.adapters.inbound.messaging;
 
+import com.clinicflow.notification.application.commands.ProcessNotificationEventCommand;
 import org.junit.jupiter.api.Test;
 import org.mapstruct.factory.Mappers;
 
@@ -10,13 +11,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 class NotificationEventMapperTest {
     @Test
     void convertsTypedRabbitPayloadToApplicationCommand() {
+        // Arrange
         UUID eventId = UUID.randomUUID();
         UUID psychologistId = UUID.randomUUID();
         InboundNotificationEvent payload = new InboundNotificationEvent(
                 eventId, "FutureEventType", psychologistId, "PATIENT@Example.COM");
+        NotificationEventMapper mapper = Mappers.getMapper(NotificationEventMapper.class);
 
-        var command = Mappers.getMapper(NotificationEventMapper.class).toCommand(payload);
+        // Act
+        ProcessNotificationEventCommand command = mapper.toCommand(payload);
 
+        // Assert
         assertThat(command.eventId().value()).isEqualTo(eventId);
         assertThat(command.eventType().value()).isEqualTo("FutureEventType");
         assertThat(command.psychologistId().value()).isEqualTo(psychologistId);

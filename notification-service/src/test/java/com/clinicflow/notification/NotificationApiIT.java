@@ -66,33 +66,80 @@ class NotificationApiIT {
     }
 
     @Test
-    void filtersNotificationsForPsychologistsWhileAdminsSeeAll() {
-        UUID ownedId = save(PSYCHOLOGIST_ID);
+    void psychologistListContainsOnlyOwnedNotifications() {
+        // Arrange
+        save(PSYCHOLOGIST_ID);
         save(OTHER_PSYCHOLOGIST_ID);
 
-        var psychologistList = http.exchange("/notifications", HttpMethod.GET,
+        // Act
+        var response = http.exchange("/notifications", HttpMethod.GET,
                 new HttpEntity<>(bearer("psychologist-token")), Object[].class);
-        assertThat(psychologistList.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(psychologistList.getBody()).hasSize(1);
 
-        var detail = http.exchange("/notifications/" + ownedId, HttpMethod.GET,
-                new HttpEntity<>(bearer("psychologist-token")), Map.class);
-        assertThat(detail.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(detail.getBody()).containsEntry("id", ownedId.toString());
-
-        var adminList = http.exchange("/notifications", HttpMethod.GET,
-                new HttpEntity<>(bearer("admin-token")), Object[].class);
-        assertThat(adminList.getBody()).hasSize(2);
+        // Assert
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).hasSize(1);
     }
 
     @Test
-    void rejectsUnauthenticatedAndUnsupportedRolesAndHidesOtherOwnersRecords() {
+    void psychologistCanReadAnOwnedNotification() {
+        // Arrange
+        UUID ownedId = save(PSYCHOLOGIST_ID);
+
+        // Act
+        var response = http.exchange("/notifications/" + ownedId, HttpMethod.GET,
+                new HttpEntity<>(bearer("psychologist-token")), Map.class);
+
+        // Assert
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).containsEntry("id", ownedId.toString());
+    }
+
+    @Test
+    void administratorListContainsEveryNotification() {
+        // Arrange
+        save(PSYCHOLOGIST_ID);
+        save(OTHER_PSYCHOLOGIST_ID);
+
+        // Act
+        var response = http.exchange("/notifications", HttpMethod.GET,
+                new HttpEntity<>(bearer("admin-token")), Object[].class);
+
+        // Assert
+        assertThat(response.getBody()).hasSize(2);
+    }
+
+    @Test
+    void listRequiresAuthentication() {
+        // Act
+        var response = http.getForEntity("/notifications", Map.class);
+
+        // Assert
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    void listRejectsPatientRole() {
+        // Arrange
+        var request = new HttpEntity<>(bearer("patient-token"));
+
+        // Act
+        var response = http.exchange("/notifications", HttpMethod.GET, request, Map.class);
+
+        // Assert
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    void psychologistCannotSeeAnotherOwnersNotification() {
+        // Arrange
         UUID otherId = save(OTHER_PSYCHOLOGIST_ID);
-        assertThat(http.getForEntity("/notifications", Map.class).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
-        assertThat(http.exchange("/notifications", HttpMethod.GET,
-                new HttpEntity<>(bearer("patient-token")), Map.class).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
-        assertThat(http.exchange("/notifications/" + otherId, HttpMethod.GET,
-                new HttpEntity<>(bearer("psychologist-token")), Map.class).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+
+        // Act
+        var response = http.exchange("/notifications/" + otherId, HttpMethod.GET,
+                new HttpEntity<>(bearer("psychologist-token")), Map.class);
+
+        // Assert
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
 
     private UUID save(UUID psychologistId) {

@@ -7,6 +7,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 const userId = "9b38f432-6b8f-4d75-9e6a-e775cc4b0175";
 let privateKey: CryptoKey;
 let publicKeyPem: string;
+let keyDirectory: string | undefined;
 
 beforeAll(async () => {
   const keyPair = await generateKeyPair("RS256");
@@ -14,17 +15,27 @@ beforeAll(async () => {
   publicKeyPem = await exportSPKI(keyPair.publicKey);
 });
 
-afterEach(() => {
+afterEach(async () => {
   delete process.env.CLINICFLOW_SECURITY_JWT_PUBLIC_KEY;
   delete process.env.CLINICFLOW_SECURITY_JWT_PUBLIC_KEY_PATH;
   delete process.env.CLINICFLOW_SECURITY_JWT_ISSUER;
   vi.resetModules();
+  if (keyDirectory) {
+    await rm(keyDirectory, { recursive: true, force: true });
+    keyDirectory = undefined;
+  }
 });
 
 describe("verifyAccessToken", () => {
   it("verifies a valid RS256 token with all ClinicFlow claims", async () => {
-    const result = await verifyInline(await signedToken());
+    // Arrange
+    const verifier = await inlineKeyVerifier();
+    const token = await signedToken();
 
+    // Act
+    const result = await verifier.verifyAccessToken(token);
+
+    // Assert
     expect(result).toMatchObject({
       status: "verified",
       principal: {
@@ -35,42 +46,63 @@ describe("verifyAccessToken", () => {
     });
   });
 
-  it("rejects expired, wrong-issuer, wrongly signed, and incomplete tokens", async () => {
-    expect(await verifyInline(await signedToken({ expiresIn: "-1s" }))).toEqual({ status: "invalid" });
-    expect(await verifyInline(await signedToken({ issuer: "other-issuer" }))).toEqual({ status: "invalid" });
+  it.each([
+    ["an expired token", () => signedToken({ expiresIn: "-1s" })],
+    ["a token from another issuer", () => signedToken({ issuer: "other-issuer" })],
+    [
+      "a token signed with another key",
+      async () => signedToken({ signingKey: (await generateKeyPair("RS256")).privateKey }),
+    ],
+    ["a token with an unknown role", () => signedToken({ claims: { role: "CLINICIAN" } })],
+    ["a token without an email claim", () => signedToken({ claims: { email: undefined } })],
+    [
+      "a token whose subject differs from the user id",
+      () => signedToken({ subject: "b1e674bd-a12d-4d16-916d-53ccde5b933d" }),
+    ],
+  ])("rejects %s", async (_scenario, createToken) => {
+    // Arrange
+    const verifier = await inlineKeyVerifier();
+    const token = await createToken();
 
-    const anotherKeyPair = await generateKeyPair("RS256");
-    expect(await verifyInline(await signedToken({ signingKey: anotherKeyPair.privateKey }))).toEqual({ status: "invalid" });
-    expect(await verifyInline(await signedToken({ claims: { role: "CLINICIAN" } }))).toEqual({ status: "invalid" });
-    expect(await verifyInline(await signedToken({ claims: { email: undefined } }))).toEqual({ status: "invalid" });
-    expect(await verifyInline(await signedToken({ subject: "b1e674bd-a12d-4d16-916d-53ccde5b933d" }))).toEqual({ status: "invalid" });
+    // Act
+    const result = await verifier.verifyAccessToken(token);
+
+    // Assert
+    expect(result).toEqual({ status: "invalid" });
   });
 
   it("loads a public key from the configured file path", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "clinicflow-jwt-"));
-    const keyPath = join(directory, "jwt-public.pem");
+    // Arrange
+    keyDirectory = await mkdtemp(join(tmpdir(), "clinicflow-jwt-"));
+    const keyPath = join(keyDirectory, "jwt-public.pem");
     await writeFile(keyPath, publicKeyPem, "utf8");
     process.env.CLINICFLOW_SECURITY_JWT_PUBLIC_KEY_PATH = keyPath;
+    const verifier = await import("@/lib/server/jwt");
+    const token = await signedToken();
 
-    try {
-      const verifier = await import("@/lib/server/jwt");
-      await expect(verifier.verifyAccessToken(await signedToken())).resolves.toMatchObject({ status: "verified" });
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
+    // Act
+    const result = await verifier.verifyAccessToken(token);
+
+    // Assert
+    expect(result).toMatchObject({ status: "verified" });
   });
 
   it("fails closed when no public key can be loaded", async () => {
+    // Arrange
     const verifier = await import("@/lib/server/jwt");
+    const token = await signedToken();
 
-    await expect(verifier.verifyAccessToken(await signedToken())).resolves.toEqual({ status: "unavailable" });
+    // Act
+    const result = await verifier.verifyAccessToken(token);
+
+    // Assert
+    expect(result).toEqual({ status: "unavailable" });
   });
 });
 
-async function verifyInline(token: string) {
+async function inlineKeyVerifier() {
   process.env.CLINICFLOW_SECURITY_JWT_PUBLIC_KEY = publicKeyPem;
-  const verifier = await import("@/lib/server/jwt");
-  return verifier.verifyAccessToken(token);
+  return import("@/lib/server/jwt");
 }
 
 async function signedToken({

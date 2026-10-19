@@ -31,8 +31,47 @@ class AppointmentCompletedEventConsumerTest {
     }
 
     @Test
-    void convertsPayloadAndRecordsSuccessfulConsumption() {
-        InboundAppointmentCompletedEvent event = new InboundAppointmentCompletedEvent(
+    void delegatesConvertedCommandToClinicalService() {
+        // Arrange
+        Message message = messageWithCorrelationId();
+
+        // Act
+        consumer.consume(event(), message);
+
+        // Assert
+        verify(clinicalService).processAppointmentCompleted(any(ProcessAppointmentCompletedCommand.class));
+    }
+
+    @Test
+    void recordsSuccessfulConsumptionMetric() {
+        // Arrange
+        Message message = messageWithCorrelationId();
+
+        // Act
+        consumer.consume(event(), message);
+
+        // Assert
+        assertThat(registry.get("clinicflow.domain.events.consumed")
+                .tag("service", "clinical-service")
+                .tag("event_type", "AppointmentCompleted")
+                .tag("status", "success")
+                .counter().count()).isEqualTo(1);
+    }
+
+    @Test
+    void clearsCorrelationIdFromMdcAfterConsumption() {
+        // Arrange
+        Message message = messageWithCorrelationId();
+
+        // Act
+        consumer.consume(event(), message);
+
+        // Assert
+        assertThat(MDC.get("correlation.id")).isNull();
+    }
+
+    private InboundAppointmentCompletedEvent event() {
+        return new InboundAppointmentCompletedEvent(
                 UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
                 "AppointmentCompleted",
                 Instant.parse("2026-06-01T10:00:00Z"),
@@ -42,17 +81,11 @@ class AppointmentCompletedEventConsumerTest {
                 Instant.parse("2026-06-01T09:00:00Z"),
                 "ONLINE"
         );
+    }
+
+    private Message messageWithCorrelationId() {
         MessageProperties properties = new MessageProperties();
         properties.setHeader("X-Correlation-Id", "correlation-123".getBytes(StandardCharsets.UTF_8));
-
-        consumer.consume(event, new Message(new byte[0], properties));
-
-        verify(clinicalService).processAppointmentCompleted(any(ProcessAppointmentCompletedCommand.class));
-        assertThat(registry.get("clinicflow.domain.events.consumed")
-                .tag("service", "clinical-service")
-                .tag("event_type", "AppointmentCompleted")
-                .tag("status", "success")
-                .counter().count()).isEqualTo(1);
-        assertThat(MDC.get("correlation.id")).isNull();
+        return new Message(new byte[0], properties);
     }
 }

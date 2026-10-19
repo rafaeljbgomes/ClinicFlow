@@ -24,38 +24,72 @@ class DemoDataBootstrapTest {
     @Test
     void canBeConstructedBySpring() {
         try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            // Arrange
             context.getEnvironment().getPropertySources().addFirst(demoBootstrapProperty());
             context.registerBean(UserRepository.class, InMemoryUserRepository::new);
             context.registerBean(PasswordHasher.class, DemoPasswordHasher::new);
             context.registerBean(DemoDataBootstrap.class);
 
+            // Act
             context.refresh();
 
+            // Assert
             assertThat(context.getBean(DemoDataBootstrap.class)).isNotNull();
         }
     }
 
-    private static MapPropertySource demoBootstrapProperty() {
-        return new MapPropertySource("test", Map.of("clinicflow.demo.bootstrap.enabled", "true"));
+    @Test
+    void seedsDemoUsersForEveryRole() throws Exception {
+        // Arrange
+        InMemoryUserRepository users = new InMemoryUserRepository();
+        DemoDataBootstrap bootstrap = bootstrap(users);
+
+        // Act
+        bootstrap.run(null);
+
+        // Assert
+        assertThat(users.records().values()).extracting(User::role)
+                .contains(Role.ADMIN, Role.PSYCHOLOGIST, Role.PATIENT);
     }
 
     @Test
-    void seedsDemoUsersIdempotently() throws Exception {
+    void seedsTheAdministratorDemoAccount() throws Exception {
+        // Arrange
         InMemoryUserRepository users = new InMemoryUserRepository();
-        DemoDataBootstrap bootstrap = new DemoDataBootstrap(
+        DemoDataBootstrap bootstrap = bootstrap(users);
+
+        // Act
+        bootstrap.run(null);
+
+        // Assert
+        assertThat(users.findByEmail(new EmailAddress("admin@demo.clinicflow.local")))
+                .hasValueSatisfying(user -> assertThat(user.role()).isEqualTo(Role.ADMIN));
+    }
+
+    @Test
+    void repeatedRunDoesNotDuplicateDemoUsers() throws Exception {
+        // Arrange
+        InMemoryUserRepository users = new InMemoryUserRepository();
+        DemoDataBootstrap bootstrap = bootstrap(users);
+        bootstrap.run(null);
+
+        // Act
+        bootstrap.run(null);
+
+        // Assert
+        assertThat(users.records()).hasSize(5);
+    }
+
+    private static DemoDataBootstrap bootstrap(InMemoryUserRepository users) {
+        return new DemoDataBootstrap(
                 users,
                 new DemoPasswordHasher(),
                 Clock.fixed(Instant.parse("2026-07-05T10:00:00Z"), ZoneOffset.UTC)
         );
+    }
 
-        bootstrap.run(null);
-        bootstrap.run(null);
-
-        assertThat(users.records()).hasSize(5);
-        assertThat(users.records().values()).extracting(User::role)
-                .contains(Role.ADMIN, Role.PSYCHOLOGIST, Role.PATIENT);
-        assertThat(users.findByEmail(new EmailAddress("admin@demo.clinicflow.local")))
-                .hasValueSatisfying(user -> assertThat(user.role()).isEqualTo(Role.ADMIN));
+    private static MapPropertySource demoBootstrapProperty() {
+        return new MapPropertySource("test", Map.of("clinicflow.demo.bootstrap.enabled", "true"));
     }
 
     private static final class DemoPasswordHasher implements PasswordHasher {

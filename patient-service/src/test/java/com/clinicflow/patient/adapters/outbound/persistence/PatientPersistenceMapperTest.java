@@ -28,10 +28,13 @@ class PatientPersistenceMapperTest {
 
     @Test
     void roundTripsDomainAndPersistenceModels() {
+        // Arrange
         Patient patient = patient();
 
+        // Act
         Patient restored = mapper.toDomain(mapper.toJpa(patient));
 
+        // Assert
         assertThat(restored).isEqualTo(patient);
         assertThat(restored.phone()).contains(new PhoneNumber("+351912345678"));
         assertThat(restored.preferredName()).contains(new PreferredName("Pat"));
@@ -40,16 +43,33 @@ class PatientPersistenceMapperTest {
     }
 
     @Test
-    void repositorySaveKeepsTheSuppliedDomainInstance() {
+    void repositorySavePersistsTheMappedEntity() {
+        // Arrange
         SpringDataPatientJpaRepository delegate = mock(SpringDataPatientJpaRepository.class);
         PatientPersistenceMapper mockedMapper = mock(PatientPersistenceMapper.class);
         Patient patient = patient();
         JpaPatientEntity jpa = mapper.toJpa(patient);
         when(mockedMapper.toJpa(patient)).thenReturn(jpa);
+        JpaPatientRepository repository = new JpaPatientRepository(delegate, mockedMapper);
 
-        new JpaPatientRepository(delegate, mockedMapper).save(patient);
+        // Act
+        repository.save(patient);
 
+        // Assert
         verify(delegate).save(jpa);
+    }
+
+    @Test
+    void repositorySaveKeepsTheSuppliedDomainInstance() {
+        // Arrange
+        SpringDataPatientJpaRepository delegate = mock(SpringDataPatientJpaRepository.class);
+        Patient patient = patient();
+        JpaPatientRepository repository = new JpaPatientRepository(delegate, mapper);
+
+        // Act
+        repository.save(patient);
+
+        // Assert
         assertThat(patient.fullName()).isEqualTo(new FullName("Patient Name"));
     }
 

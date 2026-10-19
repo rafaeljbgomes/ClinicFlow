@@ -1,5 +1,6 @@
 package com.clinicflow.clinical.adapters.inbound.messaging;
 
+import com.clinicflow.clinical.application.commands.ProcessAppointmentCompletedCommand;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -14,10 +15,15 @@ class AppointmentCompletedEventContractTest {
 
     @Test
     void consumerDeserializesTheCanonicalCompletedAppointmentContract() throws Exception {
-        var event = json.readValue(getClass().getResourceAsStream("/contracts/appointment-completed.json"),
+        // Arrange
+        InboundAppointmentCompletedEvent event = json.readValue(
+                getClass().getResourceAsStream("/contracts/appointment-completed.json"),
                 InboundAppointmentCompletedEvent.class);
-        var command = mapper.toCommand(event);
 
+        // Act
+        ProcessAppointmentCompletedCommand command = mapper.toCommand(event);
+
+        // Assert
         assertThat(command.eventId().value().toString()).isEqualTo("11111111-1111-1111-1111-111111111115");
         assertThat(command.appointmentId().value().toString()).isEqualTo("44444444-4444-4444-4444-444444444444");
         assertThat(command.modality().name()).isEqualTo("ONLINE");

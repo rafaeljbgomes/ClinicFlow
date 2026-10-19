@@ -63,19 +63,28 @@ class RabbitConfigIT {
 
     @Test
     void routesCompletedAppointmentEventsToClinicalQueue() {
+        // Act
         rabbitTemplate.convertAndSend(EXCHANGE, "appointment.completed", "completed");
 
-        Object message = rabbitTemplate.receiveAndConvert(QUEUE, 5000);
-
-        assertThat(message).isEqualTo("completed");
+        // Assert
+        assertThat(rabbitTemplate.receiveAndConvert(QUEUE, 5000)).isEqualTo("completed");
     }
 
     @Test
-    void isolatesClinicalDeadLettersByExactRoutingKey() {
+    void routesClinicalFailuresToDlq() {
+        // Act
         rabbitTemplate.convertAndSend(DLX, FAILED_ROUTING_KEY, "clinical-failure");
+
+        // Assert
+        assertThat(rabbitTemplate.receiveAndConvert(DLQ, 5000)).isEqualTo("clinical-failure");
+    }
+
+    @Test
+    void ignoresDeadLettersFromOtherServices() {
+        // Act
         rabbitTemplate.convertAndSend(DLX, "notification.failed", "notification-failure");
 
-        assertThat(rabbitTemplate.receiveAndConvert(DLQ, 5000)).isEqualTo("clinical-failure");
-        assertThat(rabbitTemplate.receive(DLQ, 250)).isNull();
+        // Assert
+        assertThat(rabbitTemplate.receive(DLQ, 1000)).isNull();
     }
 }

@@ -72,14 +72,16 @@ function notification(overrides: Partial<Notification> = {}): Notification {
 
 describe("dashboard insights", () => {
   it("adds useful context without adding another API", () => {
-    const metrics = practiceMetrics(
-      [patient()],
-      [appointment(), appointment({ id: "cancelled", status: "CANCELLED" })],
-      [clinicalCase(), clinicalCase({ id: "intake", status: "INTAKE" })],
-      [notification(), notification({ id: "failed", status: "FAILED" })],
-      now
-    );
+    // Arrange
+    const patients = [patient()];
+    const appointments = [appointment(), appointment({ id: "cancelled", status: "CANCELLED" })];
+    const cases = [clinicalCase(), clinicalCase({ id: "intake", status: "INTAKE" })];
+    const notifications = [notification(), notification({ id: "failed", status: "FAILED" })];
 
+    // Act
+    const metrics = practiceMetrics(patients, appointments, cases, notifications, now);
+
+    // Assert
     expect(metrics).toEqual([
       { label: "Patients", value: 1, context: "+1 this month" },
       { label: "Upcoming", value: 1, context: "Next 7 days" },
@@ -89,11 +91,14 @@ describe("dashboard insights", () => {
   });
 
   it("derives navigable follow-ups without pretending they are stored tasks", () => {
-    const followUps = deriveFollowUps(
-      [patient({ consentStatus: "PENDING" })],
-      [clinicalCase({ status: "INTAKE" })]
-    );
+    // Arrange
+    const patients = [patient({ consentStatus: "PENDING" })];
+    const cases = [clinicalCase({ status: "INTAKE" })];
 
+    // Act
+    const followUps = deriveFollowUps(patients, cases);
+
+    // Assert
     expect(followUps).toEqual([
       expect.objectContaining({ title: "Consent pending", href: "/dashboard/patients", tone: "warning" }),
       expect.objectContaining({ title: "Complete case intake", href: "/dashboard/clinical", tone: "info" }),
