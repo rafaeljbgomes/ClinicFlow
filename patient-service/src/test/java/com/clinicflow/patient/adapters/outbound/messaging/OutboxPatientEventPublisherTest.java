@@ -16,7 +16,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -35,39 +35,84 @@ class OutboxPatientEventPublisherTest {
     }
 
     @Test
-    void storesMappedEventAndRequestCorrelationId() {
+    void storesEventWithItsIdentityTypeAndRoutingKey() {
+        // Arrange
         PatientCreatedEvent event = event();
-        MDC.put("correlation.id", "correlation-123");
 
+        // Act
         publisher.publish(event);
 
-        ArgumentCaptor<JpaOutboxEvent> captor = ArgumentCaptor.forClass(JpaOutboxEvent.class);
-        verify(repository).save(captor.capture());
-        JpaOutboxEvent stored = captor.getValue();
+        // Assert
+        JpaOutboxEvent stored = storedRow();
         assertThat(stored.eventId()).isEqualTo(event.eventId());
         assertThat(stored.eventType()).isEqualTo("PatientCreated");
         assertThat(stored.routingKey()).isEqualTo("patient.created");
+    }
+
+    @Test
+    void storesEventAsPendingRowWithRequestCorrelationId() {
+        // Arrange
+        MDC.put("correlation.id", "correlation-123");
+
+        // Act
+        publisher.publish(event());
+
+        // Assert
+        JpaOutboxEvent stored = storedRow();
         assertThat(stored.correlationId()).isEqualTo("correlation-123");
         assertThat(stored.status()).isEqualTo(OutboxEventStatus.PENDING);
         assertThat(stored.retryCount()).isZero();
-        assertThat(stored.payload())
+    }
+
+    @Test
+    void serializesMappedEventIntoPayload() {
+        // Act
+        publisher.publish(event());
+
+        // Assert
+        assertThat(storedRow().payload())
                 .contains("\"eventId\":\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\"")
                 .contains("\"patientEmail\":\"patient@example.com\"");
     }
 
     @Test
-    void propagatesSerializationFailureWithoutWritingOutboxRow() throws Exception {
-        ObjectMapper failingMapper = mock(ObjectMapper.class);
-        when(failingMapper.writeValueAsString(any())).thenThrow(new JsonProcessingException("broken") { });
-        var failingPublisher = new OutboxPatientEventPublisher(
-                repository, failingMapper, Mappers.getMapper(PatientEventMapper.class));
+    void propagatesSerializationFailure() throws Exception {
+        // Arrange
+        OutboxPatientEventPublisher failingPublisher = publisherWithFailingSerializer();
 
-        assertThatThrownBy(() -> failingPublisher.publish(event()))
+        // Act
+        Throwable thrown = catchThrowable(() -> failingPublisher.publish(event()));
+
+        // Assert
+        assertThat(thrown)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("Could not serialize patient event for the outbox")
                 .hasCauseInstanceOf(JsonProcessingException.class);
+    }
 
+    @Test
+    void writesNoOutboxRowWhenSerializationFails() throws Exception {
+        // Arrange
+        OutboxPatientEventPublisher failingPublisher = publisherWithFailingSerializer();
+
+        // Act
+        catchThrowable(() -> failingPublisher.publish(event()));
+
+        // Assert
         verify(repository, never()).save(any());
+    }
+
+    private JpaOutboxEvent storedRow() {
+        ArgumentCaptor<JpaOutboxEvent> captor = ArgumentCaptor.forClass(JpaOutboxEvent.class);
+        verify(repository).save(captor.capture());
+        return captor.getValue();
+    }
+
+    private OutboxPatientEventPublisher publisherWithFailingSerializer() throws JsonProcessingException {
+        ObjectMapper failingMapper = mock(ObjectMapper.class);
+        when(failingMapper.writeValueAsString(any())).thenThrow(new JsonProcessingException("broken") { });
+        return new OutboxPatientEventPublisher(
+                repository, failingMapper, Mappers.getMapper(PatientEventMapper.class));
     }
 
     private PatientCreatedEvent event() {

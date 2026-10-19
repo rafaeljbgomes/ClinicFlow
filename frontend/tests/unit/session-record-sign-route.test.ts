@@ -51,53 +51,121 @@ describe("session record sign route", () => {
     vi.clearAllMocks();
   });
 
-  it("forwards a psychologist's CSRF-protected sign request to the clinical service", async () => {
-    fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ id: sessionId, noteStatus: "SIGNED" }), { status: 200 })
-    );
+  describe("for a psychologist with a matching CSRF token", () => {
+    beforeEach(() => {
+      fetchMock.mockResolvedValue(
+        new Response(JSON.stringify({ id: sessionId, noteStatus: "SIGNED" }), { status: 200 })
+      );
+    });
 
-    const response = await POST(signRequest("csrf-token"), context());
+    it("returns the downstream status", async () => {
+      // Arrange
+      const request = signRequest("csrf-token");
 
-    expect(response.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe(`http://localhost:8085/session-records/${sessionId}/sign`);
-    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "POST" });
+      // Act
+      const response = await POST(request, context());
+
+      // Assert
+      expect(response.status).toBe(200);
+    });
+
+    it("forwards one POST to the clinical service sign endpoint", async () => {
+      // Arrange
+      const request = signRequest("csrf-token");
+
+      // Act
+      await POST(request, context());
+
+      // Assert
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][0]).toBe(`http://localhost:8085/session-records/${sessionId}/sign`);
+      expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "POST" });
+    });
   });
 
-  it("rejects a missing or mismatched CSRF token before any downstream request", async () => {
-    expect((await POST(signRequest(), context())).status).toBe(403);
-    expect((await POST(signRequest("other-token"), context())).status).toBe(403);
-    expect(fetchMock).not.toHaveBeenCalled();
+  describe.each([
+    ["missing", undefined],
+    ["mismatched", "other-token"],
+  ])("with a %s CSRF token", (_label, csrf) => {
+    it("rejects the request", async () => {
+      // Arrange
+      const request = signRequest(csrf);
+
+      // Act
+      const response = await POST(request, context());
+
+      // Assert
+      expect(response.status).toBe(403);
+    });
+
+    it("sends no downstream request", async () => {
+      // Arrange
+      const request = signRequest(csrf);
+
+      // Act
+      await POST(request, context());
+
+      // Assert
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
   });
 
-  it("rejects non-psychologist roles before any downstream request", async () => {
-    for (const role of ["PATIENT", "ADMIN"] as const) {
+  describe.each(["PATIENT", "ADMIN"] as const)("for the %s role", (role) => {
+    beforeEach(() => {
       verifyAccessTokenMock.mockResolvedValue({ status: "verified", principal: { ...psychologist, role } });
-      expect((await POST(signRequest("csrf-token"), context())).status).toBe(403);
-    }
-    expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects the request", async () => {
+      // Arrange
+      const request = signRequest("csrf-token");
+
+      // Act
+      const response = await POST(request, context());
+
+      // Assert
+      expect(response.status).toBe(403);
+    });
+
+    it("sends no downstream request", async () => {
+      // Arrange
+      const request = signRequest("csrf-token");
+
+      // Act
+      await POST(request, context());
+
+      // Assert
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
   });
 
   it("keeps the record id inside the session-records path", async () => {
+    // Arrange
     fetchMock.mockResolvedValue(new Response(null, { status: 404 }));
+    const request = signRequest("csrf-token");
 
-    await POST(signRequest("csrf-token"), context("../clinical-cases/x"));
+    // Act
+    await POST(request, context("../clinical-cases/x"));
 
+    // Assert
     expect(fetchMock.mock.calls[0][0]).toBe(
       "http://localhost:8085/session-records/..%2Fclinical-cases%2Fx/sign"
     );
   });
 
   it("passes the stable signed-note conflict code through to the browser", async () => {
+    // Arrange
     fetchMock.mockResolvedValue(
       new Response(
         JSON.stringify({ status: 409, detail: "Signed session records cannot be changed", code: "session_record_signed" }),
         { status: 409 }
       )
     );
+    const request = signRequest("csrf-token");
 
-    const response = await POST(signRequest("csrf-token"), context());
+    // Act
+    const response = await POST(request, context());
 
+    // Assert
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toMatchObject({
       code: "session_record_signed",

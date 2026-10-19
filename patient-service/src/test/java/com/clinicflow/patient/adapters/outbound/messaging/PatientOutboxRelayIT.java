@@ -82,20 +82,33 @@ class PatientOutboxRelayIT {
     }
 
     @Test
-    void storesThenPublishesTheExistingJsonContractWithStableMetadata() {
+    void publishingStoresPendingRowBeforeAnyRelay() {
+        // Arrange
+        PatientCreatedEvent event = event();
+
+        // Act
+        publisher.publish(event);
+
+        // Assert
+        assertThat(repository.findAll()).singleElement().satisfies(stored -> {
+            assertThat(stored.eventId()).isEqualTo(event.eventId());
+            assertThat(stored.status()).isEqualTo(OutboxEventStatus.PENDING);
+        });
+    }
+
+    @Test
+    void relaysStoredEventWithExistingJsonContractAndStableMetadata() {
+        // Arrange
         PatientCreatedEvent event = event();
         MDC.put("correlation.id", "correlation-123");
         publisher.publish(event);
         MDC.clear();
 
-        assertThat(repository.findAll()).singleElement().satisfies(stored -> {
-            assertThat(stored.eventId()).isEqualTo(event.eventId());
-            assertThat(stored.status()).isEqualTo(OutboxEventStatus.PENDING);
-        });
+        // Act
+        dispatcher.dispatchNext();
 
-        assertThat(dispatcher.dispatchNext()).isTrue();
-
-        Message message = rabbitTemplate.receive(QUEUE, 5000);
+        // Assert
+        Message message = receive();
         assertThat(message).isNotNull();
         assertThat(message.getMessageProperties().getReceivedRoutingKey()).isEqualTo("patient.created");
         assertThat(message.getMessageProperties().getMessageId()).isEqualTo(event.eventId().toString());
@@ -104,83 +117,154 @@ class PatientOutboxRelayIT {
         assertThat(new String(message.getBody(), StandardCharsets.UTF_8))
                 .contains("\"eventType\":\"PatientCreated\"")
                 .contains("\"patientEmail\":\"patient@example.com\"");
+    }
+
+    @Test
+    void marksRelayedRowPublished() {
+        // Arrange
+        publisher.publish(event());
+
+        // Act
+        boolean dispatched = dispatcher.dispatchNext();
+
+        // Assert
+        assertThat(dispatched).isTrue();
         assertThat(repository.findAll()).singleElement()
                 .extracting(JpaOutboxEvent::status)
                 .isEqualTo(OutboxEventStatus.PUBLISHED);
     }
 
     @Test
-    void commitsBusinessHandoffWhileBrokerIsDownThenPublishesAfterRecovery() throws Exception {
-        PatientCreatedEvent event = event();
-        publisher.publish(event);
-        assertThat(RABBITMQ.execInContainer("rabbitmqctl", "stop_app").getExitCode()).isZero();
-        resetRabbitConnection();
+    void keepsCommittedRowRetryableWhileBrokerIsDown() throws Exception {
+        // Arrange
+        publisher.publish(event());
+        stopBroker();
 
-        assertThat(dispatcher.dispatchNext()).isTrue();
+        // Act
+        boolean dispatched = dispatcher.dispatchNext();
+
+        // Assert
+        assertThat(dispatched).isTrue();
         assertThat(repository.findAll()).singleElement().satisfies(stored -> {
             assertThat(stored.status()).isEqualTo(OutboxEventStatus.FAILED);
             assertThat(stored.retryCount()).isOne();
         });
-
-        assertThat(RABBITMQ.execInContainer("rabbitmqctl", "start_app").getExitCode()).isZero();
-        resetRabbitConnection();
-        declareQueue();
-
-        Awaitility.await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
-            dispatcher.dispatchNext();
-            assertThat(repository.findAll()).singleElement()
-                    .extracting(JpaOutboxEvent::status)
-                    .isEqualTo(OutboxEventStatus.PUBLISHED);
-        });
-        assertThat(rabbitTemplate.receive(QUEUE, 5000)).isNotNull();
     }
 
     @Test
-    void skipLockedClaimPublishesOneRowOnceAcrossConcurrentDispatchers() throws Exception {
+    void publishesRetainedRowAfterBrokerRecovery() throws Exception {
+        // Arrange
+        PatientCreatedEvent event = event();
+        publisher.publish(event);
+        stopBroker();
+        dispatcher.dispatchNext();
+        startBroker();
+
+        // Act
+        dispatchUntilPublished();
+
+        // Assert
+        Message message = receive();
+        assertThat(message).isNotNull();
+        assertThat(message.getMessageProperties().getMessageId()).isEqualTo(event.eventId().toString());
+    }
+
+    @Test
+    void onlyOneConcurrentDispatcherClaimsTheRow() throws Exception {
+        // Arrange
         publisher.publish(event());
 
-        List<Boolean> outcomes;
-        try (var executor = Executors.newFixedThreadPool(2)) {
-            var first = executor.submit(dispatcher::dispatchNext);
-            var second = executor.submit(dispatcher::dispatchNext);
-            outcomes = List.of(first.get(), second.get());
-        }
+        // Act
+        List<Boolean> outcomes = dispatchConcurrently();
 
+        // Assert
         assertThat(outcomes).containsExactlyInAnyOrder(true, false);
-        assertThat(rabbitTemplate.receive(QUEUE, 5000)).isNotNull();
+    }
+
+    @Test
+    void concurrentDispatchersPublishTheRowOnce() throws Exception {
+        // Arrange
+        publisher.publish(event());
+
+        // Act
+        dispatchConcurrently();
+
+        // Assert
+        assertThat(receive()).isNotNull();
         assertThat(rabbitTemplate.receive(QUEUE, 250)).isNull();
     }
 
     @Test
     void replayAfterLostStatusUpdateKeepsTheSameIdempotencyKey() {
+        // Arrange
         PatientCreatedEvent event = event();
         publisher.publish(event);
-        assertThat(dispatcher.dispatchNext()).isTrue();
-
+        arrangeStep("first relay", dispatcher.dispatchNext());
+        Message first = receive();
         jdbc.update("""
                 UPDATE outbox_events
                 SET status = 'FAILED', published_at = NULL, next_attempt_at = now()
                 WHERE event_id = ?
                 """, event.eventId());
-        assertThat(dispatcher.dispatchNext()).isTrue();
 
-        Message first = rabbitTemplate.receive(QUEUE, 5000);
-        Message second = rabbitTemplate.receive(QUEUE, 5000);
-        assertThat(first).isNotNull();
+        // Act
+        dispatcher.dispatchNext();
+
+        // Assert
+        Message second = receive();
         assertThat(second).isNotNull();
-        assertThat(first.getMessageProperties().getMessageId())
-                .isEqualTo(second.getMessageProperties().getMessageId())
+        assertThat(second.getMessageProperties().getMessageId())
+                .isEqualTo(first.getMessageProperties().getMessageId())
                 .isEqualTo(event.eventId().toString());
     }
 
     @Test
     void migrationCreatesDispatchAndRetentionIndexes() {
-        assertThat(jdbc.queryForList("""
+        // Act
+        List<String> indexes = jdbc.queryForList("""
                 SELECT indexname
                 FROM pg_indexes
                 WHERE tablename = 'outbox_events'
-                """, String.class))
-                .contains("idx_outbox_dispatch", "idx_outbox_published_at");
+                """, String.class);
+
+        // Assert
+        assertThat(indexes).contains("idx_outbox_dispatch", "idx_outbox_published_at");
+    }
+
+    private List<Boolean> dispatchConcurrently() throws Exception {
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var first = executor.submit(dispatcher::dispatchNext);
+            var second = executor.submit(dispatcher::dispatchNext);
+            return List.of(first.get(), second.get());
+        }
+    }
+
+    private void dispatchUntilPublished() {
+        Awaitility.await().atMost(Duration.ofSeconds(15)).until(() -> {
+            dispatcher.dispatchNext();
+            return repository.findAll().getFirst().status() == OutboxEventStatus.PUBLISHED;
+        });
+    }
+
+    private void stopBroker() throws Exception {
+        arrangeStep("stop broker", RABBITMQ.execInContainer("rabbitmqctl", "stop_app").getExitCode() == 0);
+        resetRabbitConnection();
+    }
+
+    private void startBroker() throws Exception {
+        arrangeStep("start broker", RABBITMQ.execInContainer("rabbitmqctl", "start_app").getExitCode() == 0);
+        resetRabbitConnection();
+        declareQueue();
+    }
+
+    private static void arrangeStep(String step, boolean succeeded) {
+        if (!succeeded) {
+            throw new IllegalStateException("Arrange step \"" + step + "\" failed");
+        }
+    }
+
+    private Message receive() {
+        return rabbitTemplate.receive(QUEUE, 5000);
     }
 
     private void declareQueue() {

@@ -16,6 +16,7 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
@@ -30,7 +31,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.when;
 
@@ -65,42 +66,87 @@ class PatientApiIT {
     }
 
     @Test
-    void runsThePatientLifecycleAcrossControllerServiceAndPostgres() {
-        var created = exchange("/patients", HttpMethod.POST, Map.of(
-                "email", "patient@example.com",
-                "fullName", "Original Name",
-                "phone", "+351912345678",
-                "contactPreference", "EMAIL",
-                "consentStatus", "GRANTED"));
-        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        String id = created.getBody().get("id").toString();
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM outbox_events", Long.class)).isEqualTo(1);
+    void createsPatientThroughControllerServiceAndPostgres() {
+        // Arrange
+        Map<String, Object> request = createRequest("patient@example.com");
 
-        var updated = exchange("/patients/" + id, HttpMethod.PUT, Map.of(
-                "fullName", "Updated Name",
-                "preferredName", "Updated",
-                "phone", "+351912345678",
-                "contactPreference", "PHONE",
-                "consentStatus", "GRANTED"));
-        assertThat(updated.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(updated.getBody()).containsEntry("fullName", "Updated Name");
+        // Act
+        var response = exchange("/patients", HttpMethod.POST, request);
 
-        var changed = exchange("/patients/" + id + "/status", HttpMethod.PATCH, Map.of("status", "INACTIVE"));
-        assertThat(changed.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(changed.getBody()).containsEntry("status", "INACTIVE");
+        // Assert
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(response.getBody()).containsKey("id");
+    }
 
-        var found = exchange("/patients/" + id, HttpMethod.GET, null);
-        assertThat(found.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(found.getBody()).containsEntry("preferredName", "Updated");
+    @Test
+    void creationStoresOneOutboxEvent() {
+        // Arrange
+        Map<String, Object> request = createRequest("patient@example.com");
 
-        var listed = http.exchange("/patients", HttpMethod.GET,
-                new HttpEntity<>(bearer("psychologist-token")), Object[].class);
-        assertThat(listed.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(listed.getBody()).hasSize(1);
+        // Act
+        exchange("/patients", HttpMethod.POST, request);
+
+        // Assert
+        assertThat(outboxEventCount()).isOne();
+    }
+
+    @Test
+    void updatesPatientProfile() {
+        // Arrange
+        String id = createPatient();
+
+        // Act
+        var response = exchange("/patients/" + id, HttpMethod.PUT, updateRequest());
+
+        // Assert
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).containsEntry("fullName", "Updated Name");
+    }
+
+    @Test
+    void changesPatientStatus() {
+        // Arrange
+        String id = createPatient();
+
+        // Act
+        var response = exchange("/patients/" + id + "/status", HttpMethod.PATCH, Map.of("status", "INACTIVE"));
+
+        // Assert
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).containsEntry("status", "INACTIVE");
+    }
+
+    @Test
+    void findsPersistedPatientProfile() {
+        // Arrange
+        String id = createPatient();
+        arrangeStep("update patient", exchange("/patients/" + id, HttpMethod.PUT, updateRequest()), HttpStatus.OK);
+
+        // Act
+        var response = exchange("/patients/" + id, HttpMethod.GET, null);
+
+        // Assert
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).containsEntry("preferredName", "Updated");
+    }
+
+    @Test
+    void listsThePsychologistPatients() {
+        // Arrange
+        createPatient();
+        var request = new HttpEntity<>(bearer("psychologist-token"));
+
+        // Act
+        var response = http.exchange("/patients", HttpMethod.GET, request, Object[].class);
+
+        // Assert
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).hasSize(1);
     }
 
     @Test
     void rollsBackPatientAndOutboxEventTogether() {
+        // Arrange
         CreatePatientCommand command = new CreatePatientCommand(
                 new PsychologistId(PSYCHOLOGIST_ID),
                 new EmailAddress("rollback@example.com"),
@@ -109,46 +155,119 @@ class PatientApiIT {
                 ConsentStatus.GRANTED
         );
 
-        assertThatThrownBy(() -> transactions.executeWithoutResult(status -> {
+        // Act
+        catchThrowable(() -> transactions.executeWithoutResult(status -> {
             patientService.create(command);
             throw new IllegalStateException("force rollback");
-        })).isInstanceOf(IllegalStateException.class);
+        }));
 
+        // Assert
         assertThat(jdbc.queryForObject("SELECT count(*) FROM patients", Long.class)).isZero();
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM outbox_events", Long.class)).isZero();
+        assertThat(outboxEventCount()).isZero();
     }
 
     @Test
-    void replacesOversizedCorrelationIdInsteadOfRollingBackTheWrite() {
-        HttpHeaders headers = bearer("psychologist-token");
-        headers.set("X-Correlation-Id", "a".repeat(129));
-        var created = http.exchange("/patients", HttpMethod.POST, new HttpEntity<>(Map.of(
-                "email", "correlation@example.com",
-                "fullName", "Correlation Patient",
-                "phone", "+351912345678",
-                "contactPreference", "EMAIL",
-                "consentStatus", "GRANTED"), headers), Map.class);
+    void acceptsWriteWithOversizedCorrelationId() {
+        // Arrange
+        HttpEntity<Map<String, Object>> request = createRequestWithOversizedCorrelationId();
 
-        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        String correlationId = created.getHeaders().getFirst("X-Correlation-Id");
-        assertThat(UUID.fromString(correlationId)).isNotNull();
+        // Act
+        var response = http.exchange("/patients", HttpMethod.POST, request, Map.class);
+
+        // Assert
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    }
+
+    @Test
+    void replacesOversizedCorrelationIdInResponseAndOutbox() {
+        // Arrange
+        HttpEntity<Map<String, Object>> request = createRequestWithOversizedCorrelationId();
+
+        // Act
+        var response = http.exchange("/patients", HttpMethod.POST, request, Map.class);
+
+        // Assert
+        String correlationId = response.getHeaders().getFirst("X-Correlation-Id");
+        assertThat(catchThrowable(() -> UUID.fromString(correlationId))).isNull();
         assertThat(jdbc.queryForObject("SELECT correlation_id FROM outbox_events", String.class))
                 .isEqualTo(correlationId);
     }
 
     @Test
-    void enforcesValidationAuthenticationAndRoleAtTheFunctionalBoundary() {
-        assertThat(http.getForEntity("/patients", Map.class).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
-        var forbidden = http.exchange("/patients", HttpMethod.GET,
-                new HttpEntity<>(bearer("patient-token")), Map.class);
-        assertThat(forbidden.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    void rejectsMissingAuthentication() {
+        // Act
+        var response = http.getForEntity("/patients", Map.class);
 
-        var invalid = exchange("/patients", HttpMethod.POST, Map.of(
-                "email", "invalid", "fullName", "", "consentStatus", "GRANTED"));
-        assertThat(invalid.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        // Assert
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
-    private org.springframework.http.ResponseEntity<Map> exchange(String path, HttpMethod method, Object body) {
+    @Test
+    void rejectsPatientRoleOnPsychologistPatients() {
+        // Arrange
+        var request = new HttpEntity<>(bearer("patient-token"));
+
+        // Act
+        var response = http.exchange("/patients", HttpMethod.GET, request, Map.class);
+
+        // Assert
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    void rejectsInvalidPatientPayload() {
+        // Arrange
+        Map<String, Object> invalid = Map.of("email", "invalid", "fullName", "", "consentStatus", "GRANTED");
+
+        // Act
+        var response = exchange("/patients", HttpMethod.POST, invalid);
+
+        // Assert
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    private String createPatient() {
+        var response = exchange("/patients", HttpMethod.POST, createRequest("patient@example.com"));
+        arrangeStep("create patient", response, HttpStatus.CREATED);
+        return response.getBody().get("id").toString();
+    }
+
+    private static void arrangeStep(String step, ResponseEntity<?> response, HttpStatus expected) {
+        if (response.getStatusCode().value() != expected.value()) {
+            throw new IllegalStateException(
+                    "Arrange step \"" + step + "\" returned " + response.getStatusCode() + ", expected " + expected);
+        }
+    }
+
+    private HttpEntity<Map<String, Object>> createRequestWithOversizedCorrelationId() {
+        HttpHeaders headers = bearer("psychologist-token");
+        headers.set("X-Correlation-Id", "a".repeat(129));
+        return new HttpEntity<>(createRequest("correlation@example.com"), headers);
+    }
+
+    private Map<String, Object> createRequest(String email) {
+        return Map.of(
+                "email", email,
+                "fullName", "Original Name",
+                "phone", "+351912345678",
+                "contactPreference", "EMAIL",
+                "consentStatus", "GRANTED");
+    }
+
+    private Map<String, Object> updateRequest() {
+        return Map.of(
+                "fullName", "Updated Name",
+                "preferredName", "Updated",
+                "phone", "+351912345678",
+                "contactPreference", "PHONE",
+                "consentStatus", "GRANTED");
+    }
+
+    private Long outboxEventCount() {
+        return jdbc.queryForObject("SELECT count(*) FROM outbox_events", Long.class);
+    }
+
+    private ResponseEntity<Map> exchange(String path, HttpMethod method, Object body) {
         return http.exchange(path, method, new HttpEntity<>(body, bearer("psychologist-token")), Map.class);
     }
 

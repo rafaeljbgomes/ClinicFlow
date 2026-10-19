@@ -16,6 +16,9 @@ import com.clinicflow.appointment.domain.events.AppointmentScheduledEvent;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.slf4j.MDC;
 import org.springframework.amqp.core.BindingBuilder;
 import org.springframework.amqp.core.Message;
@@ -42,6 +45,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Executors;
+import java.util.function.Supplier;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -79,6 +84,18 @@ class AppointmentOutboxRelayIT {
     @Autowired private JdbcTemplate jdbc;
     @MockitoBean private JwtDecoder jwtDecoder;
 
+    static Stream<Arguments> appointmentEvents() {
+        return Stream.of(
+                Arguments.of("AppointmentScheduled", "appointment.scheduled",
+                        (Supplier<Object>) AppointmentOutboxRelayIT::scheduled),
+                Arguments.of("AppointmentRescheduled", "appointment.rescheduled",
+                        (Supplier<Object>) AppointmentOutboxRelayIT::rescheduled),
+                Arguments.of("AppointmentCancelled", "appointment.cancelled",
+                        (Supplier<Object>) AppointmentOutboxRelayIT::cancelled),
+                Arguments.of("AppointmentCompleted", "appointment.completed",
+                        (Supplier<Object>) AppointmentOutboxRelayIT::completed));
+    }
+
     @BeforeEach
     void resetState() throws Exception {
         RABBITMQ.execInContainer("rabbitmqctl", "start_app");
@@ -90,120 +107,210 @@ class AppointmentOutboxRelayIT {
     }
 
     @Test
-    void publishesEveryExistingJsonContractWithStableMetadata() {
-        AppointmentScheduledEvent scheduled = scheduled();
+    void publishingStoresPendingRowBeforeAnyRelay() {
+        // Arrange
+        AppointmentScheduledEvent event = scheduled();
+
+        // Act
+        publisher.publish(event);
+
+        // Assert
+        assertThat(repository.findAll()).singleElement().satisfies(stored -> {
+            assertThat(stored.eventId()).isEqualTo(event.eventId().value());
+            assertThat(stored.status()).isEqualTo(OutboxEventStatus.PENDING);
+        });
+    }
+
+    @ParameterizedTest(name = "{0} is relayed on {1}")
+    @MethodSource("appointmentEvents")
+    void relaysStoredEventWithExistingJsonContractAndStableMetadata(String eventType, String routingKey,
+                                                                    Supplier<Object> event) {
+        // Arrange
         MDC.put("correlation.id", "correlation-123");
-        publisher.publish(scheduled);
-        publisher.publish(rescheduled());
-        publisher.publish(cancelled());
-        publisher.publish(completed());
+        publish(event.get());
         MDC.clear();
 
-        assertThat(repository.findAll()).hasSize(4)
-                .allSatisfy(stored -> assertThat(stored.status()).isEqualTo(OutboxEventStatus.PENDING));
+        // Act
+        dispatcher.dispatchNext();
 
-        for (int i = 0; i < 4; i++) {
-            assertThat(dispatcher.dispatchNext()).isTrue();
-        }
-
-        List<Message> messages = List.of(
-                receive(), receive(), receive(), receive());
-        assertThat(messages).extracting(message -> message.getMessageProperties().getReceivedRoutingKey())
-                .containsExactly(
-                        "appointment.scheduled",
-                        "appointment.rescheduled",
-                        "appointment.cancelled",
-                        "appointment.completed");
-        assertThat(messages).allSatisfy(message -> {
-            assertThat(message.getMessageProperties().getMessageId()).isNotBlank();
-            assertThat(message.getMessageProperties().getHeader("X-Correlation-Id").toString())
-                    .isEqualTo("correlation-123");
-            assertThat(new String(message.getBody(), StandardCharsets.UTF_8)).startsWith("{").endsWith("}");
-        });
-        assertThat(messages.get(0).getMessageProperties().getMessageId())
-                .isEqualTo(scheduled.eventId().value().toString());
-        assertThat(new String(messages.get(0).getBody(), StandardCharsets.UTF_8))
-                .contains("\"eventType\":\"AppointmentScheduled\"");
-        assertThat(new String(messages.get(1).getBody(), StandardCharsets.UTF_8))
-                .contains("\"eventType\":\"AppointmentRescheduled\"");
-        assertThat(new String(messages.get(2).getBody(), StandardCharsets.UTF_8))
-                .contains("\"eventType\":\"AppointmentCancelled\"");
-        assertThat(new String(messages.get(3).getBody(), StandardCharsets.UTF_8))
-                .contains("\"eventType\":\"AppointmentCompleted\"")
-                .contains("\"appointmentType\":\"ONLINE\"");
-        assertThat(repository.findAll()).allSatisfy(stored ->
-                assertThat(stored.status()).isEqualTo(OutboxEventStatus.PUBLISHED));
+        // Assert
+        Message message = receive();
+        assertThat(message).isNotNull();
+        assertThat(message.getMessageProperties().getReceivedRoutingKey()).isEqualTo(routingKey);
+        assertThat(message.getMessageProperties().getMessageId())
+                .isEqualTo(repository.findAll().getFirst().eventId().toString());
+        assertThat(message.getMessageProperties().getHeader("X-Correlation-Id").toString())
+                .isEqualTo("correlation-123");
+        assertThat(new String(message.getBody(), StandardCharsets.UTF_8))
+                .startsWith("{").endsWith("}")
+                .contains("\"eventType\":\"" + eventType + "\"");
     }
 
     @Test
-    void commitsBusinessHandoffWhileBrokerIsDownThenPublishesAfterRecovery() throws Exception {
-        publisher.publish(scheduled());
-        assertThat(RABBITMQ.execInContainer("rabbitmqctl", "stop_app").getExitCode()).isZero();
-        resetRabbitConnection();
+    void relaysCompletedEventWithItsAppointmentType() {
+        // Arrange
+        publisher.publish(completed());
 
-        assertThat(dispatcher.dispatchNext()).isTrue();
+        // Act
+        dispatcher.dispatchNext();
+
+        // Assert
+        assertThat(new String(receive().getBody(), StandardCharsets.UTF_8))
+                .contains("\"appointmentType\":\"ONLINE\"");
+    }
+
+    @Test
+    void marksRelayedRowPublished() {
+        // Arrange
+        publisher.publish(scheduled());
+
+        // Act
+        boolean dispatched = dispatcher.dispatchNext();
+
+        // Assert
+        assertThat(dispatched).isTrue();
+        assertThat(repository.findAll()).singleElement()
+                .extracting(JpaOutboxEvent::status)
+                .isEqualTo(OutboxEventStatus.PUBLISHED);
+    }
+
+    @Test
+    void keepsCommittedRowRetryableWhileBrokerIsDown() throws Exception {
+        // Arrange
+        publisher.publish(scheduled());
+        stopBroker();
+
+        // Act
+        boolean dispatched = dispatcher.dispatchNext();
+
+        // Assert
+        assertThat(dispatched).isTrue();
         assertThat(repository.findAll()).singleElement().satisfies(stored -> {
             assertThat(stored.status()).isEqualTo(OutboxEventStatus.FAILED);
             assertThat(stored.retryCount()).isOne();
         });
-
-        assertThat(RABBITMQ.execInContainer("rabbitmqctl", "start_app").getExitCode()).isZero();
-        resetRabbitConnection();
-        declareQueue();
-
-        Awaitility.await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
-            dispatcher.dispatchNext();
-            assertThat(repository.findAll()).singleElement()
-                    .extracting(JpaOutboxEvent::status)
-                    .isEqualTo(OutboxEventStatus.PUBLISHED);
-        });
-        assertThat(receive()).isNotNull();
     }
 
     @Test
-    void skipLockedClaimPublishesOneRowOnceAcrossConcurrentDispatchers() throws Exception {
+    void publishesRetainedRowAfterBrokerRecovery() throws Exception {
+        // Arrange
+        AppointmentScheduledEvent event = scheduled();
+        publisher.publish(event);
+        stopBroker();
+        dispatcher.dispatchNext();
+        startBroker();
+
+        // Act
+        dispatchUntilPublished();
+
+        // Assert
+        Message message = receive();
+        assertThat(message).isNotNull();
+        assertThat(message.getMessageProperties().getMessageId()).isEqualTo(event.eventId().value().toString());
+    }
+
+    @Test
+    void onlyOneConcurrentDispatcherClaimsTheRow() throws Exception {
+        // Arrange
         publisher.publish(scheduled());
 
-        List<Boolean> outcomes;
-        try (var executor = Executors.newFixedThreadPool(2)) {
-            var first = executor.submit(dispatcher::dispatchNext);
-            var second = executor.submit(dispatcher::dispatchNext);
-            outcomes = List.of(first.get(), second.get());
-        }
+        // Act
+        List<Boolean> outcomes = dispatchConcurrently();
 
+        // Assert
         assertThat(outcomes).containsExactlyInAnyOrder(true, false);
+    }
+
+    @Test
+    void concurrentDispatchersPublishTheRowOnce() throws Exception {
+        // Arrange
+        publisher.publish(scheduled());
+
+        // Act
+        dispatchConcurrently();
+
+        // Assert
         assertThat(receive()).isNotNull();
         assertThat(rabbitTemplate.receive(QUEUE, 250)).isNull();
     }
 
     @Test
     void replayAfterLostStatusUpdateKeepsTheSameIdempotencyKey() {
+        // Arrange
         AppointmentScheduledEvent event = scheduled();
         publisher.publish(event);
-        assertThat(dispatcher.dispatchNext()).isTrue();
-
+        arrangeStep("first relay", dispatcher.dispatchNext());
+        Message first = receive();
         jdbc.update("""
                 UPDATE outbox_events
                 SET status = 'FAILED', published_at = NULL, next_attempt_at = now()
                 WHERE event_id = ?
                 """, event.eventId().value());
-        assertThat(dispatcher.dispatchNext()).isTrue();
 
-        Message first = receive();
+        // Act
+        dispatcher.dispatchNext();
+
+        // Assert
         Message second = receive();
-        assertThat(first.getMessageProperties().getMessageId())
-                .isEqualTo(second.getMessageProperties().getMessageId())
+        assertThat(second).isNotNull();
+        assertThat(second.getMessageProperties().getMessageId())
+                .isEqualTo(first.getMessageProperties().getMessageId())
                 .isEqualTo(event.eventId().value().toString());
     }
 
     @Test
     void migrationCreatesDispatchAndRetentionIndexes() {
-        assertThat(jdbc.queryForList("""
+        // Act
+        List<String> indexes = jdbc.queryForList("""
                 SELECT indexname
                 FROM pg_indexes
                 WHERE tablename = 'outbox_events'
-                """, String.class))
-                .contains("idx_outbox_dispatch", "idx_outbox_published_at");
+                """, String.class);
+
+        // Assert
+        assertThat(indexes).contains("idx_outbox_dispatch", "idx_outbox_published_at");
+    }
+
+    private void publish(Object event) {
+        switch (event) {
+            case AppointmentScheduledEvent scheduled -> publisher.publish(scheduled);
+            case AppointmentRescheduledEvent rescheduled -> publisher.publish(rescheduled);
+            case AppointmentCancelledEvent cancelled -> publisher.publish(cancelled);
+            case AppointmentCompletedEvent completed -> publisher.publish(completed);
+            default -> throw new IllegalArgumentException("Unsupported event " + event);
+        }
+    }
+
+    private List<Boolean> dispatchConcurrently() throws Exception {
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var first = executor.submit(dispatcher::dispatchNext);
+            var second = executor.submit(dispatcher::dispatchNext);
+            return List.of(first.get(), second.get());
+        }
+    }
+
+    private void dispatchUntilPublished() {
+        Awaitility.await().atMost(Duration.ofSeconds(15)).until(() -> {
+            dispatcher.dispatchNext();
+            return repository.findAll().getFirst().status() == OutboxEventStatus.PUBLISHED;
+        });
+    }
+
+    private void stopBroker() throws Exception {
+        arrangeStep("stop broker", RABBITMQ.execInContainer("rabbitmqctl", "stop_app").getExitCode() == 0);
+        resetRabbitConnection();
+    }
+
+    private void startBroker() throws Exception {
+        arrangeStep("start broker", RABBITMQ.execInContainer("rabbitmqctl", "start_app").getExitCode() == 0);
+        resetRabbitConnection();
+        declareQueue();
+    }
+
+    private static void arrangeStep(String step, boolean succeeded) {
+        if (!succeeded) {
+            throw new IllegalStateException("Arrange step \"" + step + "\" failed");
+        }
     }
 
     private Message receive() {
@@ -226,47 +333,47 @@ class AppointmentOutboxRelayIT {
         }
     }
 
-    private AppointmentScheduledEvent scheduled() {
+    private static AppointmentScheduledEvent scheduled() {
         return new AppointmentScheduledEvent(eventId(), "AppointmentScheduled", occurredAt(), appointmentId(),
                 patientId(), psychologistId(), new AppointmentDate(Instant.parse("2099-07-01T10:00:00Z")));
     }
 
-    private AppointmentRescheduledEvent rescheduled() {
+    private static AppointmentRescheduledEvent rescheduled() {
         return new AppointmentRescheduledEvent(eventId(), "AppointmentRescheduled", occurredAt(), appointmentId(),
                 patientId(), psychologistId(),
                 new AppointmentDate(Instant.parse("2099-07-01T10:00:00Z")),
                 new AppointmentDate(Instant.parse("2099-07-02T10:00:00Z")));
     }
 
-    private AppointmentCancelledEvent cancelled() {
+    private static AppointmentCancelledEvent cancelled() {
         return new AppointmentCancelledEvent(eventId(), "AppointmentCancelled", occurredAt(), appointmentId(),
                 patientId(), psychologistId(),
                 new CancellationActor("psychologist"), new CancellationReason("Patient requested cancellation"));
     }
 
-    private AppointmentCompletedEvent completed() {
+    private static AppointmentCompletedEvent completed() {
         return new AppointmentCompletedEvent(eventId(), "AppointmentCompleted", occurredAt(), appointmentId(),
                 patientId(), psychologistId(), new AppointmentDate(Instant.parse("2099-07-01T10:00:00Z")),
                 AppointmentType.ONLINE);
     }
 
-    private DomainEventId eventId() {
+    private static DomainEventId eventId() {
         return new DomainEventId(UUID.randomUUID());
     }
 
-    private AppointmentId appointmentId() {
+    private static AppointmentId appointmentId() {
         return new AppointmentId(UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"));
     }
 
-    private PatientId patientId() {
+    private static PatientId patientId() {
         return new PatientId(UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"));
     }
 
-    private PsychologistId psychologistId() {
+    private static PsychologistId psychologistId() {
         return new PsychologistId(UUID.fromString("cccccccc-cccc-cccc-cccc-cccccccccccc"));
     }
 
-    private Instant occurredAt() {
+    private static Instant occurredAt() {
         return Instant.parse("2026-06-01T10:00:00Z");
     }
 }

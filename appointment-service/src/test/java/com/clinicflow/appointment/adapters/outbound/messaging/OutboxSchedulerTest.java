@@ -4,6 +4,8 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -18,22 +20,72 @@ class OutboxSchedulerTest {
     private final OutboxScheduler scheduler = new OutboxScheduler(dispatcher, properties, metrics);
 
     @Test
-    void drainsUpToConfiguredBatchAndRefreshesMetrics() {
-        when(dispatcher.dispatchNext()).thenReturn(true, true, false);
+    void dispatchStopsWhenNoEventIsDue() {
+        // Arrange
+        when(dispatcher.dispatchNext()).thenReturn(true, false);
 
+        // Act
         scheduler.dispatch();
 
+        // Assert
+        verify(dispatcher, times(2)).dispatchNext();
+    }
+
+    @Test
+    void dispatchDrainsAtMostTheConfiguredBatch() {
+        // Arrange
+        when(dispatcher.dispatchNext()).thenReturn(true);
+
+        // Act
+        scheduler.dispatch();
+
+        // Assert
         verify(dispatcher, times(3)).dispatchNext();
+    }
+
+    @Test
+    void dispatchRefreshesBacklogMetrics() {
+        // Arrange
+        when(dispatcher.dispatchNext()).thenReturn(false);
+
+        // Act
+        scheduler.dispatch();
+
+        // Assert
         verify(metrics).refreshBacklog();
     }
 
     @Test
-    void runsCleanupAndContainsCycleFailures() {
+    void dispatchContainsCycleFailures() {
+        // Arrange
+        when(dispatcher.dispatchNext()).thenThrow(new IllegalStateException("database unavailable"));
+
+        // Act
+        Throwable thrown = catchThrowable(scheduler::dispatch);
+
+        // Assert
+        assertThat(thrown).isNull();
+    }
+
+    @Test
+    void cleanupPurgesPublishedEventsAndRefreshesBacklogMetrics() {
+        // Act
         scheduler.cleanup();
+
+        // Assert
         verify(dispatcher).cleanupPublished();
         verify(metrics).refreshBacklog();
+    }
 
-        when(dispatcher.dispatchNext()).thenThrow(new IllegalStateException("database unavailable"));
-        scheduler.dispatch();
+    @Test
+    void cleanupContainsCycleFailures() {
+        // Arrange
+        when(dispatcher.cleanupPublished()).thenThrow(new IllegalStateException("database unavailable"));
+
+        // Act
+        Throwable thrown = catchThrowable(scheduler::cleanup);
+
+        // Assert
+        assertThat(thrown).isNull();
     }
 }

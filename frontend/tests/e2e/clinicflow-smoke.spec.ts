@@ -1,245 +1,789 @@
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import {
+  expect,
+  test as base,
+  type APIRequestContext,
+  type APIResponse,
+  type BrowserContext,
+  type Locator,
+  type Page,
+} from "@playwright/test";
 
-test("session routing remains safe for missing and stale cookies", async ({ context, page }) => {
-  await page.goto("/dashboard");
-  await expect(page).toHaveURL(/\/login$/);
-  const runtimeOrigin = new URL(page.url()).origin;
+type StorageState = Awaited<ReturnType<APIRequestContext["storageState"]>>;
+type DemoRole = "psychologist" | "patient" | "administrator";
+type Workspace = { fullName: string; storageState: StorageState };
+type Patient = { id: string; fullName: string; email: string };
+type SessionRecord = { id: string; sessionDate: string; modality: string; durationMinutes: number; attendanceStatus: string };
 
-  await context.addCookies([
-    {
-      name: "clinicflow_access_token",
-      value: "stale-token",
-      url: runtimeOrigin,
-      httpOnly: true,
-      sameSite: "Lax",
-    },
-  ]);
+const demoPassword = "ClinicFlowDemo!2026";
+const demoAccounts: Record<DemoRole, { email: string; home: string }> = {
+  psychologist: { email: "sofia.almeida@demo.clinicflow.local", home: "/dashboard" },
+  patient: { email: "ana.martins@demo.clinicflow.local", home: "/dashboard/access-limited" },
+  administrator: { email: "admin@demo.clinicflow.local", home: "/dashboard/system" },
+};
+const workspaceName = "ClinicFlow Demo Psychologist";
+const therapeuticFocus = "Stabilize routines and reduce acute stress triggers.";
+const sessionSummary = "Reviewed weekly routine and agreed on sleep hygiene homework.";
 
-  await page.goto("/login");
-  await expect(page).toHaveURL(/\/login$/);
-  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
-
-  await page.goto("/dashboard");
-  await expect(page).toHaveURL(/\/login$/);
+// Logins go through rate-limited auth routes, so demo sessions and the synthetic psychologist
+// workspace are arranged once per worker and shared read-only; every test arranges its own records
+// through the BFF and performs a single action.
+const test = base.extend<{ workspacePage: Page; pageAs: (role: DemoRole) => Promise<Page> }, {
+  demoSessions: Record<DemoRole, StorageState>;
+  workspace: Workspace;
+}>({
+  demoSessions: [async ({ playwright }, provide, workerInfo) => {
+    const sessions = {} as Record<DemoRole, StorageState>;
+    for (const role of Object.keys(demoAccounts) as DemoRole[]) {
+      const request = await playwright.request.newContext(requestOptions(workerInfo.project.use));
+      try {
+        await signInThroughBff(request, demoAccounts[role].email, demoPassword);
+        sessions[role] = await request.storageState();
+      } finally {
+        await request.dispose();
+      }
+    }
+    await provide(sessions);
+  }, { scope: "worker" }],
+  workspace: [async ({ playwright }, provide, workerInfo) => {
+    const request = await playwright.request.newContext(requestOptions(workerInfo.project.use));
+    try {
+      const email = `psychologist.${Date.now()}.${workerInfo.workerIndex}@example.com`;
+      const password = "TestingPass123!";
+      await arrangeStep(await withAuthRetry(() => request.post("/api/auth/register", {
+        data: { email, password, role: "PSYCHOLOGIST", fullName: workspaceName },
+      })), 201, "register workspace psychologist");
+      await signInThroughBff(request, email, password);
+      await provide({ fullName: workspaceName, storageState: await request.storageState() });
+    } finally {
+      await request.dispose();
+    }
+  }, { scope: "worker" }],
+  workspacePage: async ({ browser, workspace }, provide) => {
+    const context = await browser.newContext({ storageState: workspace.storageState });
+    try {
+      await provide(await context.newPage());
+    } finally {
+      await context.close();
+    }
+  },
+  pageAs: async ({ browser, demoSessions }, provide) => {
+    const contexts: BrowserContext[] = [];
+    await provide(async (role) => {
+      const context = await browser.newContext({ storageState: demoSessions[role] });
+      contexts.push(context);
+      return context.newPage();
+    });
+    await Promise.all(contexts.map((context) => context.close()));
+  },
 });
 
-test("role-protected BFF routes isolate psychologist, patient, and administrator sessions", async ({ browser }) => {
-  test.setTimeout(180_000);
+test.describe("session routing", () => {
+  test("sends anonymous dashboard visitors to login", async ({ page }) => {
+    // Act
+    await page.goto("/dashboard");
 
-  const psychologist = await signIn(browser, "sofia.almeida@demo.clinicflow.local", "/dashboard");
-  await expect.poll(() => psychologist.evaluate((path) => fetch(path).then((response) => response.status), "/api/users/9b38f432-6b8f-4d75-9e6a-e775cc4b0175")).toBe(403);
+    // Assert
+    await expect(page).toHaveURL(/\/login$/);
+  });
 
-  const patient = await signIn(browser, "ana.martins@demo.clinicflow.local", "/dashboard/access-limited");
-  await expect.poll(() => patient.evaluate((path) => fetch(path).then((response) => response.status), "/api/system/health")).toBe(403);
+  test("keeps the login page available with a stale access cookie", async ({ context, page, baseURL }) => {
+    // Arrange
+    await addStaleAccessCookie(context, baseURL);
 
-  const administrator = await signIn(browser, "admin@demo.clinicflow.local", "/dashboard/system");
-  await expect.poll(() => administrator.evaluate((path) => fetch(path).then((response) => response.status), "/api/system/health")).toBe(200);
+    // Act
+    await page.goto("/login");
 
-  await Promise.all([psychologist.context().close(), patient.context().close(), administrator.context().close()]);
+    // Assert
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+  });
+
+  test("sends stale sessions back to login", async ({ context, page, baseURL }) => {
+    // Arrange
+    await addStaleAccessCookie(context, baseURL);
+
+    // Act
+    await page.goto("/dashboard");
+
+    // Assert
+    await expect(page).toHaveURL(/\/login$/);
+  });
 });
 
-test("psychologist can run the main prototype workflow", async ({ page }) => {
-  test.setTimeout(180_000);
+test.describe("psychologist registration", () => {
+  test("opens the Today dashboard after creating an account", async ({ page }) => {
+    // Arrange
+    await page.goto("/register");
+    await page.getByLabel("Full name").fill(workspaceName);
+    await page.getByLabel("Email").fill(`registration.${Date.now()}@example.com`);
+    await page.getByLabel("Password").fill("TestingPass123!");
 
-  const stamp = Date.now();
-  const email = `psychologist.${stamp}@example.com`;
-  const password = "TestingPass123!";
-  const patientName = `Demo Patient ${stamp}`;
-  const patientEmail = `patient.${stamp}@example.com`;
-  const presentingConcern = "Initial stress and sleep disruption";
-  const therapeuticFocus = "Stabilize routines and reduce acute stress triggers.";
-  const sessionSummary = "Reviewed weekly routine and agreed on sleep hygiene homework.";
+    // Act
+    await page.getByRole("button", { name: "Create account" }).click();
 
-  await page.goto("/register");
-  await page.getByLabel("Full name").fill("ClinicFlow Demo Psychologist");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Create account" }).click();
-
-  await expect(page).toHaveURL(/\/dashboard$/);
-  await expect(page.getByRole("heading", { name: "Today" })).toBeVisible({
-    timeout: 30_000,
+    // Assert
+    await expect(page).toHaveURL(/\/dashboard$/);
+    await expect(page.getByRole("heading", { name: "Today" })).toBeVisible({ timeout: 30_000 });
   });
-  await expect(page.getByRole("link", { name: "Today" })).toHaveAttribute("aria-current", "page");
-  await expect(page.getByRole("button", { name: "Schedule", exact: true })).toHaveCount(1);
-  await page.getByRole("button", { name: "ClinicFlow Demo Psychologist" }).click();
-  await expect(page.getByRole("menuitem", { name: "Settings" })).toBeVisible();
-  await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("link", { name: "System" })).toHaveCount(0);
+});
 
-  await page.getByRole("link", { name: "Patients" }).click();
-  await openDialog(page, "New patient", "Create patient");
-  await page.getByLabel("Full name").fill(patientName);
-  await page.getByLabel("Preferred name").fill("Demo");
-  await page.getByLabel("Email").fill(patientEmail);
-  await page.getByLabel("Birth date").fill("1991-04-12");
-  await page.getByLabel("Phone", { exact: true }).fill("+351912345678");
-  await page.getByLabel("Emergency contact").fill("Emergency Contact");
-  await page.getByLabel("Emergency phone").fill("+351923456789");
-  await page.getByLabel("Relationship").fill("Partner");
-  await page.getByRole("button", { name: "Create patient" }).click();
-  await expect(page.getByText(patientName).filter({ visible: true }).first()).toBeVisible();
-  await page.getByPlaceholder("Search patients").fill(patientEmail);
-  await expect(page.getByText(patientName).filter({ visible: true }).first()).toBeVisible();
-  await page.getByPlaceholder("Search patients").clear();
-  const statusFilter = page.getByRole("combobox", { name: "Filter patients by status" });
-  await statusFilter.focus();
-  await page.keyboard.press("ArrowDown");
-  const activeOption = page.getByRole("option", { name: "Active", exact: true });
-  await expect(activeOption).toBeVisible();
-  await expect.poll(async () => {
-    if (await activeOption.getAttribute("data-highlighted") !== null) return true;
-    await page.keyboard.press("ArrowDown");
-    return false;
-  }, { timeout: 5_000 }).toBe(true);
-  await page.keyboard.press("Enter");
-  await expect(statusFilter).toContainText("Active");
-  await statusFilter.focus();
-  await page.keyboard.press("Space");
-  await expect(page.getByRole("option", { name: "All statuses", exact: true })).toBeVisible();
-  await page.keyboard.press("Home");
-  await expect(page.getByRole("option", { name: "All statuses", exact: true })).toHaveAttribute("data-highlighted", "");
-  await page.keyboard.press("Enter");
-  await expect(statusFilter).toContainText("All statuses");
-  const patientActions = page.getByRole("button", { name: "Patient actions" }).last();
-  await patientActions.focus();
-  await page.keyboard.press("Enter");
-  await expect(page.getByRole("menuitem", { name: "Archive" })).toBeVisible();
-  await page.keyboard.press("Escape");
+test.describe("role isolation", () => {
+  for (const role of Object.keys(demoAccounts) as DemoRole[]) {
+    test(`routes the ${role} to their home`, async ({ pageAs }) => {
+      // Arrange
+      const page = await pageAs(role);
 
-  await page.getByRole("link", { name: "Calendar" }).click();
-  await openDialog(page, "Schedule session", "Schedule session");
-  await page.getByLabel("Date and time").fill(futureDatetimeLocal());
-  await page.getByRole("button", { name: "Schedule session" }).click();
-  await expect(page.getByText(patientName).filter({ visible: true }).first()).toBeVisible();
-  await expect(page.getByText("SCHEDULED").filter({ visible: true }).first()).toBeVisible();
+      // Act
+      await page.goto("/dashboard/entry");
 
-  await page.getByRole("link", { name: "Clinical" }).click();
-  await openDialog(page, "New clinical case", "Create clinical case");
-  await page.getByLabel("Presenting concern").fill(presentingConcern);
-  await page.getByRole("button", { name: "Create case" }).click();
-  await expect(page.getByText(presentingConcern).filter({ visible: true }).first()).toBeVisible();
-  await expect(page.getByText("Intake").filter({ visible: true }).first()).toBeVisible();
-  await page.getByRole("button", { name: "Browse cases" }).click();
-  await page.getByPlaceholder("Search cases or patients").fill(patientName);
-  await expect(page.getByText(presentingConcern).filter({ visible: true }).first()).toBeVisible();
-  const clinicalFilter = page.getByRole("combobox", { name: "Filter clinical cases by status" });
-  await clinicalFilter.focus();
-  await page.keyboard.press("ArrowDown");
-  await expect(page.getByRole("option", { name: "All case statuses", exact: true })).toBeVisible();
-  const intakeOption = page.getByRole("option", { name: "Intake", exact: true });
-  await expect.poll(async () => {
-    if (await intakeOption.getAttribute("data-highlighted") !== null) return true;
-    await page.keyboard.press("ArrowDown");
-    return false;
-  }, { timeout: 5_000 }).toBe(true);
-  await page.keyboard.press("Enter");
-  await expect(clinicalFilter).toContainText("Intake");
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("checkbox")).toHaveCount(0);
+      // Assert
+      await expect(page).toHaveURL(new RegExp(`${demoAccounts[role].home.replaceAll("/", "\\/")}$`));
+    });
+  }
 
-  await openDialog(page, "Create", "Care plan", true);
-  await page.getByLabel("Therapeutic focus").fill(therapeuticFocus);
-  await page.getByLabel("Planned frequency").fill("Weekly");
-  await page.getByLabel("Review date").fill("2026-08-15");
-  await page.getByLabel("Goal description").fill("Improve sleep consistency");
-  await page.getByLabel("Progress").fill("20");
-  await page.getByRole("button", { name: "Add goal" }).click();
-  await expect(page.getByText("Goal 2")).toBeVisible();
-  await page.getByLabel("Goal description").nth(1).fill("Create a consistent wind-down routine");
-  await page.getByLabel("Progress").nth(1).fill("0");
-  await page.getByRole("button", { name: "Save care plan" }).click();
-  await expect(page.getByText(therapeuticFocus).filter({ visible: true }).first()).toBeVisible();
-  await page.getByRole("tab", { name: "Care plan" }).click();
-  await expect(page.getByText("Not started").filter({ visible: true }).first()).toBeVisible();
-  await page.getByRole("button", { name: "View all 2 objectives" }).click();
-  await expect(page.getByRole("dialog", { name: "Care-plan objectives" })).toContainText("Improve sleep consistency");
-  await expect(page.getByRole("dialog", { name: "Care-plan objectives" })).toContainText("Create a consistent wind-down routine");
-  await page.keyboard.press("Escape");
+  test("forbids psychologists from reading another user", async ({ pageAs }) => {
+    // Arrange
+    const page = await pageAs("psychologist");
 
-  await page.getByRole("tab", { name: "Session records" }).click();
-  await openDialog(page, "New record", "New session record");
-  await page.getByLabel("Session date").fill(futureDatetimeLocal());
-  await page.getByLabel("Summary").fill(sessionSummary);
-  await page.getByRole("button", { name: "Create session record" }).click();
-  await expect(page.getByRole("dialog", { name: "New session record" })).toBeHidden({
-    timeout: 30_000,
+    // Act
+    const response = await page.request.get("/api/users/9b38f432-6b8f-4d75-9e6a-e775cc4b0175");
+
+    // Assert
+    expect(response.status()).toBe(403);
   });
-  await expect(page.locator("main")).toContainText(sessionSummary, { timeout: 30_000 });
 
-  const recordActions = page.getByRole("button", { name: "Session record actions" });
-  await expect(recordActions).toHaveCount(1);
-  await recordActions.click();
-  await expect(page.getByRole("menuitem", { name: "Edit" })).toBeVisible();
-  await page.getByRole("menuitem", { name: "Sign note" }).click();
-  const signDialog = page.getByRole("dialog", { name: "Sign session note?" });
-  await expect(signDialog).toContainText("Signed notes can't be edited");
-  await expect(signDialog).toContainText(sessionSummary);
-  await signDialog.getByRole("button", { name: "Sign note" }).click();
-  await expect(signDialog).toBeHidden({ timeout: 30_000 });
-  await expect(page.locator("main")).toContainText("Signed by ClinicFlow Demo Psychologist", { timeout: 30_000 });
+  test("forbids patients from reading system health", async ({ pageAs }) => {
+    // Arrange
+    const page = await pageAs("patient");
 
-  await recordActions.click();
-  await expect(page.getByRole("menuitem", { name: "View note" })).toBeVisible();
-  await expect(page.getByRole("menuitem", { name: "Edit" })).toHaveCount(0);
-  await expect(page.getByRole("menuitem", { name: "Sign note" })).toHaveCount(0);
-  await page.getByRole("menuitem", { name: "View note" }).click();
-  const noteDialog = page.getByRole("dialog", { name: "Session note" });
-  await expect(noteDialog).toContainText(sessionSummary);
-  await expect(noteDialog).toContainText("read-only");
-  await expect(noteDialog.getByRole("textbox")).toHaveCount(0);
-  await expect(noteDialog.getByRole("combobox")).toHaveCount(0);
-  await page.keyboard.press("Escape");
-  await expect(noteDialog).toBeHidden();
+    // Act
+    const response = await page.request.get("/api/system/health");
 
-  const historyHref = await page
-    .locator('a[href$="/clinical-history"]')
-    .first()
-    .getAttribute("href");
-  expect(historyHref).toBeTruthy();
-  await page.goto(historyHref!);
-  await expect(page.getByRole("heading", { name: "Clinical history" })).toBeVisible();
-  await expect(page.locator("main")).toContainText(therapeuticFocus);
-  await expect(page.locator("main")).toContainText(sessionSummary);
-  await expect(page.locator("main")).toContainText("Signed by the treating psychologist");
+    // Assert
+    expect(response.status()).toBe(403);
+  });
 
-  const patientId = historyHref!.split("/").at(-2)!;
-  const lockedEdit = await page.evaluate(async (id) => {
-    const history = await fetch(`/api/patients/${id}/clinical-history`).then((response) => response.json());
-    const record = history.sessionRecords[0];
-    const csrf = document.cookie.split("; ").find((entry) => entry.startsWith("clinicflow_csrf="))?.split("=")[1] ?? "";
-    const response = await fetch(`/api/session-records/${record.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
-      body: JSON.stringify({
+  test("lets administrators read system health", async ({ pageAs }) => {
+    // Arrange
+    const page = await pageAs("administrator");
+
+    // Act
+    const response = await page.request.get("/api/system/health");
+
+    // Assert
+    expect(response.status()).toBe(200);
+  });
+});
+
+test.describe("psychologist workspace shell", () => {
+  test("marks Today as the current navigation entry", async ({ workspacePage: page }) => {
+    // Act
+    await page.goto("/dashboard");
+
+    // Assert
+    await expect(page.getByRole("link", { name: "Today" })).toHaveAttribute("aria-current", "page");
+  });
+
+  test("offers a single Schedule action", async ({ workspacePage: page }) => {
+    // Act
+    await page.goto("/dashboard");
+
+    // Assert
+    await expect(page.getByRole("button", { name: "Schedule", exact: true })).toHaveCount(1);
+  });
+
+  test("hides the System area from psychologists", async ({ workspacePage: page }) => {
+    // Act
+    await page.goto("/dashboard");
+
+    // Assert
+    await expect(page.getByRole("heading", { name: "Today" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("link", { name: "System" })).toHaveCount(0);
+  });
+
+  test("account menu offers settings and sign out", async ({ workspacePage: page }) => {
+    // Arrange
+    await page.goto("/dashboard");
+
+    // Act
+    await page.getByRole("button", { name: workspaceName }).click();
+
+    // Assert
+    await expect(page.getByRole("menuitem", { name: "Settings" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeVisible();
+  });
+
+  test("settings hide security internals", async ({ workspacePage: page }) => {
+    // Act
+    await page.goto("/dashboard/settings");
+
+    // Assert
+    await expect(page.getByRole("heading").first()).toBeVisible();
+    await expect(page.getByText("CSRF protection")).toHaveCount(0);
+    await expect(page.getByText("Browser access uses")).toHaveCount(0);
+  });
+});
+
+test.describe("patients", () => {
+  test("creating a patient lists them", async ({ workspacePage: page }) => {
+    // Arrange
+    const stamp = uniqueStamp();
+    const patientName = `Demo Patient ${stamp}`;
+    await page.goto("/dashboard/patients");
+    await openDialog(page, "New patient", "Create patient");
+    await page.getByLabel("Full name").fill(patientName);
+    await page.getByLabel("Preferred name").fill("Demo");
+    await page.getByLabel("Email").fill(`patient.${stamp}@example.com`);
+    await page.getByLabel("Birth date").fill("1991-04-12");
+    await page.getByLabel("Phone", { exact: true }).fill("+351912345678");
+    await page.getByLabel("Emergency contact").fill("Emergency Contact");
+    await page.getByLabel("Emergency phone").fill("+351923456789");
+    await page.getByLabel("Relationship").fill("Partner");
+
+    // Act
+    await page.getByRole("button", { name: "Create patient" }).click();
+
+    // Assert
+    await expect(page.getByText(patientName).filter({ visible: true }).first()).toBeVisible();
+  });
+
+  test("search finds a patient by email", async ({ workspacePage: page }) => {
+    // Arrange
+    const patient = await createPatient(page);
+    await page.goto("/dashboard/patients");
+
+    // Act
+    await page.getByPlaceholder("Search patients").fill(patient.email);
+
+    // Assert
+    await expect(page.getByText(patient.fullName).filter({ visible: true }).first()).toBeVisible();
+  });
+
+  test("keyboard selection applies the Active status filter", async ({ workspacePage: page }) => {
+    // Arrange
+    await createPatient(page);
+    await page.goto("/dashboard/patients");
+    const statusFilter = patientStatusFilter(page);
+    await statusFilter.focus();
+    await page.keyboard.press("ArrowDown");
+    await highlightOption(page, page.getByRole("option", { name: "Active", exact: true }));
+
+    // Act
+    await page.keyboard.press("Enter");
+
+    // Assert
+    await expect(statusFilter).toContainText("Active");
+  });
+
+  test("Space opens the status filter options", async ({ workspacePage: page }) => {
+    // Arrange
+    await createPatient(page);
+    await page.goto("/dashboard/patients");
+    await patientStatusFilter(page).focus();
+
+    // Act
+    await page.keyboard.press("Space");
+
+    // Assert
+    await expect(page.getByRole("option", { name: "All statuses", exact: true })).toBeVisible();
+  });
+
+  test("Home highlights All statuses in the status filter", async ({ workspacePage: page }) => {
+    // Arrange
+    await createPatient(page);
+    await page.goto("/dashboard/patients");
+    await patientStatusFilter(page).focus();
+    await page.keyboard.press("Space");
+    await expect(page.getByRole("option", { name: "All statuses", exact: true })).toBeVisible();
+
+    // Act
+    await page.keyboard.press("Home");
+
+    // Assert
+    await expect(page.getByRole("option", { name: "All statuses", exact: true })).toHaveAttribute("data-highlighted", "");
+  });
+
+  test("choosing All statuses resets the status filter", async ({ workspacePage: page }) => {
+    // Arrange
+    await createPatient(page);
+    await page.goto("/dashboard/patients");
+    const statusFilter = patientStatusFilter(page);
+    await statusFilter.focus();
+    await page.keyboard.press("ArrowDown");
+    await highlightOption(page, page.getByRole("option", { name: "Active", exact: true }));
+    await page.keyboard.press("Enter");
+    await expect(statusFilter).toContainText("Active");
+    await statusFilter.focus();
+    await page.keyboard.press("Space");
+    await page.keyboard.press("Home");
+
+    // Act
+    await page.keyboard.press("Enter");
+
+    // Assert
+    await expect(statusFilter).toContainText("All statuses");
+  });
+
+  test("patient actions open from the keyboard", async ({ workspacePage: page }) => {
+    // Arrange
+    await createPatient(page);
+    await page.goto("/dashboard/patients");
+    await page.getByRole("button", { name: "Patient actions" }).last().focus();
+
+    // Act
+    await page.keyboard.press("Enter");
+
+    // Assert
+    await expect(page.getByRole("menuitem", { name: "Archive" })).toBeVisible();
+  });
+});
+
+test.describe("calendar", () => {
+  test("scheduling a session lists it as scheduled", async ({ workspacePage: page }) => {
+    // Arrange
+    const patient = await createPatient(page);
+    await page.goto("/dashboard/appointments");
+    await openDialog(page, "Schedule session", "Schedule session");
+    const dialog = page.getByRole("dialog", { name: "Schedule session" });
+    await choosePatient(page, dialog, patient.fullName);
+    await page.getByLabel("Date and time").fill(futureDatetimeLocal());
+
+    // Act
+    await dialog.getByRole("button", { name: "Schedule session" }).click();
+
+    // Assert
+    await expect(page.getByText(patient.fullName).filter({ visible: true }).first()).toBeVisible();
+    await expect(page.getByText("SCHEDULED").filter({ visible: true }).first()).toBeVisible();
+  });
+});
+
+test.describe("clinical cases", () => {
+  test("creating a case opens it in intake", async ({ workspacePage: page }) => {
+    // Arrange
+    const patient = await createPatient(page);
+    const presentingConcern = `Initial stress and sleep disruption ${uniqueStamp()}`;
+    await page.goto("/dashboard/clinical");
+    await openDialog(page, "New clinical case", "Create clinical case");
+    const dialog = page.getByRole("dialog", { name: "Create clinical case" });
+    await choosePatient(page, dialog, patient.fullName);
+    await page.getByLabel("Presenting concern").fill(presentingConcern);
+
+    // Act
+    await page.getByRole("button", { name: "Create case" }).click();
+
+    // Assert
+    await expect(page.getByText(presentingConcern).filter({ visible: true }).first()).toBeVisible();
+    await expect(page.getByText("Intake").filter({ visible: true }).first()).toBeVisible();
+  });
+
+  test("case browser search finds a case by patient name", async ({ workspacePage: page }) => {
+    // Arrange
+    const patient = await createPatient(page);
+    const clinicalCase = await createClinicalCase(page, patient);
+    await page.goto("/dashboard/clinical");
+    await page.getByRole("button", { name: "Browse cases" }).click();
+
+    // Act
+    await page.getByPlaceholder("Search cases or patients").fill(patient.fullName);
+
+    // Assert
+    await expect(page.getByText(clinicalCase.presentingConcern).filter({ visible: true }).first()).toBeVisible();
+  });
+
+  test("keyboard selection applies the Intake case filter", async ({ workspacePage: page }) => {
+    // Arrange
+    const patient = await createPatient(page);
+    await createClinicalCase(page, patient);
+    await page.goto("/dashboard/clinical");
+    await page.getByRole("button", { name: "Browse cases" }).click();
+    const clinicalFilter = page.getByRole("combobox", { name: "Filter clinical cases by status" });
+    await clinicalFilter.focus();
+    await page.keyboard.press("ArrowDown");
+    await expect(page.getByRole("option", { name: "All case statuses", exact: true })).toBeVisible();
+    await highlightOption(page, page.getByRole("option", { name: "Intake", exact: true }));
+
+    // Act
+    await page.keyboard.press("Enter");
+
+    // Assert
+    await expect(clinicalFilter).toContainText("Intake");
+  });
+
+  test("the clinical workspace offers no bulk selection", async ({ workspacePage: page }) => {
+    // Arrange
+    const patient = await createPatient(page);
+    const clinicalCase = await createClinicalCase(page, patient);
+
+    // Act
+    await page.goto("/dashboard/clinical");
+
+    // Assert
+    await expect(page.getByText(clinicalCase.presentingConcern).filter({ visible: true }).first()).toBeVisible();
+    await expect(page.getByRole("checkbox")).toHaveCount(0);
+  });
+
+  test("saving a care plan shows its therapeutic focus", async ({ workspacePage: page }) => {
+    // Arrange
+    const patient = await createPatient(page);
+    await createClinicalCase(page, patient);
+    await page.goto("/dashboard/clinical");
+    await openDialog(page, "Create", "Care plan", true);
+    await page.getByLabel("Therapeutic focus").fill(therapeuticFocus);
+    await page.getByLabel("Planned frequency").fill("Weekly");
+    await page.getByLabel("Review date").fill("2026-08-15");
+    await page.getByLabel("Goal description").fill("Improve sleep consistency");
+    await page.getByLabel("Progress").fill("20");
+    await page.getByRole("button", { name: "Add goal" }).click();
+    await expect(page.getByText("Goal 2")).toBeVisible();
+    await page.getByLabel("Goal description").nth(1).fill("Create a consistent wind-down routine");
+    await page.getByLabel("Progress").nth(1).fill("0");
+
+    // Act
+    await page.getByRole("button", { name: "Save care plan" }).click();
+
+    // Assert
+    await expect(page.getByText(therapeuticFocus).filter({ visible: true }).first()).toBeVisible();
+  });
+
+  test("care plan tab shows goals without a status as not started", async ({ workspacePage: page }) => {
+    // Arrange
+    const patient = await createPatient(page);
+    const clinicalCase = await createClinicalCase(page, patient);
+    await putCarePlan(page, clinicalCase.id);
+    await page.goto("/dashboard/clinical");
+
+    // Act
+    await page.getByRole("tab", { name: "Care plan" }).click();
+
+    // Assert
+    await expect(page.getByText("Not started").filter({ visible: true }).first()).toBeVisible();
+  });
+
+  test("objectives dialog lists every care-plan goal", async ({ workspacePage: page }) => {
+    // Arrange
+    const patient = await createPatient(page);
+    const clinicalCase = await createClinicalCase(page, patient);
+    await putCarePlan(page, clinicalCase.id);
+    await page.goto("/dashboard/clinical");
+    await page.getByRole("tab", { name: "Care plan" }).click();
+
+    // Act
+    await page.getByRole("button", { name: "View all 2 objectives" }).click();
+
+    // Assert
+    const objectives = page.getByRole("dialog", { name: "Care-plan objectives" });
+    await expect(objectives).toContainText("Improve sleep consistency");
+    await expect(objectives).toContainText("Create a consistent wind-down routine");
+  });
+});
+
+test.describe("session records", () => {
+  test("creating a session record shows its summary", async ({ workspacePage: page }) => {
+    // Arrange
+    const patient = await createPatient(page);
+    await createClinicalCase(page, patient);
+    await page.goto("/dashboard/clinical");
+    await page.getByRole("tab", { name: "Session records" }).click();
+    await openDialog(page, "New record", "New session record");
+    await page.getByLabel("Session date").fill(futureDatetimeLocal());
+    await page.getByLabel("Summary").fill(sessionSummary);
+
+    // Act
+    await page.getByRole("button", { name: "Create session record" }).click();
+
+    // Assert
+    await expect(page.getByRole("dialog", { name: "New session record" })).toBeHidden({ timeout: 30_000 });
+    await expect(page.locator("main")).toContainText(sessionSummary, { timeout: 30_000 });
+  });
+
+  test("draft record actions offer editing and signing", async ({ workspacePage: page }) => {
+    // Arrange
+    await openSessionRecords(page, await draftRecord(page));
+
+    // Act
+    await page.getByRole("button", { name: "Session record actions" }).click();
+
+    // Assert
+    await expect(page.getByRole("menuitem", { name: "Edit" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Sign note" })).toBeVisible();
+  });
+
+  test("sign dialog warns that signed notes are locked", async ({ workspacePage: page }) => {
+    // Arrange
+    await openSessionRecords(page, await draftRecord(page));
+    await page.getByRole("button", { name: "Session record actions" }).click();
+
+    // Act
+    await page.getByRole("menuitem", { name: "Sign note" }).click();
+
+    // Assert
+    const signDialog = page.getByRole("dialog", { name: "Sign session note?" });
+    await expect(signDialog).toContainText("Signed notes can't be edited");
+    await expect(signDialog).toContainText(sessionSummary);
+  });
+
+  test("confirming the signature shows the signer", async ({ workspacePage: page }) => {
+    // Arrange
+    await openSessionRecords(page, await draftRecord(page));
+    await page.getByRole("button", { name: "Session record actions" }).click();
+    await page.getByRole("menuitem", { name: "Sign note" }).click();
+    const signDialog = page.getByRole("dialog", { name: "Sign session note?" });
+
+    // Act
+    await signDialog.getByRole("button", { name: "Sign note" }).click();
+
+    // Assert
+    await expect(signDialog).toBeHidden({ timeout: 30_000 });
+    await expect(page.locator("main")).toContainText(`Signed by ${workspaceName}`, { timeout: 30_000 });
+  });
+
+  test("signed record actions are read-only", async ({ workspacePage: page }) => {
+    // Arrange
+    await openSessionRecords(page, await signedRecord(page));
+
+    // Act
+    await page.getByRole("button", { name: "Session record actions" }).click();
+
+    // Assert
+    await expect(page.getByRole("menuitem", { name: "View note" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Edit" })).toHaveCount(0);
+    await expect(page.getByRole("menuitem", { name: "Sign note" })).toHaveCount(0);
+  });
+
+  test("a signed note opens read-only", async ({ workspacePage: page }) => {
+    // Arrange
+    await openSessionRecords(page, await signedRecord(page));
+    await page.getByRole("button", { name: "Session record actions" }).click();
+
+    // Act
+    await page.getByRole("menuitem", { name: "View note" }).click();
+
+    // Assert
+    const noteDialog = page.getByRole("dialog", { name: "Session note" });
+    await expect(noteDialog).toContainText(sessionSummary);
+    await expect(noteDialog).toContainText("read-only");
+    await expect(noteDialog.getByRole("textbox")).toHaveCount(0);
+    await expect(noteDialog.getByRole("combobox")).toHaveCount(0);
+  });
+
+  test("Escape closes the signed note", async ({ workspacePage: page }) => {
+    // Arrange
+    await openSessionRecords(page, await signedRecord(page));
+    await page.getByRole("button", { name: "Session record actions" }).click();
+    await page.getByRole("menuitem", { name: "View note" }).click();
+    const noteDialog = page.getByRole("dialog", { name: "Session note" });
+    await expect(noteDialog).toBeVisible();
+
+    // Act
+    await page.keyboard.press("Escape");
+
+    // Assert
+    await expect(noteDialog).toBeHidden();
+  });
+
+  test("clinical history shows the plan, the note and its signature", async ({ workspacePage: page }) => {
+    // Arrange
+    const { patient } = await signedRecord(page, { withCarePlan: true });
+
+    // Act
+    await page.goto(`/dashboard/patients/${patient.id}/clinical-history`);
+
+    // Assert
+    await expect(page.getByRole("heading", { name: "Clinical history" })).toBeVisible();
+    await expect(page.locator("main")).toContainText(therapeuticFocus);
+    await expect(page.locator("main")).toContainText(sessionSummary);
+    await expect(page.locator("main")).toContainText("Signed by the treating psychologist");
+  });
+
+  test("the BFF rejects edits to a signed note", async ({ workspacePage: page }) => {
+    // Arrange
+    const { record } = await signedRecord(page);
+    const csrf = await csrfToken(page);
+
+    // Act
+    const response = await page.request.patch(`/api/session-records/${record.id}`, {
+      headers: { "x-csrf-token": csrf },
+      data: {
         sessionDate: record.sessionDate,
         modality: record.modality,
         durationMinutes: record.durationMinutes,
         attendanceStatus: record.attendanceStatus,
         noteStatus: "DRAFT",
         summary: "Rewritten after signing",
-      }),
+      },
     });
-    return { status: response.status, code: (await response.json()).code, noteStatus: record.noteStatus };
-  }, patientId);
-  expect(lockedEdit).toEqual({ status: 409, code: "session_record_signed", noteStatus: "SIGNED" });
 
-  await page.getByRole("link", { name: "Messages" }).click();
-  await expect(page.locator("main")).toContainText("Patient profile created");
-  await expect(page.locator("main")).toContainText("Appointment scheduled");
-
-  await page.getByRole("link", { name: "Settings" }).click();
-  await expect(page.getByText("CSRF protection")).toHaveCount(0);
-  await expect(page.getByText("Browser access uses")).toHaveCount(0);
+    // Assert
+    expect(response.status()).toBe(409);
+    expect((await response.json()).code).toBe("session_record_signed");
+  });
 });
 
-async function openDialog(
-  page: Page,
-  triggerName: string,
-  dialogName: string,
-  exact = false
-) {
+test.describe("messages", () => {
+  test("list patient and appointment notifications", async ({ workspacePage: page }) => {
+    // Arrange
+    const patient = await createPatient(page);
+    await scheduleAppointment(page, patient);
+
+    // Act
+    await page.goto("/dashboard/notifications");
+
+    // Assert
+    await expect(page.locator("main")).toContainText("Patient profile created");
+    await expect(page.locator("main")).toContainText("Appointment scheduled");
+  });
+});
+
+function requestOptions(use: { baseURL?: string; ignoreHTTPSErrors?: boolean }) {
+  return { baseURL: use.baseURL, ignoreHTTPSErrors: use.ignoreHTTPSErrors };
+}
+
+async function arrangeStep(response: APIResponse, expectedStatus: number, step: string) {
+  if (response.status() !== expectedStatus) {
+    throw new Error(`Arrange step "${step}" returned ${response.status()}, expected ${expectedStatus}`);
+  }
+  return response;
+}
+
+// Auth routes allow a burst of five logins; later worker fixtures wait for the limiter to refill.
+async function withAuthRetry(send: () => Promise<APIResponse>) {
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const response = await send();
+    if (response.status() !== 429) return response;
+    await new Promise((resolve) => setTimeout(resolve, 7_000));
+  }
+  return send();
+}
+
+async function signInThroughBff(request: APIRequestContext, email: string, password: string) {
+  await arrangeStep(
+    await withAuthRetry(() => request.post("/api/auth/login", { data: { email, password } })),
+    200,
+    `sign in ${email}`
+  );
+}
+
+async function addStaleAccessCookie(context: BrowserContext, baseURL?: string) {
+  if (!baseURL) throw new Error('Arrange step "read base URL" found no configured baseURL');
+  await context.addCookies([
+    {
+      name: "clinicflow_access_token",
+      value: "stale-token",
+      url: new URL(baseURL).origin,
+      httpOnly: true,
+      sameSite: "Lax",
+    },
+  ]);
+}
+
+async function csrfToken(page: Page) {
+  const csrf = (await page.context().cookies()).find((cookie) => cookie.name === "clinicflow_csrf")?.value;
+  if (!csrf) throw new Error('Arrange step "read CSRF cookie" found no clinicflow_csrf cookie');
+  return csrf;
+}
+
+async function bffPost(page: Page, path: string, data: unknown, expectedStatus: number, step: string, method = "POST") {
+  const response = await page.request.fetch(path, {
+    method,
+    headers: { "x-csrf-token": await csrfToken(page) },
+    data,
+  });
+  return (await arrangeStep(response, expectedStatus, step)).json();
+}
+
+function uniqueStamp() {
+  return `${Date.now()}${Math.floor(Math.random() * 1_000)}`;
+}
+
+async function createPatient(page: Page): Promise<Patient> {
+  const stamp = uniqueStamp();
+  const fullName = `Demo Patient ${stamp}`;
+  const email = `patient.${stamp}@example.com`;
+  const created = await bffPost(page, "/api/patients", {
+    email,
+    fullName,
+    phone: "+351912345678",
+    contactPreference: "EMAIL",
+    consentStatus: "GRANTED",
+  }, 201, "create patient");
+  return { id: created.id, fullName, email };
+}
+
+async function scheduleAppointment(page: Page, patient: Patient) {
+  return bffPost(page, "/api/appointments", {
+    patientId: patient.id,
+    scheduledAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    type: "ONLINE",
+  }, 201, "schedule appointment");
+}
+
+async function createClinicalCase(page: Page, patient: Patient) {
+  const presentingConcern = `Initial stress and sleep disruption ${uniqueStamp()}`;
+  const created = await bffPost(page, "/api/clinical-cases", {
+    patientId: patient.id,
+    presentingConcern,
+  }, 201, "create clinical case");
+  return { id: created.id as string, presentingConcern };
+}
+
+async function putCarePlan(page: Page, caseId: string) {
+  return bffPost(page, `/api/clinical-cases/${caseId}/care-plan`, {
+    therapeuticFocus,
+    plannedFrequency: "Weekly",
+    reviewDate: "2026-08-15",
+    goals: [
+      { description: "Improve sleep consistency", progressPercentage: 20 },
+      { description: "Create a consistent wind-down routine", progressPercentage: 0 },
+    ],
+  }, 200, "put care plan", "PUT");
+}
+
+async function draftRecord(page: Page, options: { withCarePlan?: boolean } = {}) {
+  const patient = await createPatient(page);
+  const clinicalCase = await createClinicalCase(page, patient);
+  if (options.withCarePlan) await putCarePlan(page, clinicalCase.id);
+  const record: SessionRecord = await bffPost(page, `/api/clinical-cases/${clinicalCase.id}/session-records`, {
+    sessionDate: new Date().toISOString(),
+    modality: "ONLINE",
+    durationMinutes: 50,
+    attendanceStatus: "ATTENDED",
+    summary: sessionSummary,
+  }, 201, "create session record");
+  return { patient, clinicalCase, record };
+}
+
+async function signedRecord(page: Page, options: { withCarePlan?: boolean } = {}) {
+  const arranged = await draftRecord(page, options);
+  await bffPost(page, `/api/session-records/${arranged.record.id}/sign`, undefined, 200, "sign session record");
+  return arranged;
+}
+
+// The newest case is selected by default, so a freshly arranged case opens in the workspace.
+async function openSessionRecords(page: Page, arranged: { clinicalCase: { presentingConcern: string } }) {
+  await page.goto("/dashboard/clinical");
+  await expect(page.getByText(arranged.clinicalCase.presentingConcern).filter({ visible: true }).first()).toBeVisible();
+  await page.getByRole("tab", { name: "Session records" }).click();
+}
+
+function patientStatusFilter(page: Page) {
+  return page.getByRole("combobox", { name: "Filter patients by status" });
+}
+
+async function highlightOption(page: Page, option: Locator) {
+  await expect(option).toBeVisible();
+  await expect.poll(async () => {
+    if (await option.getAttribute("data-highlighted") !== null) return true;
+    await page.keyboard.press("ArrowDown");
+    return false;
+  }, { timeout: 5_000 }).toBe(true);
+}
+
+async function choosePatient(page: Page, dialog: Locator, patientName: string) {
+  await dialog.getByRole("combobox").first().click();
+  await page.getByRole("option", { name: patientName, exact: true }).click();
+}
+
+async function openDialog(page: Page, triggerName: string, dialogName: string, exact = false) {
   const dialog = page.getByRole("dialog", { name: dialogName });
   await expect
     .poll(
@@ -257,15 +801,4 @@ function futureDatetimeLocal() {
   const value = new Date(Date.now() + 24 * 60 * 60 * 1000);
   value.setMinutes(value.getMinutes() - value.getTimezoneOffset());
   return value.toISOString().slice(0, 16);
-}
-
-async function signIn(browser: Browser, email: string, destination: string) {
-  const context = await browser.newContext();
-  const page = await context.newPage();
-  await page.goto("/login");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill("ClinicFlowDemo!2026");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(new RegExp(`${destination.replaceAll("/", "\\/")}$`));
-  return page;
 }

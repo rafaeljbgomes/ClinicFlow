@@ -25,6 +25,11 @@ import com.clinicflow.clinical.application.queries.GetClinicalCaseQuery;
 import com.clinicflow.clinical.application.queries.GetPracticeProfileQuery;
 import com.clinicflow.clinical.application.queries.ListClinicalCasesQuery;
 import com.clinicflow.clinical.application.queries.ListSessionRecordsQuery;
+import com.clinicflow.clinical.application.results.CarePlanResult;
+import com.clinicflow.clinical.application.results.ClinicalCaseResult;
+import com.clinicflow.clinical.application.results.PatientClinicalHistoryResult;
+import com.clinicflow.clinical.application.results.PracticeProfileResult;
+import com.clinicflow.clinical.application.results.SessionRecordResult;
 import com.clinicflow.clinical.domain.AppointmentId;
 import com.clinicflow.clinical.domain.AttendanceStatus;
 import com.clinicflow.clinical.domain.CareGoal;
@@ -61,7 +66,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -71,11 +76,15 @@ import static org.mockito.Mockito.when;
 class ClinicalServiceTest {
     private static final PsychologistId PSYCHOLOGIST_ID =
             new PsychologistId(UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"));
+    private static final PsychologistId OTHER_PSYCHOLOGIST = new PsychologistId(UUID.randomUUID());
     private static final PatientId PATIENT_ID =
             new PatientId(UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"));
     private static final ClinicalCaseId CASE_ID =
             new ClinicalCaseId(UUID.fromString("cccccccc-cccc-cccc-cccc-cccccccccccc"));
+    private static final AppointmentId APPOINTMENT_ID =
+            new AppointmentId(UUID.fromString("dddddddd-dddd-dddd-dddd-dddddddddddd"));
     private static final Instant NOW = Instant.parse("2026-06-01T10:00:00Z");
+    private static final LocalDate REVIEW_DATE = LocalDate.of(2026, 7, 1);
 
     @Mock private PracticeProfileRepository practiceProfiles;
     @Mock private ClinicalCaseRepository clinicalCases;
@@ -91,321 +100,616 @@ class ClinicalServiceTest {
     }
 
     @Test
-    void createsCaseUnlessOpenCaseExists() {
+    void createsCaseWhenNoOpenCaseExists() {
+        // Arrange
         when(clinicalCases.existsOpenByPsychologistIdAndPatientId(PSYCHOLOGIST_ID, PATIENT_ID)).thenReturn(false);
+        var command = new CreateClinicalCaseCommand(PSYCHOLOGIST_ID, PATIENT_ID, "Anxiety symptoms");
 
-        var result = service.createClinicalCase(new CreateClinicalCaseCommand(
-                PSYCHOLOGIST_ID, PATIENT_ID, "Anxiety symptoms"));
+        // Act
+        ClinicalCaseResult result = service.createClinicalCase(command);
 
+        // Assert
         ArgumentCaptor<ClinicalCase> captor = ArgumentCaptor.forClass(ClinicalCase.class);
         verify(clinicalCases).save(captor.capture());
         assertThat(result.id()).isEqualTo(captor.getValue().id().value());
         assertThat(result.patientId()).isEqualTo(PATIENT_ID.value());
+    }
 
+    @Test
+    void rejectsCaseWhenAnOpenCaseExists() {
+        // Arrange
         when(clinicalCases.existsOpenByPsychologistIdAndPatientId(PSYCHOLOGIST_ID, PATIENT_ID)).thenReturn(true);
-        assertThatThrownBy(() -> service.createClinicalCase(new CreateClinicalCaseCommand(
-                PSYCHOLOGIST_ID, PATIENT_ID, "Another concern")))
-                .isInstanceOf(ActiveClinicalCaseExistsException.class);
+        var command = new CreateClinicalCaseCommand(PSYCHOLOGIST_ID, PATIENT_ID, "Another concern");
+
+        // Act
+        Throwable thrown = catchThrowable(() -> service.createClinicalCase(command));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(ActiveClinicalCaseExistsException.class);
     }
 
     @Test
     void createsCarePlanForOwnedCase() {
-        ClinicalCase clinicalCase = clinicalCase();
-        when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(clinicalCase));
+        // Arrange
+        when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(clinicalCase()));
         when(carePlans.findByClinicalCaseId(CASE_ID)).thenReturn(Optional.empty());
+        var command = carePlanCommand(new CareGoalInput(null, "Practice exposure", null, GoalStatus.IN_PROGRESS, 20));
 
-        var result = service.putCarePlan(new PutCarePlanCommand(PSYCHOLOGIST_ID, CASE_ID,
-                "Reduce avoidance", "Weekly", LocalDate.of(2026, 7, 1),
-                List.of(new CareGoalInput(null, "Practice exposure", null, GoalStatus.IN_PROGRESS, 20))));
+        // Act
+        CarePlanResult result = service.putCarePlan(command);
 
-        ArgumentCaptor<CarePlan> captor = ArgumentCaptor.forClass(CarePlan.class);
-        verify(carePlans).save(captor.capture());
+        // Assert
         assertThat(result.goals()).singleElement().satisfies(goal -> {
             assertThat(goal.description()).isEqualTo("Practice exposure");
             assertThat(goal.progressPercentage()).isEqualTo(20);
         });
+    }
+
+    @Test
+    void storesNewCarePlanAgainstTheCase() {
+        // Arrange
+        when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(clinicalCase()));
+        when(carePlans.findByClinicalCaseId(CASE_ID)).thenReturn(Optional.empty());
+        var command = carePlanCommand(new CareGoalInput(null, "Practice exposure", null, GoalStatus.IN_PROGRESS, 20));
+
+        // Act
+        service.putCarePlan(command);
+
+        // Assert
+        ArgumentCaptor<CarePlan> captor = ArgumentCaptor.forClass(CarePlan.class);
+        verify(carePlans).save(captor.capture());
         assertThat(captor.getValue().clinicalCaseId()).isEqualTo(CASE_ID);
     }
 
     @Test
-    void completedAppointmentCreatesLinkedSessionOnlyOnce() {
-        AppointmentId appointmentId = new AppointmentId(UUID.fromString("dddddddd-dddd-dddd-dddd-dddddddddddd"));
-        when(sessionRecords.findByAppointmentId(appointmentId)).thenReturn(Optional.empty());
+    void completedAppointmentCreatesSessionLinkedToOpenCaseWithProfileDuration() {
+        // Arrange
+        when(sessionRecords.findByAppointmentId(APPOINTMENT_ID)).thenReturn(Optional.empty());
         when(clinicalCases.findOpenByPsychologistIdAndPatientId(PSYCHOLOGIST_ID, PATIENT_ID))
                 .thenReturn(Optional.of(clinicalCase()));
         when(practiceProfiles.findByPsychologistId(PSYCHOLOGIST_ID)).thenReturn(Optional.of(
                 PracticeProfile.create(PSYCHOLOGIST_ID, null, ZoneId.of("UTC"), 60, null, true, NOW)));
 
-        service.processAppointmentCompleted(new ProcessAppointmentCompletedCommand(
-                new DomainEventId(UUID.randomUUID()), appointmentId, PATIENT_ID, PSYCHOLOGIST_ID,
-                NOW, SessionModality.ONLINE));
+        // Act
+        service.processAppointmentCompleted(appointmentCompleted());
 
+        // Assert
         ArgumentCaptor<SessionRecord> captor = ArgumentCaptor.forClass(SessionRecord.class);
         verify(sessionRecords).save(captor.capture());
         assertThat(captor.getValue().clinicalCaseId()).contains(CASE_ID);
         assertThat(captor.getValue().durationMinutes()).isEqualTo(60);
+    }
 
-        when(sessionRecords.findByAppointmentId(appointmentId)).thenReturn(Optional.of(captor.getValue()));
-        service.processAppointmentCompleted(new ProcessAppointmentCompletedCommand(
-                new DomainEventId(UUID.randomUUID()), appointmentId, PATIENT_ID, PSYCHOLOGIST_ID,
-                NOW, SessionModality.ONLINE));
-        verify(sessionRecords).save(captor.getValue());
+    @Test
+    void completedAppointmentWithExistingSessionCreatesNothing() {
+        // Arrange
+        SessionRecord existing = SessionRecord.fromCompletedAppointment(new SessionRecordId(UUID.randomUUID()),
+                CASE_ID, PSYCHOLOGIST_ID, PATIENT_ID, APPOINTMENT_ID, NOW, SessionModality.ONLINE, 60, NOW);
+        when(sessionRecords.findByAppointmentId(APPOINTMENT_ID)).thenReturn(Optional.of(existing));
+
+        // Act
+        service.processAppointmentCompleted(appointmentCompleted());
+
+        // Assert
+        verify(sessionRecords, never()).save(any());
     }
 
     @Test
     void assemblesPatientHistoryFromOwnedRecords() {
-        ClinicalCase clinicalCase = clinicalCase();
+        // Arrange
         when(clinicalCases.findByPsychologistIdAndPatientId(PSYCHOLOGIST_ID, PATIENT_ID))
-                .thenReturn(List.of(clinicalCase));
+                .thenReturn(List.of(clinicalCase()));
         when(carePlans.findByClinicalCaseId(CASE_ID)).thenReturn(Optional.empty());
         when(sessionRecords.findByPsychologistIdAndPatientId(PSYCHOLOGIST_ID, PATIENT_ID))
                 .thenReturn(List.of(SessionRecord.fromCompletedAppointment(
-                        new com.clinicflow.clinical.domain.SessionRecordId(UUID.randomUUID()), CASE_ID,
+                        new SessionRecordId(UUID.randomUUID()), CASE_ID,
                         PSYCHOLOGIST_ID, PATIENT_ID, new AppointmentId(UUID.randomUUID()),
                         NOW, SessionModality.IN_PERSON, 50, NOW)));
+        var query = new GetPatientClinicalHistoryQuery(PSYCHOLOGIST_ID, PATIENT_ID);
 
-        var result = service.getPatientClinicalHistory(new GetPatientClinicalHistoryQuery(PSYCHOLOGIST_ID, PATIENT_ID));
+        // Act
+        PatientClinicalHistoryResult result = service.getPatientClinicalHistory(query);
 
+        // Assert
         assertThat(result.cases()).hasSize(1);
         assertThat(result.sessionRecords()).hasSize(1);
     }
 
     @Test
-    void readsCreatesAndUpdatesPracticeProfile() {
-        var fallback = service.getPracticeProfile(new GetPracticeProfileQuery(PSYCHOLOGIST_ID));
+    void readsFallbackPracticeProfileWhenNoneIsStored() {
+        // Arrange
+        var query = new GetPracticeProfileQuery(PSYCHOLOGIST_ID);
+
+        // Act
+        PracticeProfileResult fallback = service.getPracticeProfile(query);
+
+        // Assert
         assertThat(fallback.timezone()).isEqualTo("UTC");
         assertThat(fallback.defaultSessionDurationMinutes()).isEqualTo(50);
+    }
 
-        var created = service.updatePracticeProfile(new UpdatePracticeProfileCommand(
-                PSYCHOLOGIST_ID, "OPP 123", ZoneId.of("Europe/Lisbon"), 45, "Lisbon", true));
+    @Test
+    void createsPracticeProfileWhenNoneIsStored() {
+        // Arrange
+        var command = new UpdatePracticeProfileCommand(
+                PSYCHOLOGIST_ID, "OPP 123", ZoneId.of("Europe/Lisbon"), 45, "Lisbon", true);
+
+        // Act
+        PracticeProfileResult created = service.updatePracticeProfile(command);
+
+        // Assert
         assertThat(created.professionalRegistration()).isEqualTo("OPP 123");
-        verify(practiceProfiles).save(org.mockito.ArgumentMatchers.any(PracticeProfile.class));
+        verify(practiceProfiles).save(any(PracticeProfile.class));
+    }
 
+    @Test
+    void updatesStoredPracticeProfile() {
+        // Arrange
         PracticeProfile existing = PracticeProfile.create(
                 PSYCHOLOGIST_ID, null, ZoneId.of("UTC"), 50, null, false, NOW);
         when(practiceProfiles.findByPsychologistId(PSYCHOLOGIST_ID)).thenReturn(Optional.of(existing));
-        var updated = service.updatePracticeProfile(new UpdatePracticeProfileCommand(
-                PSYCHOLOGIST_ID, "OPP 456", ZoneId.of("Europe/Lisbon"), 60, "Porto", true));
+        var command = new UpdatePracticeProfileCommand(
+                PSYCHOLOGIST_ID, "OPP 456", ZoneId.of("Europe/Lisbon"), 60, "Porto", true);
+
+        // Act
+        PracticeProfileResult updated = service.updatePracticeProfile(command);
+
+        // Assert
         assertThat(updated.defaultSessionDurationMinutes()).isEqualTo(60);
         assertThat(updated.primaryLocation()).isEqualTo("Porto");
     }
 
     @Test
-    void listsGetsChangesAndProtectsClinicalCases() {
-        ClinicalCase owned = clinicalCase();
-        when(clinicalCases.findByPsychologistId(PSYCHOLOGIST_ID)).thenReturn(List.of(owned));
+    void listsAllCasesOfThePsychologist() {
+        // Arrange
+        when(clinicalCases.findByPsychologistId(PSYCHOLOGIST_ID)).thenReturn(List.of(clinicalCase()));
+        var query = new ListClinicalCasesQuery(PSYCHOLOGIST_ID, null, null);
+
+        // Act
+        List<ClinicalCaseResult> cases = service.listClinicalCases(query);
+
+        // Assert
+        assertThat(cases).hasSize(1);
+    }
+
+    @Test
+    void listsCasesByStatus() {
+        // Arrange
         when(clinicalCases.findByPsychologistIdAndStatus(PSYCHOLOGIST_ID, ClinicalCaseStatus.ACTIVE))
-                .thenReturn(List.of(owned));
+                .thenReturn(List.of(clinicalCase()));
+        var query = new ListClinicalCasesQuery(PSYCHOLOGIST_ID, null, ClinicalCaseStatus.ACTIVE);
+
+        // Act
+        List<ClinicalCaseResult> cases = service.listClinicalCases(query);
+
+        // Assert
+        assertThat(cases).hasSize(1);
+    }
+
+    @Test
+    void listsCasesByPatient() {
+        // Arrange
         when(clinicalCases.findByPsychologistIdAndPatientId(PSYCHOLOGIST_ID, PATIENT_ID))
-                .thenReturn(List.of(owned));
+                .thenReturn(List.of(clinicalCase()));
+        var query = new ListClinicalCasesQuery(PSYCHOLOGIST_ID, PATIENT_ID, null);
+
+        // Act
+        List<ClinicalCaseResult> cases = service.listClinicalCases(query);
+
+        // Assert
+        assertThat(cases).hasSize(1);
+    }
+
+    @Test
+    void listsPatientCasesFilteredByStatus() {
+        // Arrange
+        when(clinicalCases.findByPsychologistIdAndPatientId(PSYCHOLOGIST_ID, PATIENT_ID))
+                .thenReturn(List.of(clinicalCase()));
+        var query = new ListClinicalCasesQuery(PSYCHOLOGIST_ID, PATIENT_ID, ClinicalCaseStatus.DISCHARGED);
+
+        // Act
+        List<ClinicalCaseResult> cases = service.listClinicalCases(query);
+
+        // Assert
+        assertThat(cases).isEmpty();
+    }
+
+    @Test
+    void getsOwnedClinicalCase() {
+        // Arrange
+        when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(clinicalCase()));
+        var query = new GetClinicalCaseQuery(PSYCHOLOGIST_ID, CASE_ID);
+
+        // Act
+        ClinicalCaseResult result = service.getClinicalCase(query);
+
+        // Assert
+        assertThat(result.id()).isEqualTo(CASE_ID.value());
+    }
+
+    @Test
+    void reportsMissingClinicalCase() {
+        // Arrange
+        when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.empty());
+        var query = new GetClinicalCaseQuery(PSYCHOLOGIST_ID, CASE_ID);
+
+        // Act
+        Throwable thrown = catchThrowable(() -> service.getClinicalCase(query));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(ClinicalCaseNotFoundException.class);
+    }
+
+    @Test
+    void deniesAccessToAnotherPsychologistsCase() {
+        // Arrange
+        when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(clinicalCase()));
+        var query = new GetClinicalCaseQuery(OTHER_PSYCHOLOGIST, CASE_ID);
+
+        // Act
+        Throwable thrown = catchThrowable(() -> service.getClinicalCase(query));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(ClinicalAccessDeniedException.class);
+    }
+
+    @Test
+    void changesStatusOfOwnedCaseAndSavesIt() {
+        // Arrange
+        ClinicalCase owned = clinicalCase();
         when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(owned));
+        var command = new ChangeClinicalCaseStatusCommand(PSYCHOLOGIST_ID, CASE_ID, ClinicalCaseStatus.DISCHARGED);
 
-        assertThat(service.listClinicalCases(new ListClinicalCasesQuery(PSYCHOLOGIST_ID, null, null))).hasSize(1);
-        assertThat(service.listClinicalCases(new ListClinicalCasesQuery(
-                PSYCHOLOGIST_ID, null, ClinicalCaseStatus.ACTIVE))).hasSize(1);
-        assertThat(service.listClinicalCases(new ListClinicalCasesQuery(
-                PSYCHOLOGIST_ID, PATIENT_ID, null))).hasSize(1);
-        assertThat(service.listClinicalCases(new ListClinicalCasesQuery(
-                PSYCHOLOGIST_ID, PATIENT_ID, ClinicalCaseStatus.ACTIVE))).hasSize(1);
-        assertThat(service.getClinicalCase(new GetClinicalCaseQuery(PSYCHOLOGIST_ID, CASE_ID)).id())
-                .isEqualTo(CASE_ID.value());
+        // Act
+        ClinicalCaseResult discharged = service.changeClinicalCaseStatus(command);
 
-        var discharged = service.changeClinicalCaseStatus(new ChangeClinicalCaseStatusCommand(
-                PSYCHOLOGIST_ID, CASE_ID, ClinicalCaseStatus.DISCHARGED));
+        // Assert
         assertThat(discharged.status()).isEqualTo(ClinicalCaseStatus.DISCHARGED);
         verify(clinicalCases).save(owned);
-
-        when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.empty());
-        assertThatThrownBy(() -> service.getClinicalCase(new GetClinicalCaseQuery(PSYCHOLOGIST_ID, CASE_ID)))
-                .isInstanceOf(ClinicalCaseNotFoundException.class);
     }
 
     @Test
-    void getsCarePlanAndReportsMissingPlan() {
+    void getsCarePlanOfOwnedCase() {
+        // Arrange
         ClinicalCase owned = clinicalCase();
         when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(owned));
-        CarePlan plan = CarePlan.create(new com.clinicflow.clinical.domain.CarePlanId(UUID.randomUUID()), owned,
-                "Focus", "Weekly", LocalDate.now().plusMonths(1),
-                List.of(new com.clinicflow.clinical.domain.CareGoal(
-                        new com.clinicflow.clinical.domain.CareGoalId(UUID.randomUUID()), "Goal", null,
-                        GoalStatus.NOT_STARTED, 0)), NOW);
-        when(carePlans.findByClinicalCaseId(CASE_ID)).thenReturn(Optional.of(plan));
+        when(carePlans.findByClinicalCaseId(CASE_ID)).thenReturn(Optional.of(carePlan(owned,
+                new CareGoalId(UUID.randomUUID()))));
+        var query = new GetCarePlanQuery(PSYCHOLOGIST_ID, CASE_ID);
 
-        assertThat(service.getCarePlan(new GetCarePlanQuery(PSYCHOLOGIST_ID, CASE_ID)).therapeuticFocus())
-                .isEqualTo("Focus");
+        // Act
+        CarePlanResult result = service.getCarePlan(query);
+
+        // Assert
+        assertThat(result.therapeuticFocus()).isEqualTo("Focus");
+    }
+
+    @Test
+    void reportsMissingCarePlan() {
+        // Arrange
+        when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(clinicalCase()));
         when(carePlans.findByClinicalCaseId(CASE_ID)).thenReturn(Optional.empty());
-        assertThatThrownBy(() -> service.getCarePlan(new GetCarePlanQuery(PSYCHOLOGIST_ID, CASE_ID)))
-                .isInstanceOf(CarePlanNotFoundException.class);
+        var query = new GetCarePlanQuery(PSYCHOLOGIST_ID, CASE_ID);
+
+        // Act
+        Throwable thrown = catchThrowable(() -> service.getCarePlan(query));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(CarePlanNotFoundException.class);
     }
 
     @Test
-    void createsListsUpdatesAndProtectsSessionRecords() {
-        ClinicalCase owned = clinicalCase();
-        when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(owned));
-        var created = service.createSessionRecord(new CreateSessionRecordCommand(
+    void createsSessionRecordForOwnedCase() {
+        // Arrange
+        when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(clinicalCase()));
+        var command = new CreateSessionRecordCommand(
                 PSYCHOLOGIST_ID, CASE_ID, null, NOW, SessionModality.ONLINE, 50,
-                AttendanceStatus.ATTENDED, "Summary", "Focus", "CBT", "Homework", "Next"));
+                AttendanceStatus.ATTENDED, "Summary", "Focus", "CBT", "Homework", "Next");
+
+        // Act
+        SessionRecordResult created = service.createSessionRecord(command);
+
+        // Assert
         assertThat(created.summary()).isEqualTo("Summary");
+        verify(sessionRecords).save(any(SessionRecord.class));
+    }
 
-        ArgumentCaptor<SessionRecord> captor = ArgumentCaptor.forClass(SessionRecord.class);
-        verify(sessionRecords).save(captor.capture());
-        SessionRecord session = captor.getValue();
-        when(sessionRecords.findByClinicalCaseId(CASE_ID)).thenReturn(List.of(session));
-        assertThat(service.listSessionRecords(new ListSessionRecordsQuery(PSYCHOLOGIST_ID, CASE_ID))).hasSize(1);
+    @Test
+    void listsSessionRecordsOfOwnedCase() {
+        // Arrange
+        when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(clinicalCase()));
+        when(sessionRecords.findByClinicalCaseId(CASE_ID)).thenReturn(List.of(draftSession(PSYCHOLOGIST_ID, "Summary")));
+        var query = new ListSessionRecordsQuery(PSYCHOLOGIST_ID, CASE_ID);
 
+        // Act
+        List<SessionRecordResult> sessions = service.listSessionRecords(query);
+
+        // Assert
+        assertThat(sessions).hasSize(1);
+    }
+
+    @Test
+    void updatesOwnedDraftSessionWithoutSigningIt() {
+        // Arrange
+        SessionRecord session = draftSession(PSYCHOLOGIST_ID, "Summary");
         when(sessionRecords.findById(session.id())).thenReturn(Optional.of(session));
-        var updated = service.updateSessionRecord(new UpdateSessionRecordCommand(
+        when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(clinicalCase()));
+        var command = new UpdateSessionRecordCommand(
                 PSYCHOLOGIST_ID, session.id(), CASE_ID, NOW.plusSeconds(60), SessionModality.IN_PERSON, 55,
-                AttendanceStatus.ATTENDED, NoteStatus.DRAFT, "Updated", null, null, null, null));
+                AttendanceStatus.ATTENDED, NoteStatus.DRAFT, "Updated", null, null, null, null);
+
+        // Act
+        SessionRecordResult updated = service.updateSessionRecord(command);
+
+        // Assert
         assertThat(updated.noteStatus()).isEqualTo(NoteStatus.DRAFT);
         assertThat(updated.durationMinutes()).isEqualTo(55);
         assertThat(updated.signedAt()).isNull();
         assertThat(updated.signedBy()).isNull();
+    }
 
+    @Test
+    void reportsMissingSessionRecordOnUpdate() {
+        // Arrange
         SessionRecordId missingId = new SessionRecordId(UUID.randomUUID());
         when(sessionRecords.findById(missingId)).thenReturn(Optional.empty());
-        assertThatThrownBy(() -> service.updateSessionRecord(new UpdateSessionRecordCommand(
+        var command = new UpdateSessionRecordCommand(
                 PSYCHOLOGIST_ID, missingId, null, NOW, SessionModality.ONLINE, 50,
-                AttendanceStatus.ATTENDED, NoteStatus.DRAFT, null, null, null, null, null)))
-                .isInstanceOf(SessionRecordNotFoundException.class);
+                AttendanceStatus.ATTENDED, NoteStatus.DRAFT, null, null, null, null, null);
 
-        PsychologistId other = new PsychologistId(UUID.randomUUID());
-        assertThatThrownBy(() -> service.getClinicalCase(new GetClinicalCaseQuery(other, CASE_ID)))
-                .isInstanceOf(ClinicalAccessDeniedException.class);
+        // Act
+        Throwable thrown = catchThrowable(() -> service.updateSessionRecord(command));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(SessionRecordNotFoundException.class);
     }
 
     @Test
     void signsOwnedDraftNoteAndRecordsTheSigner() {
+        // Arrange
         SessionRecord session = draftSession(PSYCHOLOGIST_ID, "Summary");
         when(sessionRecords.findById(session.id())).thenReturn(Optional.of(session));
         Instant before = Instant.now();
 
-        var signed = service.signSessionRecord(new SignSessionRecordCommand(PSYCHOLOGIST_ID, session.id()));
+        // Act
+        SessionRecordResult signed = service.signSessionRecord(
+                new SignSessionRecordCommand(PSYCHOLOGIST_ID, session.id()));
 
+        // Assert
         assertThat(signed.noteStatus()).isEqualTo(NoteStatus.SIGNED);
         assertThat(signed.signedBy()).isEqualTo(PSYCHOLOGIST_ID.value());
         assertThat(signed.signedAt()).isNotNull().isAfterOrEqualTo(before);
         assertThat(signed.updatedAt()).isEqualTo(signed.signedAt());
+    }
+
+    @Test
+    void savesTheSignedNote() {
+        // Arrange
+        SessionRecord session = draftSession(PSYCHOLOGIST_ID, "Summary");
+        when(sessionRecords.findById(session.id())).thenReturn(Optional.of(session));
+
+        // Act
+        service.signSessionRecord(new SignSessionRecordCommand(PSYCHOLOGIST_ID, session.id()));
+
+        // Assert
         verify(sessionRecords).save(session);
     }
 
     @Test
-    void rejectsSigningMissingForeignSignedOrIncompleteNotes() {
+    void rejectsSigningMissingNote() {
+        // Arrange
         SessionRecordId missingId = new SessionRecordId(UUID.randomUUID());
         when(sessionRecords.findById(missingId)).thenReturn(Optional.empty());
-        assertThatThrownBy(() -> service.signSessionRecord(new SignSessionRecordCommand(PSYCHOLOGIST_ID, missingId)))
-                .isInstanceOf(SessionRecordNotFoundException.class);
 
-        PsychologistId other = new PsychologistId(UUID.randomUUID());
-        SessionRecord foreign = draftSession(other, "Summary");
+        // Act
+        Throwable thrown = catchThrowable(() ->
+                service.signSessionRecord(new SignSessionRecordCommand(PSYCHOLOGIST_ID, missingId)));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(SessionRecordNotFoundException.class);
+    }
+
+    @Test
+    void rejectsSigningAnotherPsychologistsNoteWithoutChangingIt() {
+        // Arrange
+        SessionRecord foreign = draftSession(OTHER_PSYCHOLOGIST, "Summary");
         when(sessionRecords.findById(foreign.id())).thenReturn(Optional.of(foreign));
-        assertThatThrownBy(() -> service.signSessionRecord(new SignSessionRecordCommand(PSYCHOLOGIST_ID,
-                foreign.id()))).isInstanceOf(ClinicalAccessDeniedException.class);
-        assertThat(foreign.noteStatus()).isEqualTo(NoteStatus.DRAFT);
 
+        // Act
+        Throwable thrown = catchThrowable(() ->
+                service.signSessionRecord(new SignSessionRecordCommand(PSYCHOLOGIST_ID, foreign.id())));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(ClinicalAccessDeniedException.class);
+        assertThat(foreign.noteStatus()).isEqualTo(NoteStatus.DRAFT);
+        verify(sessionRecords, never()).save(any());
+    }
+
+    @Test
+    void rejectsSigningAnAlreadySignedNote() {
+        // Arrange
         SessionRecord signed = draftSession(PSYCHOLOGIST_ID, "Summary").sign(PSYCHOLOGIST_ID, NOW);
         when(sessionRecords.findById(signed.id())).thenReturn(Optional.of(signed));
-        assertThatThrownBy(() -> service.signSessionRecord(new SignSessionRecordCommand(PSYCHOLOGIST_ID,
-                signed.id()))).isInstanceOf(SignedSessionRecordException.class);
 
+        // Act
+        Throwable thrown = catchThrowable(() ->
+                service.signSessionRecord(new SignSessionRecordCommand(PSYCHOLOGIST_ID, signed.id())));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(SignedSessionRecordException.class);
+        verify(sessionRecords, never()).save(any());
+    }
+
+    @Test
+    void rejectsSigningANoteWithoutSummary() {
+        // Arrange
         SessionRecord withoutSummary = draftSession(PSYCHOLOGIST_ID, null);
         when(sessionRecords.findById(withoutSummary.id())).thenReturn(Optional.of(withoutSummary));
-        assertThatThrownBy(() -> service.signSessionRecord(new SignSessionRecordCommand(PSYCHOLOGIST_ID,
-                withoutSummary.id()))).isInstanceOf(SessionRecordNotSignableException.class);
 
+        // Act
+        Throwable thrown = catchThrowable(() ->
+                service.signSessionRecord(new SignSessionRecordCommand(PSYCHOLOGIST_ID, withoutSummary.id())));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(SessionRecordNotSignableException.class);
         verify(sessionRecords, never()).save(any());
     }
 
     @Test
     void rejectsEditsToAnotherPsychologistsSessionRecord() {
-        SessionRecord foreign = draftSession(new PsychologistId(UUID.randomUUID()), "Summary");
+        // Arrange
+        SessionRecord foreign = draftSession(OTHER_PSYCHOLOGIST, "Summary");
         when(sessionRecords.findById(foreign.id())).thenReturn(Optional.of(foreign));
-
-        assertThatThrownBy(() -> service.updateSessionRecord(new UpdateSessionRecordCommand(
+        var command = new UpdateSessionRecordCommand(
                 PSYCHOLOGIST_ID, foreign.id(), null, NOW.plusSeconds(60), SessionModality.ONLINE, 50,
-                AttendanceStatus.ATTENDED, NoteStatus.DRAFT, "Rewritten", null, null, null, null)))
-                .isInstanceOf(ClinicalAccessDeniedException.class);
+                AttendanceStatus.ATTENDED, NoteStatus.DRAFT, "Rewritten", null, null, null, null);
+
+        // Act
+        Throwable thrown = catchThrowable(() -> service.updateSessionRecord(command));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(ClinicalAccessDeniedException.class);
         assertThat(foreign.summary()).isEqualTo("Summary");
         verify(sessionRecords, never()).save(any());
     }
 
     @Test
     void rejectsEditsToSignedNotesWithoutSaving() {
+        // Arrange
         SessionRecord signed = draftSession(PSYCHOLOGIST_ID, "Summary").sign(PSYCHOLOGIST_ID, NOW);
         when(sessionRecords.findById(signed.id())).thenReturn(Optional.of(signed));
-
-        assertThatThrownBy(() -> service.updateSessionRecord(new UpdateSessionRecordCommand(
+        var command = new UpdateSessionRecordCommand(
                 PSYCHOLOGIST_ID, signed.id(), null, NOW.plusSeconds(60), SessionModality.ONLINE, 50,
-                AttendanceStatus.ATTENDED, NoteStatus.DRAFT, "Rewritten", null, null, null, null)))
-                .isInstanceOf(SignedSessionRecordException.class);
+                AttendanceStatus.ATTENDED, NoteStatus.DRAFT, "Rewritten", null, null, null, null);
+
+        // Act
+        Throwable thrown = catchThrowable(() -> service.updateSessionRecord(command));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(SignedSessionRecordException.class);
         assertThat(signed.noteStatus()).isEqualTo(NoteStatus.SIGNED);
         assertThat(signed.summary()).isEqualTo("Summary");
         verify(sessionRecords, never()).save(any());
     }
 
     @Test
-    void keepsExistingGoalIdentityGeneratesNewIdsAndDefaultsStatus() {
-        ClinicalCase clinicalCase = clinicalCase();
-        CareGoalId existingGoalId = new CareGoalId(UUID.randomUUID());
-        CarePlan existing = CarePlan.create(new CarePlanId(UUID.randomUUID()), clinicalCase, "Focus", "Weekly",
-                LocalDate.of(2026, 7, 1), List.of(new CareGoal(existingGoalId, "Goal", null,
-                        GoalStatus.IN_PROGRESS, 10)), NOW);
-        when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(clinicalCase));
-        when(carePlans.findByClinicalCaseId(CASE_ID)).thenReturn(Optional.of(existing));
+    void keepsTheIdentityOfGoalsAlreadyInThePlan() {
+        // Arrange
+        CareGoalId existingGoalId = arrangeExistingPlanWithGoal();
+        var command = carePlanCommand(
+                new CareGoalInput(existingGoalId.value(), "Goal", null, GoalStatus.ACHIEVED, 100));
 
-        var result = service.putCarePlan(new PutCarePlanCommand(PSYCHOLOGIST_ID, CASE_ID,
-                "Focus", "Weekly", LocalDate.of(2026, 7, 1),
-                List.of(new CareGoalInput(existingGoalId.value(), "Goal", null, GoalStatus.ACHIEVED, 100),
-                        new CareGoalInput(null, "New goal", null, null, 0))));
+        // Act
+        CarePlanResult result = service.putCarePlan(command);
 
-        assertThat(result.goals()).hasSize(2);
-        assertThat(result.goals().get(0).id()).isEqualTo(existingGoalId.value());
-        assertThat(result.goals().get(1).id()).isNotNull().isNotEqualTo(existingGoalId.value());
-        assertThat(result.goals().get(1).status()).isEqualTo(GoalStatus.NOT_STARTED);
+        // Assert
+        assertThat(result.goals()).singleElement()
+                .satisfies(goal -> assertThat(goal.id()).isEqualTo(existingGoalId.value()));
     }
 
     @Test
-    void rejectsGoalIdsThatDoNotBelongToTheAuthorizedPlan() {
-        ClinicalCase clinicalCase = clinicalCase();
-        UUID foreignGoalId = UUID.randomUUID();
-        when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(clinicalCase));
+    void generatesServerIdAndDefaultStatusForNewGoals() {
+        // Arrange
+        CareGoalId existingGoalId = arrangeExistingPlanWithGoal();
+        var command = carePlanCommand(new CareGoalInput(null, "New goal", null, null, 0));
+
+        // Act
+        CarePlanResult result = service.putCarePlan(command);
+
+        // Assert
+        assertThat(result.goals()).singleElement().satisfies(goal -> {
+            assertThat(goal.id()).isNotNull().isNotEqualTo(existingGoalId.value());
+            assertThat(goal.status()).isEqualTo(GoalStatus.NOT_STARTED);
+        });
+    }
+
+    @Test
+    void rejectsClientGoalIdsWhenCreatingAPlan() {
+        // Arrange
+        when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(clinicalCase()));
         when(carePlans.findByClinicalCaseId(CASE_ID)).thenReturn(Optional.empty());
+        var command = carePlanCommand(new CareGoalInput(UUID.randomUUID(), "Hijacked goal", null, null, 0));
 
-        assertThatThrownBy(() -> service.putCarePlan(new PutCarePlanCommand(PSYCHOLOGIST_ID, CASE_ID,
-                "Focus", "Weekly", LocalDate.of(2026, 7, 1),
-                List.of(new CareGoalInput(foreignGoalId, "Hijacked goal", null, null, 0)))))
-                .isInstanceOf(ClinicalAccessDeniedException.class);
+        // Act
+        Throwable thrown = catchThrowable(() -> service.putCarePlan(command));
 
-        CarePlan existing = CarePlan.create(new CarePlanId(UUID.randomUUID()), clinicalCase, "Focus", "Weekly",
-                LocalDate.of(2026, 7, 1), List.of(new CareGoal(new CareGoalId(UUID.randomUUID()), "Goal", null,
-                        GoalStatus.IN_PROGRESS, 10)), NOW);
-        when(carePlans.findByClinicalCaseId(CASE_ID)).thenReturn(Optional.of(existing));
-        assertThatThrownBy(() -> service.putCarePlan(new PutCarePlanCommand(PSYCHOLOGIST_ID, CASE_ID,
-                "Focus", "Weekly", LocalDate.of(2026, 7, 1),
-                List.of(new CareGoalInput(foreignGoalId, "Hijacked goal", null, null, 0)))))
-                .isInstanceOf(ClinicalAccessDeniedException.class);
+        // Assert
+        assertThat(thrown).isInstanceOf(ClinicalAccessDeniedException.class);
         verify(carePlans, never()).save(any());
     }
 
     @Test
-    void updatesSessionWithoutCaseAndRejectsCaseForAnotherPatient() {
+    void rejectsGoalIdsThatDoNotBelongToTheExistingPlan() {
+        // Arrange
+        arrangeExistingPlanWithGoal();
+        var command = carePlanCommand(new CareGoalInput(UUID.randomUUID(), "Hijacked goal", null, null, 0));
+
+        // Act
+        Throwable thrown = catchThrowable(() -> service.putCarePlan(command));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(ClinicalAccessDeniedException.class);
+        verify(carePlans, never()).save(any());
+    }
+
+    @Test
+    void updatesSessionWithoutCase() {
+        // Arrange
         SessionRecord session = SessionRecord.fromCompletedAppointment(new SessionRecordId(UUID.randomUUID()),
                 CASE_ID, PSYCHOLOGIST_ID, PATIENT_ID, null, NOW, SessionModality.ONLINE, 50, NOW);
         when(sessionRecords.findById(session.id())).thenReturn(Optional.of(session));
-
-        var updated = service.updateSessionRecord(new UpdateSessionRecordCommand(
+        var command = new UpdateSessionRecordCommand(
                 PSYCHOLOGIST_ID, session.id(), null, NOW.plusSeconds(60), SessionModality.ONLINE, 50,
-                AttendanceStatus.ATTENDED, NoteStatus.DRAFT, null, null, null, null, null));
-        assertThat(updated.clinicalCaseId()).isNull();
+                AttendanceStatus.ATTENDED, NoteStatus.DRAFT, null, null, null, null, null);
 
-        PatientId otherPatient = new PatientId(UUID.randomUUID());
-        ClinicalCase otherPatientCase = ClinicalCase.rehydrate(CASE_ID, PSYCHOLOGIST_ID, otherPatient,
-                "Concern", ClinicalCaseStatus.ACTIVE, NOW, null, NOW, NOW);
+        // Act
+        SessionRecordResult updated = service.updateSessionRecord(command);
+
+        // Assert
+        assertThat(updated.clinicalCaseId()).isNull();
+    }
+
+    @Test
+    void rejectsLinkingSessionToAnotherPatientsCase() {
+        // Arrange
+        SessionRecord session = SessionRecord.fromCompletedAppointment(new SessionRecordId(UUID.randomUUID()),
+                CASE_ID, PSYCHOLOGIST_ID, PATIENT_ID, null, NOW, SessionModality.ONLINE, 50, NOW);
+        when(sessionRecords.findById(session.id())).thenReturn(Optional.of(session));
+        ClinicalCase otherPatientCase = ClinicalCase.rehydrate(CASE_ID, PSYCHOLOGIST_ID,
+                new PatientId(UUID.randomUUID()), "Concern", ClinicalCaseStatus.ACTIVE, NOW, null, NOW, NOW);
         when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(otherPatientCase));
-        assertThatThrownBy(() -> service.updateSessionRecord(new UpdateSessionRecordCommand(
+        var command = new UpdateSessionRecordCommand(
                 PSYCHOLOGIST_ID, session.id(), CASE_ID, NOW.plusSeconds(120), SessionModality.ONLINE, 50,
-                AttendanceStatus.ATTENDED, NoteStatus.DRAFT, null, null, null, null, null)))
-                .isInstanceOf(ClinicalAccessDeniedException.class);
+                AttendanceStatus.ATTENDED, NoteStatus.DRAFT, null, null, null, null, null);
+
+        // Act
+        Throwable thrown = catchThrowable(() -> service.updateSessionRecord(command));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(ClinicalAccessDeniedException.class);
+    }
+
+    private CareGoalId arrangeExistingPlanWithGoal() {
+        ClinicalCase owned = clinicalCase();
+        CareGoalId existingGoalId = new CareGoalId(UUID.randomUUID());
+        when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(owned));
+        when(carePlans.findByClinicalCaseId(CASE_ID)).thenReturn(Optional.of(carePlan(owned, existingGoalId)));
+        return existingGoalId;
+    }
+
+    private PutCarePlanCommand carePlanCommand(CareGoalInput goal) {
+        return new PutCarePlanCommand(PSYCHOLOGIST_ID, CASE_ID, "Reduce avoidance", "Weekly", REVIEW_DATE,
+                List.of(goal));
+    }
+
+    private CarePlan carePlan(ClinicalCase clinicalCase, CareGoalId goalId) {
+        return CarePlan.create(new CarePlanId(UUID.randomUUID()), clinicalCase, "Focus", "Weekly", REVIEW_DATE,
+                List.of(new CareGoal(goalId, "Goal", null, GoalStatus.IN_PROGRESS, 10)), NOW);
+    }
+
+    private ProcessAppointmentCompletedCommand appointmentCompleted() {
+        return new ProcessAppointmentCompletedCommand(new DomainEventId(UUID.randomUUID()), APPOINTMENT_ID,
+                PATIENT_ID, PSYCHOLOGIST_ID, NOW, SessionModality.ONLINE);
     }
 
     private SessionRecord draftSession(PsychologistId owner, String summary) {
@@ -416,6 +720,6 @@ class ClinicalServiceTest {
 
     private ClinicalCase clinicalCase() {
         return ClinicalCase.rehydrate(CASE_ID, PSYCHOLOGIST_ID, PATIENT_ID, "Anxiety symptoms",
-                com.clinicflow.clinical.domain.ClinicalCaseStatus.ACTIVE, NOW, null, NOW, NOW);
+                ClinicalCaseStatus.ACTIVE, NOW, null, NOW, NOW);
     }
 }

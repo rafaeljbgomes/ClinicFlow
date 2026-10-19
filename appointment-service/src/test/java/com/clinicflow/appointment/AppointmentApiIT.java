@@ -16,6 +16,7 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
@@ -31,7 +32,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.when;
 
@@ -67,34 +68,102 @@ class AppointmentApiIT {
     }
 
     @Test
-    void schedulesReschedulesAndCompletesAcrossTheRealHttpAndPersistenceStack() {
-        Instant scheduledAt = Instant.now().plus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.SECONDS);
-        var created = exchange("/appointments", HttpMethod.POST, Map.of(
-                "patientId", PATIENT_ID.toString(),
-                "scheduledAt", scheduledAt.toString(),
-                "type", "ONLINE"));
-        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        String id = created.getBody().get("id").toString();
+    void schedulesAppointmentThroughTheRealHttpAndPersistenceStack() {
+        // Arrange
+        Map<String, Object> request = scheduleRequest(inThreeDays());
 
+        // Act
+        var response = exchange("/appointments", HttpMethod.POST, request);
+
+        // Assert
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(response.getBody()).containsKey("id");
+    }
+
+    @Test
+    void schedulingStoresOneOutboxEvent() {
+        // Arrange
+        Map<String, Object> request = scheduleRequest(inThreeDays());
+
+        // Act
+        exchange("/appointments", HttpMethod.POST, request);
+
+        // Assert
+        assertThat(outboxEventCount()).isOne();
+    }
+
+    @Test
+    void reschedulesScheduledAppointment() {
+        // Arrange
+        Instant scheduledAt = inThreeDays();
+        String id = scheduleAppointment(scheduledAt);
         Instant newDate = scheduledAt.plus(1, ChronoUnit.DAYS);
-        var rescheduled = exchange("/appointments/" + id + "/reschedule", HttpMethod.PATCH,
+
+        // Act
+        var response = exchange("/appointments/" + id + "/reschedule", HttpMethod.PATCH,
                 Map.of("newDate", newDate.toString()));
-        assertThat(rescheduled.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(rescheduled.getBody()).containsEntry("status", "RESCHEDULED")
+
+        // Assert
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).containsEntry("status", "RESCHEDULED")
                 .containsEntry("scheduledAt", newDate.toString());
+    }
 
-        var completed = exchange("/appointments/" + id + "/complete", HttpMethod.PATCH, null);
-        assertThat(completed.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(completed.getBody()).containsEntry("status", "COMPLETED");
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM outbox_events", Long.class)).isEqualTo(3);
+    @Test
+    void reschedulingAppendsAnOutboxEvent() {
+        // Arrange
+        Instant scheduledAt = inThreeDays();
+        String id = scheduleAppointment(scheduledAt);
 
-        var listed = http.exchange("/appointments", HttpMethod.GET,
-                new HttpEntity<>(bearer("psychologist-token")), Object[].class);
-        assertThat(listed.getBody()).hasSize(1);
+        // Act
+        exchange("/appointments/" + id + "/reschedule", HttpMethod.PATCH,
+                Map.of("newDate", scheduledAt.plus(1, ChronoUnit.DAYS).toString()));
+
+        // Assert
+        assertThat(outboxEventCount()).isEqualTo(2);
+    }
+
+    @Test
+    void completesScheduledAppointment() {
+        // Arrange
+        String id = scheduleAppointment(inThreeDays());
+
+        // Act
+        var response = exchange("/appointments/" + id + "/complete", HttpMethod.PATCH, null);
+
+        // Assert
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).containsEntry("status", "COMPLETED");
+    }
+
+    @Test
+    void completionAppendsAnOutboxEvent() {
+        // Arrange
+        String id = scheduleAppointment(inThreeDays());
+
+        // Act
+        exchange("/appointments/" + id + "/complete", HttpMethod.PATCH, null);
+
+        // Assert
+        assertThat(outboxEventCount()).isEqualTo(2);
+    }
+
+    @Test
+    void listsThePsychologistAppointments() {
+        // Arrange
+        scheduleAppointment(inThreeDays());
+        var request = new HttpEntity<>(bearer("psychologist-token"));
+
+        // Act
+        var response = http.exchange("/appointments", HttpMethod.GET, request, Object[].class);
+
+        // Assert
+        assertThat(response.getBody()).hasSize(1);
     }
 
     @Test
     void rollsBackAppointmentAndOutboxEventTogether() {
+        // Arrange
         ScheduleAppointmentCommand command = new ScheduleAppointmentCommand(
                 new PsychologistId(PSYCHOLOGIST_ID),
                 new PatientId(PATIENT_ID),
@@ -102,45 +171,108 @@ class AppointmentApiIT {
                 AppointmentType.ONLINE
         );
 
-        assertThatThrownBy(() -> transactions.executeWithoutResult(status -> {
+        // Act
+        catchThrowable(() -> transactions.executeWithoutResult(status -> {
             appointmentService.schedule(command);
             throw new IllegalStateException("force rollback");
-        })).isInstanceOf(IllegalStateException.class);
+        }));
 
+        // Assert
         assertThat(jdbc.queryForObject("SELECT count(*) FROM appointments", Long.class)).isZero();
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM outbox_events", Long.class)).isZero();
+        assertThat(outboxEventCount()).isZero();
     }
 
     @Test
-    void replacesOversizedCorrelationIdInsteadOfRollingBackTheWrite() {
-        HttpHeaders headers = bearer("psychologist-token");
-        headers.set("X-Correlation-Id", "a".repeat(129));
-        var created = http.exchange("/appointments", HttpMethod.POST, new HttpEntity<>(Map.of(
-                "patientId", PATIENT_ID.toString(),
-                "scheduledAt", Instant.now().plus(3, ChronoUnit.DAYS).toString(),
-                "type", "ONLINE"), headers), Map.class);
+    void acceptsWriteWithOversizedCorrelationId() {
+        // Arrange
+        HttpEntity<Map<String, Object>> request = scheduleRequestWithOversizedCorrelationId();
 
-        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        String correlationId = created.getHeaders().getFirst("X-Correlation-Id");
-        assertThat(UUID.fromString(correlationId)).isNotNull();
+        // Act
+        var response = http.exchange("/appointments", HttpMethod.POST, request, Map.class);
+
+        // Assert
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    }
+
+    @Test
+    void replacesOversizedCorrelationIdInResponseAndOutbox() {
+        // Arrange
+        HttpEntity<Map<String, Object>> request = scheduleRequestWithOversizedCorrelationId();
+
+        // Act
+        var response = http.exchange("/appointments", HttpMethod.POST, request, Map.class);
+
+        // Assert
+        String correlationId = response.getHeaders().getFirst("X-Correlation-Id");
+        assertThat(catchThrowable(() -> UUID.fromString(correlationId))).isNull();
         assertThat(jdbc.queryForObject("SELECT correlation_id FROM outbox_events", String.class))
                 .isEqualTo(correlationId);
     }
 
     @Test
-    void rejectsPastDatesMissingAuthenticationAndWrongRoles() {
-        var invalid = exchange("/appointments", HttpMethod.POST, Map.of(
-                "patientId", PATIENT_ID.toString(),
-                "scheduledAt", Instant.now().minusSeconds(60).toString(),
-                "type", "ONLINE"));
-        assertThat(invalid.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
-        assertThat(http.getForEntity("/appointments", Map.class).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
-        var forbidden = http.exchange("/appointments", HttpMethod.GET,
-                new HttpEntity<>(bearer("patient-token")), Map.class);
-        assertThat(forbidden.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    void rejectsPastAppointmentDate() {
+        // Arrange
+        Map<String, Object> request = scheduleRequest(Instant.now().minusSeconds(60));
+
+        // Act
+        var response = exchange("/appointments", HttpMethod.POST, request);
+
+        // Assert
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
     }
 
-    private org.springframework.http.ResponseEntity<Map> exchange(String path, HttpMethod method, Object body) {
+    @Test
+    void rejectsMissingAuthentication() {
+        // Act
+        var response = http.getForEntity("/appointments", Map.class);
+
+        // Assert
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    void rejectsPatientRoleOnPsychologistAppointments() {
+        // Arrange
+        var request = new HttpEntity<>(bearer("patient-token"));
+
+        // Act
+        var response = http.exchange("/appointments", HttpMethod.GET, request, Map.class);
+
+        // Assert
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    private String scheduleAppointment(Instant scheduledAt) {
+        var response = exchange("/appointments", HttpMethod.POST, scheduleRequest(scheduledAt));
+        if (response.getStatusCode().value() != HttpStatus.CREATED.value()) {
+            throw new IllegalStateException(
+                    "Arrange step \"schedule appointment\" returned " + response.getStatusCode());
+        }
+        return response.getBody().get("id").toString();
+    }
+
+    private HttpEntity<Map<String, Object>> scheduleRequestWithOversizedCorrelationId() {
+        HttpHeaders headers = bearer("psychologist-token");
+        headers.set("X-Correlation-Id", "a".repeat(129));
+        return new HttpEntity<>(scheduleRequest(inThreeDays()), headers);
+    }
+
+    private Map<String, Object> scheduleRequest(Instant scheduledAt) {
+        return Map.of(
+                "patientId", PATIENT_ID.toString(),
+                "scheduledAt", scheduledAt.toString(),
+                "type", "ONLINE");
+    }
+
+    private Instant inThreeDays() {
+        return Instant.now().plus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.SECONDS);
+    }
+
+    private Long outboxEventCount() {
+        return jdbc.queryForObject("SELECT count(*) FROM outbox_events", Long.class);
+    }
+
+    private ResponseEntity<Map> exchange(String path, HttpMethod method, Object body) {
         return http.exchange(path, method, new HttpEntity<>(body, bearer("psychologist-token")), Map.class);
     }
 
