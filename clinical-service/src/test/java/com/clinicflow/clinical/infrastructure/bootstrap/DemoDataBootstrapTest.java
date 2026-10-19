@@ -31,9 +31,20 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class DemoDataBootstrapTest {
+    private static final Clock FIRST_START = Clock.fixed(Instant.parse("2026-07-05T10:00:00Z"), ZoneOffset.UTC);
+    private static final Clock RESTART = Clock.fixed(Instant.parse("2026-07-09T10:00:00Z"), ZoneOffset.UTC);
+    private static final SessionRecordId SEEDED_DRAFT_ID =
+            new SessionRecordId(UUID.fromString("33000000-0000-4000-8000-000000000005"));
+
+    private final InMemoryPracticeProfileRepository practiceProfiles = new InMemoryPracticeProfileRepository();
+    private final InMemoryClinicalCaseRepository clinicalCases = new InMemoryClinicalCaseRepository();
+    private final InMemoryCarePlanRepository carePlans = new InMemoryCarePlanRepository();
+    private final InMemorySessionRecordRepository sessionRecords = new InMemorySessionRecordRepository();
+
     @Test
     void canBeConstructedBySpring() {
         try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            // Arrange
             context.getEnvironment().getPropertySources().addFirst(demoBootstrapProperty());
             context.registerBean(PracticeProfileRepository.class, InMemoryPracticeProfileRepository::new);
             context.registerBean(ClinicalCaseRepository.class, InMemoryClinicalCaseRepository::new);
@@ -41,43 +52,53 @@ class DemoDataBootstrapTest {
             context.registerBean(SessionRecordRepository.class, InMemorySessionRecordRepository::new);
             context.registerBean(DemoDataBootstrap.class);
 
+            // Act
             context.refresh();
 
+            // Assert
             assertThat(context.getBean(DemoDataBootstrap.class)).isNotNull();
         }
     }
 
-    private static MapPropertySource demoBootstrapProperty() {
-        return new MapPropertySource("test", Map.of("clinicflow.demo.bootstrap.enabled", "true"));
-    }
-
     @Test
-    void seedsClinicalWorkflowIdempotently() throws Exception {
-        InMemoryPracticeProfileRepository practiceProfiles = new InMemoryPracticeProfileRepository();
-        InMemoryClinicalCaseRepository clinicalCases = new InMemoryClinicalCaseRepository();
-        InMemoryCarePlanRepository carePlans = new InMemoryCarePlanRepository();
-        InMemorySessionRecordRepository sessionRecords = new InMemorySessionRecordRepository();
-        DemoDataBootstrap bootstrap = new DemoDataBootstrap(
-                practiceProfiles,
-                clinicalCases,
-                carePlans,
-                sessionRecords,
-                Clock.fixed(Instant.parse("2026-07-05T10:00:00Z"), ZoneOffset.UTC)
-        );
+    void seedsTheDemoClinicalWorkflow() {
+        // Act
+        bootstrap(FIRST_START).run(null);
 
-        bootstrap.run(null);
-        bootstrap.run(null);
-
-        assertThat(sessionRecords.saves()).isEqualTo(5);
+        // Assert
         assertThat(practiceProfiles.records()).hasSize(2);
         assertThat(clinicalCases.records()).hasSize(6);
         assertThat(carePlans.records()).hasSize(6);
         assertThat(sessionRecords.records()).hasSize(5);
+    }
+
+    @Test
+    void seedsCasesInEveryLifecycleStatus() {
+        // Act
+        bootstrap(FIRST_START).run(null);
+
+        // Assert
         assertThat(clinicalCases.records().values()).extracting(ClinicalCase::status)
                 .contains(ClinicalCaseStatus.INTAKE, ClinicalCaseStatus.ACTIVE,
                         ClinicalCaseStatus.PAUSED, ClinicalCaseStatus.DISCHARGED);
+    }
+
+    @Test
+    void seedsSessionRecordsInEveryNoteStatus() {
+        // Act
+        bootstrap(FIRST_START).run(null);
+
+        // Assert
         assertThat(sessionRecords.records().values()).extracting(SessionRecord::noteStatus)
                 .contains(NoteStatus.PENDING_NOTE, NoteStatus.DRAFT, NoteStatus.SIGNED);
+    }
+
+    @Test
+    void seedsOneSignedNoteSignedByItsTreatingPsychologist() {
+        // Act
+        bootstrap(FIRST_START).run(null);
+
+        // Assert
         assertThat(sessionRecords.records().values())
                 .filteredOn(record -> record.noteStatus() == NoteStatus.SIGNED)
                 .singleElement()
@@ -89,23 +110,80 @@ class DemoDataBootstrapTest {
     }
 
     @Test
-    void keepsExistingSessionRecordsOnRestartSoSignedAndEditedNotesSurvive() {
-        InMemorySessionRecordRepository sessionRecords = new InMemorySessionRecordRepository();
-        Clock firstStart = Clock.fixed(Instant.parse("2026-07-05T10:00:00Z"), ZoneOffset.UTC);
-        Clock restart = Clock.fixed(Instant.parse("2026-07-09T10:00:00Z"), ZoneOffset.UTC);
-        new DemoDataBootstrap(new InMemoryPracticeProfileRepository(), new InMemoryClinicalCaseRepository(),
-                new InMemoryCarePlanRepository(), sessionRecords, firstStart).run(null);
-        SessionRecordId draftId = new SessionRecordId(UUID.fromString("33000000-0000-4000-8000-000000000005"));
-        SessionRecord draft = sessionRecords.findById(draftId).orElseThrow();
-        draft.sign(draft.psychologistId(), Instant.parse("2026-07-06T10:00:00Z"));
+    void rerunDoesNotSaveSessionRecordsAgain() {
+        // Arrange
+        DemoDataBootstrap bootstrap = bootstrap(FIRST_START);
+        bootstrap.run(null);
+
+        // Act
+        bootstrap.run(null);
+
+        // Assert
+        assertThat(sessionRecords.saves()).isEqualTo(5);
+    }
+
+    @Test
+    void rerunDoesNotDuplicateSeededAggregates() {
+        // Arrange
+        DemoDataBootstrap bootstrap = bootstrap(FIRST_START);
+        bootstrap.run(null);
+
+        // Act
+        bootstrap.run(null);
+
+        // Assert
+        assertThat(practiceProfiles.records()).hasSize(2);
+        assertThat(clinicalCases.records()).hasSize(6);
+        assertThat(carePlans.records()).hasSize(6);
+        assertThat(sessionRecords.records()).hasSize(5);
+    }
+
+    @Test
+    void restartKeepsExistingSessionRecordsSoEditedNotesSurvive() {
+        // Arrange
+        bootstrap(FIRST_START).run(null);
+        signSeededDraft();
         Map<SessionRecordId, SessionRecord> beforeRestart = new LinkedHashMap<>(sessionRecords.records());
 
-        new DemoDataBootstrap(new InMemoryPracticeProfileRepository(), new InMemoryClinicalCaseRepository(),
-                new InMemoryCarePlanRepository(), sessionRecords, restart).run(null);
+        // Act
+        restartedBootstrap().run(null);
 
+        // Assert
         assertThat(sessionRecords.saves()).isEqualTo(5);
         beforeRestart.forEach((id, record) -> assertThat(sessionRecords.records().get(id)).isSameAs(record));
-        assertThat(sessionRecords.records().get(draftId).noteStatus()).isEqualTo(NoteStatus.SIGNED);
+    }
+
+    @Test
+    void restartKeepsANoteSignedInTheDemoSigned() {
+        // Arrange
+        bootstrap(FIRST_START).run(null);
+        signSeededDraft();
+
+        // Act
+        restartedBootstrap().run(null);
+
+        // Assert
+        assertThat(sessionRecords.records().get(SEEDED_DRAFT_ID).noteStatus()).isEqualTo(NoteStatus.SIGNED);
+    }
+
+    private DemoDataBootstrap bootstrap(Clock clock) {
+        return new DemoDataBootstrap(practiceProfiles, clinicalCases, carePlans, sessionRecords, clock);
+    }
+
+    // A restart keeps only the session store so the test isolates how session records are reconciled.
+    private DemoDataBootstrap restartedBootstrap() {
+        return new DemoDataBootstrap(new InMemoryPracticeProfileRepository(), new InMemoryClinicalCaseRepository(),
+                new InMemoryCarePlanRepository(), sessionRecords, RESTART);
+    }
+
+    private void signSeededDraft() {
+        SessionRecord draft = sessionRecords.findById(SEEDED_DRAFT_ID).orElseThrow(() ->
+                new IllegalStateException("Arrange step \"find seeded draft\" found no session record"));
+        draft.sign(draft.psychologistId(), Instant.parse("2026-07-06T10:00:00Z"));
+    }
+
+    private static MapPropertySource demoBootstrapProperty() {
+        return new MapPropertySource("test", Map.of("clinicflow.demo.bootstrap.enabled", "true"));
     }
 
     private static final class InMemoryPracticeProfileRepository implements PracticeProfileRepository {

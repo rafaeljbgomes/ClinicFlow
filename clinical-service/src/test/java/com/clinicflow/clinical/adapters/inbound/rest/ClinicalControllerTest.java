@@ -18,19 +18,26 @@ import com.clinicflow.clinical.domain.SessionRecordNotSignableException;
 import com.clinicflow.clinical.domain.SignedSessionRecordException;
 import com.clinicflow.clinical.infrastructure.security.SecurityConfig;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
@@ -54,161 +61,337 @@ class ClinicalControllerTest {
     private static final UUID SESSION_ID =
             UUID.fromString("dddddddd-dddd-dddd-dddd-dddddddddddd");
     private static final Instant NOW = Instant.parse("2026-06-01T10:00:00Z");
+    private static final String NEW_CASE = """
+            {"patientId":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+             "presentingConcern":"Anxiety symptoms"}
+            """;
+    private static final String SIGNING_UPDATE = """
+            {"sessionDate":"2026-06-01T10:00:00Z","modality":"ONLINE","durationMinutes":50,
+             "attendanceStatus":"ATTENDED","noteStatus":"SIGNED","summary":"Summary"}
+            """;
 
     @Autowired private MockMvc mvc;
     @MockitoBean private ClinicalService clinicalService;
     @MockitoBean private JwtDecoder jwtDecoder;
 
-    @Test
-    void rejectsMissingOrWrongRole() throws Exception {
-        mvc.perform(get("/clinical-cases")).andExpect(status().isUnauthorized());
-        mvc.perform(get("/clinical-cases").with(jwtFor("ROLE_PATIENT"))).andExpect(status().isForbidden());
+    static Stream<Arguments> sessionUpdateLockFailures() {
+        return Stream.of(
+                Arguments.of(new SignedSessionRecordException(), HttpStatus.CONFLICT, "session_record_signed"),
+                Arguments.of(new InvalidNoteTransitionException(), HttpStatus.BAD_REQUEST, "invalid_note_transition"));
+    }
+
+    static Stream<Arguments> sessionSignLockFailures() {
+        return Stream.of(
+                Arguments.of(new SignedSessionRecordException(), HttpStatus.CONFLICT, "session_record_signed"),
+                Arguments.of(new SessionRecordNotSignableException(), HttpStatus.CONFLICT,
+                        "session_record_not_signable"));
     }
 
     @Test
-    void executesClinicalEndpointsForPsychologist() throws Exception {
+    void rejectsRequestWithoutToken() throws Exception {
+        // Arrange
+        var request = get("/clinical-cases");
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void rejectsPatientRole() throws Exception {
+        // Arrange
+        var request = get("/clinical-cases").with(jwtFor("ROLE_PATIENT"));
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isForbidden());
+    }
+
+    @Test
+    void getPracticeProfileReturnsTheProfile() throws Exception {
+        // Arrange
         when(clinicalService.getPracticeProfile(any())).thenReturn(profile());
-        when(clinicalService.updatePracticeProfile(any())).thenReturn(profile());
-        when(clinicalService.createClinicalCase(any())).thenReturn(clinicalCase());
-        when(clinicalService.listClinicalCases(any())).thenReturn(List.of(clinicalCase()));
-        when(clinicalService.getClinicalCase(any())).thenReturn(clinicalCase());
-        when(clinicalService.changeClinicalCaseStatus(any())).thenReturn(clinicalCase());
-        when(clinicalService.getCarePlan(any())).thenReturn(carePlan());
-        when(clinicalService.putCarePlan(any())).thenReturn(carePlan());
-        when(clinicalService.listSessionRecords(any())).thenReturn(List.of(session()));
-        when(clinicalService.createSessionRecord(any())).thenReturn(session());
-        when(clinicalService.updateSessionRecord(any())).thenReturn(session());
-        when(clinicalService.signSessionRecord(any())).thenReturn(signedSession());
-        when(clinicalService.getPatientClinicalHistory(any())).thenReturn(history());
+        var request = get("/practice-profile").with(psychologist());
 
-        mvc.perform(get("/practice-profile").with(jwtFor("ROLE_PSYCHOLOGIST")))
-                .andExpect(status().isOk())
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isOk())
                 .andExpect(jsonPath("$.defaultSessionDurationMinutes").value(50));
+    }
 
-        mvc.perform(put("/practice-profile").with(jwtFor("ROLE_PSYCHOLOGIST"))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"professionalRegistration":"OPP 123","timezone":"Europe/Lisbon",
-                                 "defaultSessionDurationMinutes":50,"primaryLocation":"Lisbon",
-                                 "telehealthEnabled":true}
-                                """))
-                .andExpect(status().isOk());
+    @Test
+    void putPracticeProfileReturnsTheUpdatedProfile() throws Exception {
+        // Arrange
+        when(clinicalService.updatePracticeProfile(any())).thenReturn(profile());
+        var request = put("/practice-profile").with(psychologist())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"professionalRegistration":"OPP 123","timezone":"Europe/Lisbon",
+                         "defaultSessionDurationMinutes":50,"primaryLocation":"Lisbon",
+                         "telehealthEnabled":true}
+                        """);
 
-        mvc.perform(post("/clinical-cases").with(jwtFor("ROLE_PSYCHOLOGIST"))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"patientId":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
-                                 "presentingConcern":"Anxiety symptoms"}
-                                """))
-                .andExpect(status().isCreated())
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isOk())
+                .andExpect(jsonPath("$.professionalRegistration").value("OPP 123"));
+    }
+
+    @Test
+    void createClinicalCaseReturnsCreatedCase() throws Exception {
+        // Arrange
+        when(clinicalService.createClinicalCase(any())).thenReturn(clinicalCase());
+        var request = post("/clinical-cases").with(psychologist())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(NEW_CASE);
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value(CASE_ID.toString()));
+    }
 
-        mvc.perform(get("/clinical-cases").with(jwtFor("ROLE_PSYCHOLOGIST")))
-                .andExpect(status().isOk())
+    @Test
+    void listClinicalCasesReturnsPsychologistCases() throws Exception {
+        // Arrange
+        when(clinicalService.listClinicalCases(any())).thenReturn(List.of(clinicalCase()));
+        var request = get("/clinical-cases").with(psychologist());
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].patientId").value(PATIENT_ID.toString()));
+    }
 
-        mvc.perform(get("/clinical-cases/{id}", CASE_ID).with(jwtFor("ROLE_PSYCHOLOGIST")))
-                .andExpect(status().isOk());
+    @Test
+    void getClinicalCaseReturnsRequestedCase() throws Exception {
+        // Arrange
+        when(clinicalService.getClinicalCase(any())).thenReturn(clinicalCase());
+        var request = get("/clinical-cases/{id}", CASE_ID).with(psychologist());
 
-        mvc.perform(patch("/clinical-cases/{id}/status", CASE_ID).with(jwtFor("ROLE_PSYCHOLOGIST"))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"status\":\"ACTIVE\"}"))
-                .andExpect(status().isOk());
+        // Act
+        ResultActions response = mvc.perform(request);
 
-        mvc.perform(put("/clinical-cases/{id}/care-plan", CASE_ID).with(jwtFor("ROLE_PSYCHOLOGIST"))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"therapeuticFocus":"Reduce avoidance","plannedFrequency":"Weekly",
-                                 "reviewDate":"2026-07-01",
-                                 "goals":[{"description":"Practice exposure","status":"IN_PROGRESS",
-                                           "progressPercentage":25}]}
-                                """))
-                .andExpect(status().isOk())
+        // Assert
+        response.andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(CASE_ID.toString()));
+    }
+
+    @Test
+    void changeClinicalCaseStatusReturnsTheCase() throws Exception {
+        // Arrange
+        when(clinicalService.changeClinicalCaseStatus(any())).thenReturn(clinicalCase());
+        var request = patch("/clinical-cases/{id}/status", CASE_ID).with(psychologist())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"status\":\"ACTIVE\"}");
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ACTIVE"));
+    }
+
+    @Test
+    void putCarePlanReturnsPlanWithGoals() throws Exception {
+        // Arrange
+        when(clinicalService.putCarePlan(any())).thenReturn(carePlan());
+        var request = put("/clinical-cases/{id}/care-plan", CASE_ID).with(psychologist())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"therapeuticFocus":"Reduce avoidance","plannedFrequency":"Weekly",
+                         "reviewDate":"2026-07-01",
+                         "goals":[{"description":"Practice exposure","status":"IN_PROGRESS",
+                                   "progressPercentage":25}]}
+                        """);
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isOk())
                 .andExpect(jsonPath("$.goals[0].progressPercentage").value(25));
+    }
 
-        mvc.perform(get("/clinical-cases/{id}/care-plan", CASE_ID).with(jwtFor("ROLE_PSYCHOLOGIST")))
-                .andExpect(status().isOk());
+    @Test
+    void getCarePlanReturnsThePlan() throws Exception {
+        // Arrange
+        when(clinicalService.getCarePlan(any())).thenReturn(carePlan());
+        var request = get("/clinical-cases/{id}/care-plan", CASE_ID).with(psychologist());
 
-        mvc.perform(post("/clinical-cases/{id}/session-records", CASE_ID).with(jwtFor("ROLE_PSYCHOLOGIST"))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"sessionDate":"2026-06-01T10:00:00Z","modality":"ONLINE",
-                                 "durationMinutes":50,"attendanceStatus":"ATTENDED",
-                                 "summary":"Session summary"}
-                                """))
-                .andExpect(status().isCreated())
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isOk())
+                .andExpect(jsonPath("$.therapeuticFocus").value("Reduce avoidance"));
+    }
+
+    @Test
+    void createSessionRecordReturnsDraftNote() throws Exception {
+        // Arrange
+        when(clinicalService.createSessionRecord(any())).thenReturn(session());
+        var request = post("/clinical-cases/{id}/session-records", CASE_ID).with(psychologist())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"sessionDate":"2026-06-01T10:00:00Z","modality":"ONLINE",
+                         "durationMinutes":50,"attendanceStatus":"ATTENDED",
+                         "summary":"Session summary"}
+                        """);
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isCreated())
                 .andExpect(jsonPath("$.noteStatus").value("DRAFT"));
+    }
 
-        mvc.perform(get("/clinical-cases/{id}/session-records", CASE_ID).with(jwtFor("ROLE_PSYCHOLOGIST")))
-                .andExpect(status().isOk());
+    @Test
+    void listSessionRecordsReturnsCaseSessions() throws Exception {
+        // Arrange
+        when(clinicalService.listSessionRecords(any())).thenReturn(List.of(session()));
+        var request = get("/clinical-cases/{id}/session-records", CASE_ID).with(psychologist());
 
-        mvc.perform(patch("/session-records/{id}", SESSION_ID).with(jwtFor("ROLE_PSYCHOLOGIST"))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"clinicalCaseId":"cccccccc-cccc-cccc-cccc-cccccccccccc",
-                                 "sessionDate":"2026-06-01T10:00:00Z","modality":"ONLINE",
-                                 "durationMinutes":50,"attendanceStatus":"ATTENDED",
-                                 "noteStatus":"DRAFT","summary":"Draft summary"}
-                                """))
-                .andExpect(status().isOk());
+        // Act
+        ResultActions response = mvc.perform(request);
 
-        mvc.perform(post("/session-records/{id}/sign", SESSION_ID).with(jwtFor("ROLE_PSYCHOLOGIST")))
-                .andExpect(status().isOk())
+        // Assert
+        response.andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(SESSION_ID.toString()));
+    }
+
+    @Test
+    void updateSessionRecordReturnsTheNote() throws Exception {
+        // Arrange
+        when(clinicalService.updateSessionRecord(any())).thenReturn(session());
+        var request = patch("/session-records/{id}", SESSION_ID).with(psychologist())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"clinicalCaseId":"cccccccc-cccc-cccc-cccc-cccccccccccc",
+                         "sessionDate":"2026-06-01T10:00:00Z","modality":"ONLINE",
+                         "durationMinutes":50,"attendanceStatus":"ATTENDED",
+                         "noteStatus":"DRAFT","summary":"Draft summary"}
+                        """);
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(SESSION_ID.toString()));
+    }
+
+    @Test
+    void signSessionRecordReturnsTheSignature() throws Exception {
+        // Arrange
+        when(clinicalService.signSessionRecord(any())).thenReturn(signedSession());
+        var request = post("/session-records/{id}/sign", SESSION_ID).with(psychologist());
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isOk())
                 .andExpect(jsonPath("$.noteStatus").value("SIGNED"))
                 .andExpect(jsonPath("$.signedBy").value(PSYCHOLOGIST_ID.toString()))
                 .andExpect(jsonPath("$.signedAt").value("2026-06-01T11:00:00Z"));
+    }
 
-        mvc.perform(get("/patients/{id}/clinical-history", PATIENT_ID).with(jwtFor("ROLE_PSYCHOLOGIST")))
-                .andExpect(status().isOk())
+    @Test
+    void patientClinicalHistoryReturnsPatientCases() throws Exception {
+        // Arrange
+        when(clinicalService.getPatientClinicalHistory(any())).thenReturn(history());
+        var request = get("/patients/{id}/clinical-history", PATIENT_ID).with(psychologist());
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isOk())
                 .andExpect(jsonPath("$.cases[0].id").value(CASE_ID.toString()));
     }
 
     @Test
     void mapsActiveCaseConflictToProblemDetail() throws Exception {
+        // Arrange
         when(clinicalService.createClinicalCase(any())).thenThrow(new ActiveClinicalCaseExistsException());
+        var request = post("/clinical-cases").with(psychologist())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(NEW_CASE);
 
-        mvc.perform(post("/clinical-cases").with(jwtFor("ROLE_PSYCHOLOGIST"))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"patientId":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
-                                 "presentingConcern":"Anxiety symptoms"}
-                                """))
-                .andExpect(status().isConflict())
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isConflict())
                 .andExpect(jsonPath("$.title").value("Active clinical case exists"));
     }
 
-    @Test
-    void mapsSessionNoteLockFailuresToStableProblemCodes() throws Exception {
-        when(clinicalService.updateSessionRecord(any()))
-                .thenThrow(new SignedSessionRecordException())
-                .thenThrow(new InvalidNoteTransitionException());
-        when(clinicalService.signSessionRecord(any()))
-                .thenThrow(new SignedSessionRecordException())
-                .thenThrow(new SessionRecordNotSignableException());
+    @ParameterizedTest(name = "update failure {0} maps to {2}")
+    @MethodSource("sessionUpdateLockFailures")
+    void mapsSessionUpdateLockFailureToStableProblemCode(RuntimeException failure, HttpStatus expectedStatus,
+                                                         String expectedCode) throws Exception {
+        // Arrange
+        when(clinicalService.updateSessionRecord(any())).thenThrow(failure);
+        var request = patch("/session-records/{id}", SESSION_ID).with(psychologist())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(SIGNING_UPDATE);
 
-        String update = """
-                {"sessionDate":"2026-06-01T10:00:00Z","modality":"ONLINE","durationMinutes":50,
-                 "attendanceStatus":"ATTENDED","noteStatus":"SIGNED","summary":"Summary"}
-                """;
-        mvc.perform(patch("/session-records/{id}", SESSION_ID).with(jwtFor("ROLE_PSYCHOLOGIST"))
-                        .contentType(MediaType.APPLICATION_JSON).content(update))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("session_record_signed"));
-        mvc.perform(patch("/session-records/{id}", SESSION_ID).with(jwtFor("ROLE_PSYCHOLOGIST"))
-                        .contentType(MediaType.APPLICATION_JSON).content(update))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("invalid_note_transition"));
-        mvc.perform(post("/session-records/{id}/sign", SESSION_ID).with(jwtFor("ROLE_PSYCHOLOGIST")))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("session_record_signed"));
-        mvc.perform(post("/session-records/{id}/sign", SESSION_ID).with(jwtFor("ROLE_PSYCHOLOGIST")))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("session_record_not_signable"));
-        mvc.perform(post("/session-records/{id}/sign", SESSION_ID).with(jwtFor("ROLE_PATIENT")))
-                .andExpect(status().isForbidden());
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().is(expectedStatus.value()))
+                .andExpect(jsonPath("$.code").value(expectedCode));
     }
 
-    private org.springframework.test.web.servlet.request.RequestPostProcessor jwtFor(String authority) {
+    @ParameterizedTest(name = "sign failure {0} maps to {2}")
+    @MethodSource("sessionSignLockFailures")
+    void mapsSessionSignLockFailureToStableProblemCode(RuntimeException failure, HttpStatus expectedStatus,
+                                                       String expectedCode) throws Exception {
+        // Arrange
+        when(clinicalService.signSessionRecord(any())).thenThrow(failure);
+        var request = post("/session-records/{id}/sign", SESSION_ID).with(psychologist());
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().is(expectedStatus.value()))
+                .andExpect(jsonPath("$.code").value(expectedCode));
+    }
+
+    @Test
+    void rejectsPatientRoleOnSessionSigning() throws Exception {
+        // Arrange
+        var request = post("/session-records/{id}/sign", SESSION_ID).with(jwtFor("ROLE_PATIENT"));
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isForbidden());
+    }
+
+    private RequestPostProcessor psychologist() {
+        return jwtFor("ROLE_PSYCHOLOGIST");
+    }
+
+    private RequestPostProcessor jwtFor(String authority) {
         return jwt()
                 .jwt(token -> token.claim("userId", PSYCHOLOGIST_ID.toString()))
                 .authorities(new SimpleGrantedAuthority(authority));

@@ -19,7 +19,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 @SpringBootTest(properties = {
         "clinicflow.demo.bootstrap.enabled=true",
@@ -44,19 +44,59 @@ class DemoDataBootstrapIT {
     @MockitoBean private JwtDecoder jwtDecoder;
 
     @Test
+    void startupSeedsSignedNoteWithItsSignature() {
+        // Act
+        Map<String, Object> seeded = note(SEEDED_SIGNED_NOTE);
+
+        // Assert
+        assertThat(seeded).containsEntry("note_status", "SIGNED").containsEntry("signed_by", SOFIA);
+    }
+
+    @Test
     void rerunsCleanlyAfterSignedNotesExist() {
-        assertThat(note(SEEDED_SIGNED_NOTE)).containsEntry("note_status", "SIGNED").containsEntry("signed_by", SOFIA);
-        clinicalService.signSessionRecord(new SignSessionRecordCommand(
-                new PsychologistId(SOFIA), new SessionRecordId(SEEDED_DRAFT_NOTE)));
+        // Arrange
+        ensureSeededDraftIsSigned();
+
+        // Act
+        // Same runner the next application start executes against the existing database.
+        Throwable thrown = catchThrowable(() -> bootstrap.run(null));
+
+        // Assert
+        assertThat(thrown).isNull();
+    }
+
+    @Test
+    void rerunLeavesSeededAndDemoSignedNotesUntouched() {
+        // Arrange
+        ensureSeededDraftIsSigned();
         Map<String, Object> seededSigned = note(SEEDED_SIGNED_NOTE);
         Map<String, Object> signedInDemo = note(SEEDED_DRAFT_NOTE);
 
-        // Same runner the next application start executes against the existing database.
-        assertThatCode(() -> bootstrap.run(null)).doesNotThrowAnyException();
+        // Act
+        bootstrap.run(null);
 
+        // Assert
         assertThat(note(SEEDED_SIGNED_NOTE)).isEqualTo(seededSigned);
         assertThat(note(SEEDED_DRAFT_NOTE)).isEqualTo(signedInDemo).containsEntry("note_status", "SIGNED");
+    }
+
+    @Test
+    void rerunDoesNotDuplicateSessionRecords() {
+        // Arrange
+        ensureSeededDraftIsSigned();
+
+        // Act
+        bootstrap.run(null);
+
+        // Assert
         assertThat(jdbc.queryForObject("SELECT count(*) FROM session_records", Integer.class)).isEqualTo(5);
+    }
+
+    private void ensureSeededDraftIsSigned() {
+        if (!"SIGNED".equals(note(SEEDED_DRAFT_NOTE).get("note_status"))) {
+            clinicalService.signSessionRecord(new SignSessionRecordCommand(
+                    new PsychologistId(SOFIA), new SessionRecordId(SEEDED_DRAFT_NOTE)));
+        }
     }
 
     private Map<String, Object> note(UUID id) {

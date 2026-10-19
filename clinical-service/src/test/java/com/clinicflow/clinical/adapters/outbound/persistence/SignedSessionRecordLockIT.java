@@ -11,6 +11,9 @@ import com.clinicflow.clinical.domain.SessionRecordId;
 import com.clinicflow.clinical.domain.SignedSessionRecordException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
@@ -18,11 +21,8 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -32,9 +32,10 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 // Each step commits on its own so the PostgreSQL trigger and CHECK constraint see real row versions.
 @DataJpaTest(properties = {
@@ -59,7 +60,6 @@ class SignedSessionRecordLockIT {
 
     @Autowired private JpaSessionRecordRepository sessions;
     @Autowired private JdbcTemplate jdbc;
-    @Autowired private PlatformTransactionManager transactionManager;
 
     @AfterEach
     void removeLockedRows() {
@@ -67,13 +67,35 @@ class SignedSessionRecordLockIT {
         jdbc.execute("TRUNCATE TABLE session_records");
     }
 
+    static Stream<Arguments> statementsAgainstSignedRows() {
+        return Stream.of(
+                Arguments.of("rewrite summary", "UPDATE session_records SET summary = 'Rewritten' WHERE id = ?"),
+                Arguments.of("unsign", "UPDATE session_records SET note_status = 'DRAFT', signed_at = NULL, "
+                        + "signed_by = NULL WHERE id = ?"),
+                Arguments.of("touch updated_at", "UPDATE session_records SET updated_at = now() WHERE id = ?"),
+                Arguments.of("delete", "DELETE FROM session_records WHERE id = ?"));
+    }
+
+    static Stream<Arguments> inconsistentSignatureColumns() {
+        return Stream.of(
+                Arguments.of("DRAFT", Timestamp.from(NOW), OWNER.value()),
+                Arguments.of("DRAFT", Timestamp.from(NOW), null),
+                Arguments.of("SIGNED", null, null),
+                Arguments.of("SIGNED", Timestamp.from(NOW), null),
+                Arguments.of("SIGNED", null, OWNER.value()));
+    }
+
     @Test
     void persistsTheSignatureAndReadsItBack() {
+        // Arrange
         SessionRecord draft = draft("Summary");
         sessions.save(draft);
+        SessionRecord signed = sessions.findById(draft.id()).orElseThrow().sign(OWNER, NOW.plusSeconds(60));
 
-        sessions.save(sessions.findById(draft.id()).orElseThrow().sign(OWNER, NOW.plusSeconds(60)));
+        // Act
+        sessions.save(signed);
 
+        // Assert
         SessionRecord stored = sessions.findById(draft.id()).orElseThrow();
         assertThat(stored.noteStatus()).isEqualTo(NoteStatus.SIGNED);
         assertThat(stored.signedAt()).contains(NOW.plusSeconds(60));
@@ -81,72 +103,131 @@ class SignedSessionRecordLockIT {
         assertThat(stored.updatedAt()).isEqualTo(NOW.plusSeconds(60));
     }
 
+    @ParameterizedTest(name = "rejects {0}")
+    @MethodSource("statementsAgainstSignedRows")
+    void databaseRejectsDirectChangesToSignedRows(String change, String sql) {
+        // Arrange
+        SessionRecordId id = signedRecord("Signed summary");
+
+        // Act
+        Throwable thrown = catchThrowable(() -> jdbc.update(sql, id.value()));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(DataIntegrityViolationException.class);
+        assertThat(sqlState(thrown)).isEqualTo("23L01");
+    }
+
     @Test
-    void databaseRejectsDirectUpdatesAndDeletesOfSignedRowsButAllowsNoOpUpdates() {
+    void databaseAllowsNoOpUpdatesOfSignedRows() {
+        // Arrange
         SessionRecordId id = signedRecord("Signed summary");
         Map<String, Object> before = row(id);
 
-        assertLocked(() -> jdbc.update("UPDATE session_records SET summary = 'Rewritten' WHERE id = ?", id.value()));
-        assertLocked(() -> jdbc.update("UPDATE session_records SET note_status = 'DRAFT', signed_at = NULL, "
-                + "signed_by = NULL WHERE id = ?", id.value()));
-        assertLocked(() -> jdbc.update("UPDATE session_records SET updated_at = now() WHERE id = ?", id.value()));
-        assertLocked(() -> jdbc.update("DELETE FROM session_records WHERE id = ?", id.value()));
+        // Act
+        int updated = jdbc.update("UPDATE session_records SET summary = summary WHERE id = ?", id.value());
 
-        assertThat(jdbc.update("UPDATE session_records SET summary = summary WHERE id = ?", id.value())).isEqualTo(1);
+        // Assert
+        assertThat(updated).isEqualTo(1);
         assertThat(row(id)).isEqualTo(before);
     }
 
     @Test
-    void unsignedRowsStayEditableAndDeletable() {
+    void unsignedRowsStayEditable() {
+        // Arrange
         SessionRecord draft = draft("Draft summary");
         sessions.save(draft);
 
-        assertThat(jdbc.update("UPDATE session_records SET summary = 'Edited draft' WHERE id = ?",
-                draft.id().value())).isEqualTo(1);
-        assertThat(jdbc.update("DELETE FROM session_records WHERE id = ?", draft.id().value())).isEqualTo(1);
+        // Act
+        int updated = jdbc.update("UPDATE session_records SET summary = 'Edited draft' WHERE id = ?",
+                draft.id().value());
+
+        // Assert
+        assertThat(updated).isEqualTo(1);
     }
 
     @Test
-    void checkConstraintKeepsSignatureColumnsConsistentWithNoteStatus() {
-        assertCheckViolation("DRAFT", Timestamp.from(NOW), OWNER.value());
-        assertCheckViolation("DRAFT", Timestamp.from(NOW), null);
-        assertCheckViolation("SIGNED", null, null);
-        assertCheckViolation("SIGNED", Timestamp.from(NOW), null);
-        assertCheckViolation("SIGNED", null, OWNER.value());
-    }
-
-    @Test
-    void staleDraftSaveAfterACommittedSignatureIsRejectedAndTheRowStaysSigned() {
-        SessionRecord draft = draft("Original summary");
+    void unsignedRowsStayDeletable() {
+        // Arrange
+        SessionRecord draft = draft("Draft summary");
         sessions.save(draft);
-        TransactionTemplate editTransaction = new TransactionTemplate(transactionManager);
-        TransactionTemplate signTransaction = new TransactionTemplate(transactionManager);
-        signTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
 
-        assertThatThrownBy(() -> editTransaction.executeWithoutResult(status -> {
-            SessionRecord stale = sessions.findById(draft.id()).orElseThrow();
-            signTransaction.executeWithoutResult(inner ->
-                    sessions.save(sessions.findById(draft.id()).orElseThrow().sign(OWNER, NOW.plusSeconds(60))));
-            stale.update(null, NOW, SessionModality.ONLINE, 50, AttendanceStatus.ATTENDED, NoteStatus.DRAFT,
-                    "Stale rewrite", null, null, null, null, NOW.plusSeconds(120));
-            sessions.save(stale);
-        })).isInstanceOf(SignedSessionRecordException.class);
+        // Act
+        int deleted = jdbc.update("DELETE FROM session_records WHERE id = ?", draft.id().value());
 
-        Map<String, Object> stored = row(draft.id());
+        // Assert
+        assertThat(deleted).isEqualTo(1);
+    }
+
+    @ParameterizedTest(name = "{0} with signed_at={1} and signed_by={2}")
+    @MethodSource("inconsistentSignatureColumns")
+    void checkConstraintKeepsSignatureColumnsConsistentWithNoteStatus(String noteStatus, Timestamp signedAt,
+                                                                       UUID signedBy) {
+        // Act
+        Throwable thrown = catchThrowable(() -> jdbc.update("""
+                INSERT INTO session_records (id, psychologist_id, patient_id, session_date, modality,
+                    duration_minutes, attendance_status, note_status, summary, created_at, updated_at,
+                    signed_at, signed_by)
+                VALUES (?, ?, ?, ?, 'ONLINE', 50, 'ATTENDED', ?, 'Summary', ?, ?, ?, ?)
+                """, UUID.randomUUID(), OWNER.value(), PATIENT.value(), Timestamp.from(NOW), noteStatus,
+                Timestamp.from(NOW), Timestamp.from(NOW), signedAt, signedBy));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(DataIntegrityViolationException.class);
+        assertThat(sqlState(thrown)).isEqualTo("23514");
+    }
+
+    @Test
+    void staleDraftSaveAfterACommittedSignatureIsRejected() {
+        // Arrange
+        SessionRecord stale = staleDraftOfASignedRecord("Original summary");
+
+        // Act
+        Throwable thrown = catchThrowable(() -> sessions.save(stale));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(SignedSessionRecordException.class);
+    }
+
+    @Test
+    void rejectedStaleDraftSaveLeavesTheRowSigned() {
+        // Arrange
+        SessionRecord stale = staleDraftOfASignedRecord("Original summary");
+
+        // Act
+        catchThrowable(() -> sessions.save(stale));
+
+        // Assert
+        Map<String, Object> stored = row(stale.id());
         assertThat(stored).containsEntry("note_status", "SIGNED").containsEntry("summary", "Original summary");
         assertThat(stored.get("signed_at")).isNotNull();
     }
 
     @Test
     void otherIntegrityFailuresAreNotReportedAsSignedNotes() {
+        // Arrange
         AppointmentId appointmentId = new AppointmentId(UUID.randomUUID());
-        sessions.save(SessionRecord.fromCompletedAppointment(new SessionRecordId(UUID.randomUUID()), null, OWNER,
-                PATIENT, appointmentId, NOW, SessionModality.ONLINE, 50, NOW));
+        sessions.save(completedAppointmentSession(appointmentId));
 
-        assertThatThrownBy(() -> sessions.save(SessionRecord.fromCompletedAppointment(
-                new SessionRecordId(UUID.randomUUID()), null, OWNER, PATIENT, appointmentId, NOW,
-                SessionModality.ONLINE, 50, NOW)))
-                .isInstanceOf(DataIntegrityViolationException.class);
+        // Act
+        Throwable thrown = catchThrowable(() -> sessions.save(completedAppointmentSession(appointmentId)));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    private SessionRecord staleDraftOfASignedRecord(String summary) {
+        SessionRecord draft = draft(summary);
+        sessions.save(draft);
+        SessionRecord stale = sessions.findById(draft.id()).orElseThrow();
+        sessions.save(sessions.findById(draft.id()).orElseThrow().sign(OWNER, NOW.plusSeconds(60)));
+        stale.update(null, NOW, SessionModality.ONLINE, 50, AttendanceStatus.ATTENDED, NoteStatus.DRAFT,
+                "Stale rewrite", null, null, null, null, NOW.plusSeconds(120));
+        return stale;
+    }
+
+    private SessionRecord completedAppointmentSession(AppointmentId appointmentId) {
+        return SessionRecord.fromCompletedAppointment(new SessionRecordId(UUID.randomUUID()), null, OWNER,
+                PATIENT, appointmentId, NOW, SessionModality.ONLINE, 50, NOW);
     }
 
     private SessionRecordId signedRecord(String summary) {
@@ -164,24 +245,6 @@ class SignedSessionRecordLockIT {
 
     private Map<String, Object> row(SessionRecordId id) {
         return jdbc.queryForMap("SELECT * FROM session_records WHERE id = ?", id.value());
-    }
-
-    private void assertLocked(Runnable statement) {
-        assertThatThrownBy(statement::run)
-                .isInstanceOf(DataIntegrityViolationException.class)
-                .satisfies(failure -> assertThat(sqlState(failure)).isEqualTo("23L01"));
-    }
-
-    private void assertCheckViolation(String noteStatus, Timestamp signedAt, UUID signedBy) {
-        assertThatThrownBy(() -> jdbc.update("""
-                INSERT INTO session_records (id, psychologist_id, patient_id, session_date, modality,
-                    duration_minutes, attendance_status, note_status, summary, created_at, updated_at,
-                    signed_at, signed_by)
-                VALUES (?, ?, ?, ?, 'ONLINE', 50, 'ATTENDED', ?, 'Summary', ?, ?, ?, ?)
-                """, UUID.randomUUID(), OWNER.value(), PATIENT.value(), Timestamp.from(NOW), noteStatus,
-                Timestamp.from(NOW), Timestamp.from(NOW), signedAt, signedBy))
-                .isInstanceOf(DataIntegrityViolationException.class)
-                .satisfies(failure -> assertThat(sqlState(failure)).isEqualTo("23514"));
     }
 
     private static String sqlState(Throwable failure) {

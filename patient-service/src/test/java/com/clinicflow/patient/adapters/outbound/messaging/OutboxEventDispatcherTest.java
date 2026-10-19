@@ -13,6 +13,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -31,18 +32,15 @@ class OutboxEventDispatcherTest {
             repository, rabbitTemplate, "therapy.events.exchange", properties(), metrics);
 
     @Test
-    void publishesRawJsonAndMarksAcknowledgedEventPublished() {
-        JpaOutboxEvent event = event();
-        when(repository.lockNextDue(any())).thenReturn(Optional.of(event));
-        doAnswer(invocation -> {
-            CorrelationData correlationData = invocation.getArgument(3);
-            correlationData.getFuture().complete(new CorrelationData.Confirm(true, null));
-            return null;
-        }).when(rabbitTemplate).send(eq("therapy.events.exchange"), eq("patient.created"),
-                any(Message.class), any(CorrelationData.class));
+    void sendsStoredPayloadAsRawJsonMessage() {
+        // Arrange
+        JpaOutboxEvent event = dueEvent();
+        brokerAnswers(correlationData -> correlationData.getFuture().complete(new CorrelationData.Confirm(true, null)));
 
-        assertThat(dispatcher.dispatchNext()).isTrue();
+        // Act
+        dispatcher.dispatchNext();
 
+        // Assert
         ArgumentCaptor<Message> message = ArgumentCaptor.forClass(Message.class);
         verify(rabbitTemplate).send(eq("therapy.events.exchange"), eq("patient.created"),
                 message.capture(), any(CorrelationData.class));
@@ -53,61 +51,110 @@ class OutboxEventDispatcherTest {
         assertThat(message.getValue().getMessageProperties().getType()).isEqualTo("PatientCreated");
         assertThat(message.getValue().getMessageProperties().getHeader("X-Correlation-Id").toString())
                 .isEqualTo("correlation-123");
+    }
+
+    @Test
+    void marksAcknowledgedEventPublished() {
+        // Arrange
+        JpaOutboxEvent event = dueEvent();
+        brokerAnswers(correlationData -> correlationData.getFuture().complete(new CorrelationData.Confirm(true, null)));
+
+        // Act
+        boolean dispatched = dispatcher.dispatchNext();
+
+        // Assert
+        assertThat(dispatched).isTrue();
         assertThat(event.status()).isEqualTo(OutboxEventStatus.PUBLISHED);
+    }
+
+    @Test
+    void countsAcknowledgedEventAsSuccessfulPublication() {
+        // Arrange
+        dueEvent();
+        brokerAnswers(correlationData -> correlationData.getFuture().complete(new CorrelationData.Confirm(true, null)));
+
+        // Act
+        dispatcher.dispatchNext();
+
+        // Assert
         assertThat(registry.get("clinicflow.domain.events.published")
                 .tag("status", "success").counter().count()).isEqualTo(1);
     }
 
     @Test
     void keepsReturnedEventRetryable() {
-        JpaOutboxEvent event = event();
-        when(repository.lockNextDue(any())).thenReturn(Optional.of(event));
-        doAnswer(invocation -> {
-            CorrelationData correlationData = invocation.getArgument(3);
-            Message returned = new Message(new byte[0]);
-            correlationData.setReturned(new ReturnedMessage(
-                    returned, 312, "NO_ROUTE", "therapy.events.exchange", "patient.created"));
-            correlationData.getFuture().complete(new CorrelationData.Confirm(true, null));
-            return null;
-        }).when(rabbitTemplate).send(any(), any(), any(Message.class), any(CorrelationData.class));
+        // Arrange
+        JpaOutboxEvent event = dueEvent();
+        brokerAnswers(this::returnAsUnroutable);
 
-        assertThat(dispatcher.dispatchNext()).isTrue();
+        // Act
+        boolean dispatched = dispatcher.dispatchNext();
 
+        // Assert
+        assertThat(dispatched).isTrue();
         assertThat(event.status()).isEqualTo(OutboxEventStatus.FAILED);
         assertThat(event.retryCount()).isOne();
         assertThat(event.lastError()).contains("unroutable");
         assertThat(event.nextAttemptAt()).isAfter(Instant.now().minusSeconds(1));
+    }
+
+    @Test
+    void countsReturnedEventAsFailedPublication() {
+        // Arrange
+        dueEvent();
+        brokerAnswers(this::returnAsUnroutable);
+
+        // Act
+        dispatcher.dispatchNext();
+
+        // Assert
         assertThat(registry.get("clinicflow.domain.events.published")
                 .tag("status", "failure").counter().count()).isEqualTo(1);
     }
 
     @Test
-    void retriesNegativeAcknowledgementAndReportsEmptyQueue() {
-        JpaOutboxEvent event = event();
-        when(repository.lockNextDue(any())).thenReturn(Optional.of(event), Optional.empty());
-        doAnswer(invocation -> {
-            CorrelationData correlationData = invocation.getArgument(3);
-            correlationData.getFuture().complete(new CorrelationData.Confirm(false, "broker rejected"));
-            return null;
-        }).when(rabbitTemplate).send(any(), any(), any(Message.class), any(CorrelationData.class));
+    void keepsNegativelyAcknowledgedEventRetryable() {
+        // Arrange
+        JpaOutboxEvent event = dueEvent();
+        brokerAnswers(correlationData -> correlationData.getFuture()
+                .complete(new CorrelationData.Confirm(false, "broker rejected")));
 
-        assertThat(dispatcher.dispatchNext()).isTrue();
+        // Act
+        boolean dispatched = dispatcher.dispatchNext();
+
+        // Assert
+        assertThat(dispatched).isTrue();
         assertThat(event.status()).isEqualTo(OutboxEventStatus.FAILED);
         assertThat(event.lastError()).contains("broker rejected");
-        assertThat(dispatcher.dispatchNext()).isFalse();
+    }
+
+    @Test
+    void reportsNoWorkWhenNoEventIsDue() {
+        // Arrange
+        when(repository.lockNextDue(any())).thenReturn(Optional.empty());
+
+        // Act
+        boolean dispatched = dispatcher.dispatchNext();
+
+        // Assert
+        assertThat(dispatched).isFalse();
     }
 
     @Test
     void removesOnlyRowsSelectedByPublishedRetentionQuery() {
+        // Arrange
         when(repository.deletePublishedBefore(any())).thenReturn(2);
 
-        assertThat(dispatcher.cleanupPublished()).isEqualTo(2);
+        // Act
+        int removed = dispatcher.cleanupPublished();
 
+        // Assert
+        assertThat(removed).isEqualTo(2);
         verify(repository).deletePublishedBefore(any());
     }
 
-    private JpaOutboxEvent event() {
-        return JpaOutboxEvent.pending(
+    private JpaOutboxEvent dueEvent() {
+        JpaOutboxEvent event = JpaOutboxEvent.pending(
                 UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
                 "PatientCreated",
                 "patient.created",
@@ -115,6 +162,21 @@ class OutboxEventDispatcherTest {
                 "correlation-123",
                 Instant.now().minusSeconds(1)
         );
+        when(repository.lockNextDue(any())).thenReturn(Optional.of(event));
+        return event;
+    }
+
+    private void brokerAnswers(Consumer<CorrelationData> confirmation) {
+        doAnswer(invocation -> {
+            confirmation.accept(invocation.getArgument(3));
+            return null;
+        }).when(rabbitTemplate).send(any(), any(), any(Message.class), any(CorrelationData.class));
+    }
+
+    private void returnAsUnroutable(CorrelationData correlationData) {
+        correlationData.setReturned(new ReturnedMessage(
+                new Message(new byte[0]), 312, "NO_ROUTE", "therapy.events.exchange", "patient.created"));
+        correlationData.getFuture().complete(new CorrelationData.Confirm(true, null));
     }
 
     private OutboxProperties properties() {
