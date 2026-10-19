@@ -16,6 +16,7 @@ import org.springframework.http.MediaType;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -48,99 +49,166 @@ class PatientControllerTest {
     private JwtDecoder jwtDecoder;
 
     @Test
-    void rejectsMissingOrWrongRole() throws Exception {
-        mvc.perform(get("/patients"))
-                .andExpect(status().isUnauthorized());
+    void rejectsRequestWithoutToken() throws Exception {
+        // Arrange
+        var request = get("/patients");
 
-        mvc.perform(get("/patients").with(jwtFor("ROLE_PATIENT")))
-                .andExpect(status().isForbidden());
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isUnauthorized());
     }
 
     @Test
-    void executesAllPatientEndpointsForPsychologist() throws Exception {
+    void rejectsPatientRole() throws Exception {
+        // Arrange
+        var request = get("/patients").with(jwtFor("ROLE_PATIENT"));
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isForbidden());
+    }
+
+    @Test
+    void createReturnsCreatedPatient() throws Exception {
+        // Arrange
         when(patientService.create(any())).thenReturn(result());
-        when(patientService.list(any())).thenReturn(List.of(result()));
-        when(patientService.get(any())).thenReturn(result());
-        when(patientService.update(any())).thenReturn(result());
-        when(patientService.changeStatus(any())).thenReturn(result());
+        var request = post("/patients")
+                .with(jwtFor("ROLE_PSYCHOLOGIST"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {
+                          "email": "patient@example.com",
+                          "fullName": "Patient Name",
+                          "preferredName": "Pat",
+                          "birthDate": "1990-01-01",
+                          "phone": "+351912345678",
+                          "emergencyContactName": "Emergency One",
+                          "emergencyContactPhone": "+351923456789",
+                          "emergencyContactRelationship": "Partner",
+                          "contactPreference": "EMAIL",
+                          "consentStatus": "GRANTED"
+                        }
+                        """);
 
-        mvc.perform(post("/patients")
-                        .with(jwtFor("ROLE_PSYCHOLOGIST"))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "email": "patient@example.com",
-                                  "fullName": "Patient Name",
-                                  "preferredName": "Pat",
-                                  "birthDate": "1990-01-01",
-                                  "phone": "+351912345678",
-                                  "emergencyContactName": "Emergency One",
-                                  "emergencyContactPhone": "+351923456789",
-                                  "emergencyContactRelationship": "Partner",
-                                  "contactPreference": "EMAIL",
-                                  "consentStatus": "GRANTED"
-                                }
-                                """))
-                .andExpect(status().isCreated())
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value(PATIENT_ID.toString()));
+    }
 
-        mvc.perform(get("/patients").with(jwtFor("ROLE_PSYCHOLOGIST")))
-                .andExpect(status().isOk())
+    @Test
+    void listReturnsPsychologistPatients() throws Exception {
+        // Arrange
+        when(patientService.list(any())).thenReturn(List.of(result()));
+        var request = get("/patients").with(jwtFor("ROLE_PSYCHOLOGIST"));
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value(PATIENT_ID.toString()));
+    }
 
-        mvc.perform(get("/patients/{id}", PATIENT_ID).with(jwtFor("ROLE_PSYCHOLOGIST")))
-                .andExpect(status().isOk());
+    @Test
+    void getReturnsRequestedPatient() throws Exception {
+        // Arrange
+        when(patientService.get(any())).thenReturn(result());
+        var request = get("/patients/{id}", PATIENT_ID).with(jwtFor("ROLE_PSYCHOLOGIST"));
 
-        mvc.perform(put("/patients/{id}", PATIENT_ID)
-                        .with(jwtFor("ROLE_PSYCHOLOGIST"))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "fullName": "Updated Name",
-                                  "preferredName": null,
-                                  "birthDate": null,
-                                  "phone": null,
-                                  "emergencyContactName": null,
-                                  "emergencyContactPhone": null,
-                                  "emergencyContactRelationship": null,
-                                  "contactPreference": "PHONE",
-                                  "consentStatus": "REVOKED"
-                                }
-                                """))
-                .andExpect(status().isOk());
+        // Act
+        ResultActions response = mvc.perform(request);
 
-        mvc.perform(patch("/patients/{id}/status", PATIENT_ID)
-                        .with(jwtFor("ROLE_PSYCHOLOGIST"))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"status\":\"INACTIVE\"}"))
-                .andExpect(status().isOk());
+        // Assert
+        response.andExpect(status().isOk());
+    }
+
+    @Test
+    void updateReturnsUpdatedPatient() throws Exception {
+        // Arrange
+        when(patientService.update(any())).thenReturn(result());
+        var request = put("/patients/{id}", PATIENT_ID)
+                .with(jwtFor("ROLE_PSYCHOLOGIST"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {
+                          "fullName": "Updated Name",
+                          "preferredName": null,
+                          "birthDate": null,
+                          "phone": null,
+                          "emergencyContactName": null,
+                          "emergencyContactPhone": null,
+                          "emergencyContactRelationship": null,
+                          "contactPreference": "PHONE",
+                          "consentStatus": "REVOKED"
+                        }
+                        """);
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isOk());
+    }
+
+    @Test
+    void changeStatusReturnsUpdatedPatient() throws Exception {
+        // Arrange
+        when(patientService.changeStatus(any())).thenReturn(result());
+        var request = patch("/patients/{id}/status", PATIENT_ID)
+                .with(jwtFor("ROLE_PSYCHOLOGIST"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"status\":\"INACTIVE\"}");
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isOk());
     }
 
     @Test
     void invalidPhoneReturnsGenericBadRequest() throws Exception {
-        mvc.perform(post("/patients")
-                        .with(jwtFor("ROLE_PSYCHOLOGIST"))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "email": "patient@example.com",
-                                  "fullName": "Patient Name",
-                                  "phone": "912345678",
-                                  "contactPreference": "EMAIL",
-                                  "consentStatus": "GRANTED"
-                                }
-                                """))
-                .andExpect(status().isBadRequest())
+        // Arrange
+        var request = post("/patients")
+                .with(jwtFor("ROLE_PSYCHOLOGIST"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {
+                          "email": "patient@example.com",
+                          "fullName": "Patient Name",
+                          "phone": "912345678",
+                          "contactPreference": "EMAIL",
+                          "consentStatus": "GRANTED"
+                        }
+                        """);
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.title").value("Validation failed"))
                 .andExpect(jsonPath("$.detail").value("Request validation failed"));
     }
 
     @Test
     void mapsOwnershipFailureToForbiddenProblemDetail() throws Exception {
+        // Arrange
         when(patientService.get(any())).thenThrow(new PatientAccessDeniedException());
+        var request = get("/patients/{id}", PATIENT_ID).with(jwtFor("ROLE_PSYCHOLOGIST"));
 
-        mvc.perform(get("/patients/{id}", PATIENT_ID).with(jwtFor("ROLE_PSYCHOLOGIST")))
-                .andExpect(status().isForbidden())
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.title").value("Access denied"));
     }
 

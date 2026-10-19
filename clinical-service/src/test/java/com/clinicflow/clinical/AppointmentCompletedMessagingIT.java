@@ -20,8 +20,11 @@ import org.testcontainers.containers.RabbitMQContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -36,6 +39,9 @@ import static org.mockito.Mockito.verify;
 @Testcontainers
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class AppointmentCompletedMessagingIT {
+    private static final String EXCHANGE = "therapy.events.exchange";
+    private static final String DLQ = "clinical.appointment-events.dlq";
+
     @Container
     @ServiceConnection(name = "postgres")
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(
@@ -62,9 +68,91 @@ class AppointmentCompletedMessagingIT {
     }
 
     @Test
-    void completedAppointmentCrossesRabbitAndCreatesOneClinicalSession() {
+    void completedAppointmentCreatesSessionWithTheAppointmentModality() {
+        // Arrange
         UUID appointmentId = UUID.randomUUID();
-        Map<String, Object> event = Map.of(
+        Map<String, Object> event = appointmentCompleted(appointmentId);
+
+        // Act
+        rabbit.convertAndSend(EXCHANGE, "appointment.completed", event);
+
+        // Assert
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
+                assertThat(sessions.findByAppointmentId(new AppointmentId(appointmentId)))
+                        .hasValueSatisfying(session -> assertThat(session.modality().name()).isEqualTo("ONLINE")));
+    }
+
+    @Test
+    void redeliveredCompletedAppointmentCreatesOnlyOneSession() {
+        // Arrange
+        UUID appointmentId = UUID.randomUUID();
+        Map<String, Object> event = appointmentCompleted(appointmentId);
+
+        // Act
+        rabbit.convertAndSend(EXCHANGE, "appointment.completed", event);
+        rabbit.convertAndSend(EXCHANGE, "appointment.completed", event);
+
+        // Assert
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
+                verify(clinicalService, times(2)).processAppointmentCompleted(any()));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM session_records WHERE appointment_id = ?",
+                Long.class, appointmentId)).isEqualTo(1L);
+    }
+
+    @Test
+    void failingEventIsAttemptedFourTimes() {
+        // Arrange
+        failEveryProcessingAttempt();
+
+        // Act
+        rabbit.convertAndSend(EXCHANGE, "appointment.completed", appointmentCompleted(UUID.randomUUID()));
+
+        // Assert
+        await().atMost(Duration.ofSeconds(20)).untilAsserted(() ->
+                verify(clinicalService, times(4)).processAppointmentCompleted(any()));
+    }
+
+    @Test
+    void exhaustedEventIsDeadLetteredExactlyOnceWithFailureRoutingKey() {
+        // Arrange
+        failEveryProcessingAttempt();
+        UUID appointmentId = UUID.randomUUID();
+
+        // Act
+        rabbit.convertAndSend(EXCHANGE, "appointment.completed", appointmentCompleted(appointmentId));
+
+        // Assert
+        assertThat(deadLettersFor(appointmentId)).singleElement().satisfies(deadLetter ->
+                assertThat(deadLetter.getMessageProperties().getReceivedRoutingKey()).isEqualTo("clinical.failed"));
+    }
+
+    private void failEveryProcessingAttempt() {
+        doThrow(new IllegalStateException("forced consumer failure"))
+                .when(clinicalService).processAppointmentCompleted(any());
+    }
+
+    private List<Message> deadLettersFor(UUID appointmentId) {
+        List<Message> matches = new ArrayList<>();
+        long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
+        while (true) {
+            long timeout = matches.isEmpty()
+                    ? Duration.ofNanos(deadline - System.nanoTime()).toMillis()
+                    : 250;
+            if (timeout <= 0) {
+                return matches;
+            }
+            Message message = rabbit.receive(DLQ, timeout);
+            if (message == null) {
+                return matches;
+            }
+            if (new String(message.getBody(), StandardCharsets.UTF_8).contains(appointmentId.toString())) {
+                matches.add(message);
+            }
+        }
+    }
+
+    private Map<String, Object> appointmentCompleted(UUID appointmentId) {
+        return Map.of(
                 "eventId", UUID.randomUUID(),
                 "eventType", "AppointmentCompleted",
                 "occurredAt", Instant.now(),
@@ -73,40 +161,5 @@ class AppointmentCompletedMessagingIT {
                 "psychologistId", UUID.randomUUID(),
                 "appointmentDate", Instant.now().minusSeconds(3600),
                 "appointmentType", "ONLINE");
-
-        rabbit.convertAndSend("therapy.events.exchange", "appointment.completed", event);
-        rabbit.convertAndSend("therapy.events.exchange", "appointment.completed", event);
-
-        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
-            var session = sessions.findByAppointmentId(new AppointmentId(appointmentId));
-            assertThat(session).isPresent();
-            assertThat(session.orElseThrow().modality().name()).isEqualTo("ONLINE");
-        });
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM session_records WHERE appointment_id = ?",
-                Long.class, appointmentId)).isEqualTo(1L);
-    }
-
-    @Test
-    void retriesFourTimesThenRejectsExactlyOnceToClinicalDlq() {
-        doThrow(new IllegalStateException("forced consumer failure"))
-                .when(clinicalService).processAppointmentCompleted(any());
-        Map<String, Object> event = Map.of(
-                "eventId", UUID.randomUUID(),
-                "eventType", "AppointmentCompleted",
-                "occurredAt", Instant.now(),
-                "appointmentId", UUID.randomUUID(),
-                "patientId", UUID.randomUUID(),
-                "psychologistId", UUID.randomUUID(),
-                "appointmentDate", Instant.now().minusSeconds(3600),
-                "appointmentType", "ONLINE");
-
-        rabbit.convertAndSend("therapy.events.exchange", "appointment.completed", event);
-
-        await().atMost(Duration.ofSeconds(20)).untilAsserted(() ->
-                verify(clinicalService, times(4)).processAppointmentCompleted(any()));
-        Message deadLetter = rabbit.receive("clinical.appointment-events.dlq", 5000);
-        assertThat(deadLetter).isNotNull();
-        assertThat(deadLetter.getMessageProperties().getReceivedRoutingKey()).isEqualTo("clinical.failed");
-        assertThat(rabbit.receive("clinical.appointment-events.dlq", 250)).isNull();
     }
 }

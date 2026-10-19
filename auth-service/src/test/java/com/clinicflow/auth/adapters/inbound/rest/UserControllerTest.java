@@ -12,6 +12,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
 
 import java.util.UUID;
 
@@ -37,31 +38,56 @@ class UserControllerTest {
 
     @Test
     void rejectsUnauthenticatedRequest() throws Exception {
-        mvc.perform(get("/users/me"))
-                .andExpect(status().isUnauthorized());
+        // Arrange
+        var request = get("/users/me");
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isUnauthorized());
     }
 
     @Test
     void returnsAuthenticatedUserFromUserIdClaim() throws Exception {
+        // Arrange
         when(getUserService.get(any())).thenReturn(userResult());
+        var request = get("/users/me")
+                .with(jwt().jwt(token -> token.claim("userId", USER_ID.toString())));
 
-        mvc.perform(get("/users/me")
-                        .with(jwt().jwt(token -> token.claim("userId", USER_ID.toString()))))
-                .andExpect(status().isOk())
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(USER_ID.toString()));
     }
 
     @Test
-    void restrictsUserLookupToAdminRole() throws Exception {
+    void userLookupRejectsNonAdminRole() throws Exception {
+        // Arrange
+        var request = get("/users/{id}", USER_ID)
+                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_PSYCHOLOGIST")));
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isForbidden());
+    }
+
+    @Test
+    void userLookupReturnsUserForAdminRole() throws Exception {
+        // Arrange
         when(getUserService.get(any())).thenReturn(userResult());
+        var request = get("/users/{id}", USER_ID)
+                .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_ADMIN")));
 
-        mvc.perform(get("/users/{id}", USER_ID)
-                        .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_PSYCHOLOGIST"))))
-                .andExpect(status().isForbidden());
+        // Act
+        ResultActions response = mvc.perform(request);
 
-        mvc.perform(get("/users/{id}", USER_ID)
-                        .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
-                .andExpect(status().isOk())
+        // Assert
+        response.andExpect(status().isOk())
                 .andExpect(jsonPath("$.email").value("user@example.com"));
     }
 

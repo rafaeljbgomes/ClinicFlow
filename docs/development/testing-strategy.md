@@ -45,6 +45,28 @@ integration they describe so failures identify a narrow responsibility.
   implementation calls that are not observable behaviour. Dummies are limited
   to mandatory values that a scenario intentionally does not inspect.
 
+## Test structure
+
+Each backend and frontend test should verify one behaviour in three explicit
+steps so a failure points at a single cause:
+
+- `// Arrange` builds inputs, doubles and preconditions. It is omitted when the
+  test has nothing to arrange. Preconditions arranged through real APIs fail
+  with an explicit arrange error instead of an assertion.
+- `// Act` performs exactly one action. Exceptions are captured with
+  `catchThrowable`, MockMvc results are held in `ResultActions`, and Vitest or
+  Playwright results are stored before any `expect`.
+- `// Assert` checks only the outcome of that action. Several assertion lines
+  are allowed when they describe the same outcome, such as the status and body
+  of one response or the fields of one mapped object.
+- Validation matrices, such as one rejection per missing field, use
+  `@ParameterizedTest` or `it.each` so every case is reported separately.
+- Asynchronous messaging tests may wait for the action to settle with
+  Awaitility inside the assert step; they never chain a second action.
+- Shared fixtures (`@BeforeEach`, `beforeEach`, worker-scoped Playwright
+  fixtures) only arrange read-only state. Gateway end-to-end tests share demo
+  logins per worker because authentication routes are rate limited.
+
 ## Commands
 
 Fast feedback without Docker:

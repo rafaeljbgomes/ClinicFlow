@@ -9,7 +9,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class NotificationContentFactoryTest {
     private final NotificationContentFactory factory = new NotificationContentFactory();
 
-    @ParameterizedTest
+    @ParameterizedTest(name = "{0} produces subject \"{1}\"")
     @CsvSource({
             "PatientCreated,Patient profile created",
             "AppointmentScheduled,Appointment scheduled",
@@ -18,8 +18,13 @@ class NotificationContentFactoryTest {
             "UnexpectedEvent,ClinicFlow notification"
     })
     void createsExpectedContentForEverySupportedEvent(String eventType, String subject) {
-        var content = factory.create(new EventType(eventType));
+        // Arrange
+        EventType type = new EventType(eventType);
 
+        // Act
+        var content = factory.create(type);
+
+        // Assert
         assertThat(content.subject().value()).isEqualTo(subject);
         assertThat(content.message().value()).contains(eventType);
     }

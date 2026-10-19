@@ -35,23 +35,54 @@ describe("system health role check", () => {
 
   afterEach(() => vi.clearAllMocks());
 
-  it("uses verified administrator claims and queries each health endpoint", async () => {
-    const response = await GET();
+  describe("for an administrator", () => {
+    it("verifies the session access token", async () => {
+      // Act
+      await GET();
 
-    expect(response.status).toBe(200);
-    expect(verifyAccessTokenMock).toHaveBeenCalledWith("signed-access-token");
-    expect(backendHealthGetMock).toHaveBeenCalledTimes(5);
-  });
-
-  it("rejects a non-administrator before querying health endpoints", async () => {
-    verifyAccessTokenMock.mockResolvedValue({
-      status: "verified",
-      principal: { ...adminPrincipal, role: "PSYCHOLOGIST" },
+      // Assert
+      expect(verifyAccessTokenMock).toHaveBeenCalledWith("signed-access-token");
     });
 
-    const response = await GET();
+    it("queries each service health endpoint", async () => {
+      // Act
+      await GET();
 
-    expect(response.status).toBe(403);
-    expect(backendHealthGetMock).not.toHaveBeenCalled();
+      // Assert
+      expect(backendHealthGetMock).toHaveBeenCalledTimes(5);
+    });
+
+    it("responds with 200", async () => {
+      // Act
+      const response = await GET();
+
+      // Assert
+      expect(response.status).toBe(200);
+    });
+  });
+
+  describe("for a non-administrator", () => {
+    beforeEach(() => {
+      verifyAccessTokenMock.mockResolvedValue({
+        status: "verified",
+        principal: { ...adminPrincipal, role: "PSYCHOLOGIST" },
+      });
+    });
+
+    it("responds with 403", async () => {
+      // Act
+      const response = await GET();
+
+      // Assert
+      expect(response.status).toBe(403);
+    });
+
+    it("rejects before querying health endpoints", async () => {
+      // Act
+      await GET();
+
+      // Assert
+      expect(backendHealthGetMock).not.toHaveBeenCalled();
+    });
   });
 });

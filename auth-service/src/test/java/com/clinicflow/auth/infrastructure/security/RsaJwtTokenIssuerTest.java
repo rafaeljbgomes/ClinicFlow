@@ -6,7 +6,9 @@ import com.clinicflow.auth.domain.PasswordHash;
 import com.clinicflow.auth.domain.Role;
 import com.clinicflow.auth.domain.User;
 import com.clinicflow.auth.domain.UserId;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 
 import java.security.KeyPair;
@@ -17,9 +19,45 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class RsaJwtTokenIssuerTest {
+    private static KeyPair pair;
+
+    @BeforeAll
+    static void generateKeyPair() throws Exception {
+        pair = PemUtilsTest.keyPair();
+    }
+
     @Test
-    void signsRs256TokenWithExpectedClaimsAndTtl() throws Exception {
-        KeyPair pair = PemUtilsTest.keyPair();
+    void reportsConfiguredTtlInSeconds() {
+        // Arrange
+        RsaJwtTokenIssuer issuer = issuer();
+
+        // Act
+        var issued = issuer.issue(user());
+
+        // Assert
+        assertThat(issued.expiresInSeconds()).isEqualTo(1800);
+    }
+
+    @Test
+    void signsRs256TokenWithUserClaims() {
+        // Arrange
+        RsaJwtTokenIssuer issuer = issuer();
+        User user = user();
+
+        // Act
+        var issued = issuer.issue(user);
+
+        // Assert
+        Jwt jwt = NimbusJwtDecoder.withPublicKey((RSAPublicKey) pair.getPublic()).build()
+                .decode(issued.value());
+        assertThat(jwt.getSubject()).isEqualTo(user.id().value().toString());
+        assertThat(jwt.getClaimAsString("userId")).isEqualTo(user.id().value().toString());
+        assertThat(jwt.getClaimAsString("email")).isEqualTo("user@example.com");
+        assertThat(jwt.getClaimAsString("role")).isEqualTo("PSYCHOLOGIST");
+        assertThat(jwt.getClaimAsString("iss")).isEqualTo("clinicflow-auth");
+    }
+
+    private RsaJwtTokenIssuer issuer() {
         JwtProperties properties = new JwtProperties(
                 "clinicflow-auth",
                 30,
@@ -28,7 +66,11 @@ class RsaJwtTokenIssuerTest {
                 PemUtilsTest.pem("PUBLIC KEY", pair.getPublic().getEncoded()),
                 null
         );
-        User user = User.create(
+        return new RsaJwtTokenIssuer(properties);
+    }
+
+    private User user() {
+        return User.create(
                 new UserId(UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")),
                 new EmailAddress("user@example.com"),
                 new PasswordHash("encoded"),
@@ -36,16 +78,5 @@ class RsaJwtTokenIssuerTest {
                 new FullName("Clinic User"),
                 Instant.parse("2026-06-01T10:00:00Z")
         );
-
-        var issued = new RsaJwtTokenIssuer(properties).issue(user);
-        var jwt = NimbusJwtDecoder.withPublicKey((RSAPublicKey) pair.getPublic()).build()
-                .decode(issued.value());
-
-        assertThat(issued.expiresInSeconds()).isEqualTo(1800);
-        assertThat(jwt.getSubject()).isEqualTo(user.id().value().toString());
-        assertThat(jwt.getClaimAsString("userId")).isEqualTo(user.id().value().toString());
-        assertThat(jwt.getClaimAsString("email")).isEqualTo("user@example.com");
-        assertThat(jwt.getClaimAsString("role")).isEqualTo("PSYCHOLOGIST");
-        assertThat(jwt.getClaimAsString("iss")).isEqualTo("clinicflow-auth");
     }
 }

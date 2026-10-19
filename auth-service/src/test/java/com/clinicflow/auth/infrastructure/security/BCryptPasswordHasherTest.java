@@ -1,5 +1,6 @@
 package com.clinicflow.auth.infrastructure.security;
 
+import com.clinicflow.auth.domain.PasswordHash;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
@@ -10,11 +11,35 @@ class BCryptPasswordHasherTest {
             new BCryptPasswordHasher(new BCryptPasswordEncoder(4));
 
     @Test
-    void hashesAndVerifiesPasswordWithoutStoringPlainText() {
-        var hash = hasher.hash("TestingPass123!");
+    void hashDoesNotStorePlainTextPassword() {
+        // Act
+        PasswordHash hash = hasher.hash("TestingPass123!");
 
+        // Assert
         assertThat(hash.value()).doesNotContain("TestingPass123!");
-        assertThat(hasher.matches("TestingPass123!", hash)).isTrue();
-        assertThat(hasher.matches("wrong-password", hash)).isFalse();
+    }
+
+    @Test
+    void matchesAcceptsTheOriginalPassword() {
+        // Arrange
+        PasswordHash hash = hasher.hash("TestingPass123!");
+
+        // Act
+        boolean matches = hasher.matches("TestingPass123!", hash);
+
+        // Assert
+        assertThat(matches).isTrue();
+    }
+
+    @Test
+    void matchesRejectsADifferentPassword() {
+        // Arrange
+        PasswordHash hash = hasher.hash("TestingPass123!");
+
+        // Act
+        boolean matches = hasher.matches("wrong-password", hash);
+
+        // Assert
+        assertThat(matches).isFalse();
     }
 }

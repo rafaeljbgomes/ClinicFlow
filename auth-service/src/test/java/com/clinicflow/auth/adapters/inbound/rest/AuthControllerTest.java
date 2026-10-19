@@ -1,6 +1,5 @@
 package com.clinicflow.auth.adapters.inbound.rest;
 
-import com.clinicflow.auth.adapters.inbound.rest.dto.UserResponse;
 import com.clinicflow.auth.application.LoginResult;
 import com.clinicflow.auth.application.LoginService;
 import com.clinicflow.auth.application.RegisterUserService;
@@ -15,6 +14,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
 
 import java.util.UUID;
 
@@ -41,19 +41,24 @@ class AuthControllerTest {
 
     @Test
     void registrationIsPublicAndReturnsCreatedUser() throws Exception {
+        // Arrange
         when(registerUserService.register(any())).thenReturn(userResult());
+        var request = post("/auth/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {
+                          "email": "user@example.com",
+                          "password": "TestingPass123!",
+                          "role": "PSYCHOLOGIST",
+                          "fullName": "Clinic User"
+                        }
+                        """);
 
-        mvc.perform(post("/auth/register")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "email": "user@example.com",
-                                  "password": "TestingPass123!",
-                                  "role": "PSYCHOLOGIST",
-                                  "fullName": "Clinic User"
-                                }
-                                """))
-                .andExpect(status().isCreated())
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value(USER_ID.toString()))
                 .andExpect(jsonPath("$.email").value("user@example.com"))
                 .andExpect(jsonPath("$.role").value("PSYCHOLOGIST"));
@@ -61,22 +66,27 @@ class AuthControllerTest {
 
     @Test
     void loginIsPublicAndReturnsBearerToken() throws Exception {
+        // Arrange
         when(loginService.login(any())).thenReturn(new LoginResult(
                 "signed-jwt",
                 "Bearer",
                 1800,
                 userResult()
         ));
+        var request = post("/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {
+                          "email": "user@example.com",
+                          "password": "TestingPass123!"
+                        }
+                        """);
 
-        mvc.perform(post("/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "email": "user@example.com",
-                                  "password": "TestingPass123!"
-                                }
-                                """))
-                .andExpect(status().isOk())
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isOk())
                 .andExpect(jsonPath("$.accessToken").value("signed-jwt"))
                 .andExpect(jsonPath("$.tokenType").value("Bearer"))
                 .andExpect(jsonPath("$.expiresInSeconds").value(1800));
@@ -84,17 +94,23 @@ class AuthControllerTest {
 
     @Test
     void invalidRequestReturnsGenericBadRequest() throws Exception {
-        mvc.perform(post("/auth/register")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "email": "invalid",
-                                  "password": "TestingPass123!",
-                                  "role": "PSYCHOLOGIST",
-                                  "fullName": "Clinic User"
-                                }
-                                """))
-                .andExpect(status().isBadRequest())
+        // Arrange
+        var request = post("/auth/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {
+                          "email": "invalid",
+                          "password": "TestingPass123!",
+                          "role": "PSYCHOLOGIST",
+                          "fullName": "Clinic User"
+                        }
+                        """);
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.title").value("Validation failed"))
                 .andExpect(jsonPath("$.detail").value("Request validation failed"));
     }

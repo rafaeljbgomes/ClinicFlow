@@ -25,36 +25,70 @@ class DemoDataBootstrapTest {
     @Test
     void canBeConstructedBySpring() {
         try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            // Arrange
             context.getEnvironment().getPropertySources().addFirst(demoBootstrapProperty());
             context.registerBean(NotificationRepository.class, InMemoryNotificationRepository::new);
             context.registerBean(DemoDataBootstrap.class);
 
+            // Act
             context.refresh();
 
+            // Assert
             assertThat(context.getBean(DemoDataBootstrap.class)).isNotNull();
         }
     }
 
-    private static MapPropertySource demoBootstrapProperty() {
-        return new MapPropertySource("test", Map.of("clinicflow.demo.bootstrap.enabled", "true"));
+    @Test
+    void seedsNotificationsInEveryDeliveryStatus() throws Exception {
+        // Arrange
+        InMemoryNotificationRepository notifications = new InMemoryNotificationRepository();
+        DemoDataBootstrap bootstrap = bootstrap(notifications);
+
+        // Act
+        bootstrap.run(null);
+
+        // Assert
+        assertThat(notifications.records().values()).extracting(Notification::status)
+                .contains(NotificationStatus.SENT, NotificationStatus.PENDING, NotificationStatus.FAILED);
     }
 
     @Test
-    void seedsDemoNotificationsIdempotently() throws Exception {
+    void seedsNotificationsOfEveryType() throws Exception {
+        // Arrange
         InMemoryNotificationRepository notifications = new InMemoryNotificationRepository();
-        DemoDataBootstrap bootstrap = new DemoDataBootstrap(
+        DemoDataBootstrap bootstrap = bootstrap(notifications);
+
+        // Act
+        bootstrap.run(null);
+
+        // Assert
+        assertThat(notifications.records().values()).extracting(Notification::type)
+                .contains(NotificationType.EMAIL, NotificationType.SYSTEM);
+    }
+
+    @Test
+    void repeatedRunDoesNotDuplicateDemoNotifications() throws Exception {
+        // Arrange
+        InMemoryNotificationRepository notifications = new InMemoryNotificationRepository();
+        DemoDataBootstrap bootstrap = bootstrap(notifications);
+        bootstrap.run(null);
+
+        // Act
+        bootstrap.run(null);
+
+        // Assert
+        assertThat(notifications.records()).hasSize(5);
+    }
+
+    private static DemoDataBootstrap bootstrap(InMemoryNotificationRepository notifications) {
+        return new DemoDataBootstrap(
                 notifications,
                 Clock.fixed(Instant.parse("2026-07-05T10:00:00Z"), ZoneOffset.UTC)
         );
+    }
 
-        bootstrap.run(null);
-        bootstrap.run(null);
-
-        assertThat(notifications.records()).hasSize(5);
-        assertThat(notifications.records().values()).extracting(Notification::status)
-                .contains(NotificationStatus.SENT, NotificationStatus.PENDING, NotificationStatus.FAILED);
-        assertThat(notifications.records().values()).extracting(Notification::type)
-                .contains(NotificationType.EMAIL, NotificationType.SYSTEM);
+    private static MapPropertySource demoBootstrapProperty() {
+        return new MapPropertySource("test", Map.of("clinicflow.demo.bootstrap.enabled", "true"));
     }
 
     private static final class InMemoryNotificationRepository implements NotificationRepository {

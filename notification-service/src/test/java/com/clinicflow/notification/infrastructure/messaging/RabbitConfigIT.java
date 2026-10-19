@@ -3,6 +3,8 @@ package com.clinicflow.notification.infrastructure.messaging;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.amqp.core.Binding;
 import org.springframework.amqp.core.Declarables;
 import org.springframework.amqp.core.Message;
@@ -65,44 +67,44 @@ class RabbitConfigIT {
         }
     }
 
-    @Test
-    void routesAllDeclaredDomainEventsToNotificationQueue() {
-        for (String routingKey : new String[]{
-                "patient.created",
-                "appointment.scheduled",
-                "appointment.rescheduled",
-                "appointment.cancelled"
-        }) {
-            rabbitTemplate.convertAndSend(EXCHANGE, routingKey, routingKey);
-        }
+    @ParameterizedTest(name = "routes {0} to the notification queue")
+    @ValueSource(strings = {
+            "patient.created",
+            "appointment.scheduled",
+            "appointment.rescheduled",
+            "appointment.cancelled"
+    })
+    void routesDeclaredDomainEventToNotificationQueue(String routingKey) {
+        // Act
+        rabbitTemplate.convertAndSend(EXCHANGE, routingKey, routingKey);
 
-        assertThat(receivedBodies(4))
-                .containsExactlyInAnyOrder(
-                        "patient.created",
-                        "appointment.scheduled",
-                        "appointment.rescheduled",
-                        "appointment.cancelled"
-                );
+        // Assert
+        Message message = rabbitTemplate.receive(QUEUE, 5000);
+        assertThat(message).isNotNull();
+        assertThat(body(message)).isEqualTo(routingKey);
     }
 
     @Test
-    void routesDeadLettersToDlq() {
+    void routesNotificationFailuresToDlq() {
+        // Act
         rabbitTemplate.convertAndSend(DLX, FAILED_ROUTING_KEY, "failed-event");
-        rabbitTemplate.convertAndSend(DLX, "clinical.failed", "clinical-failure");
 
+        // Assert
         Message message = rabbitTemplate.receive(DLQ, 5000);
         assertThat(message).isNotNull();
-        assertThat(new String(message.getBody(), StandardCharsets.UTF_8)).isEqualTo("failed-event");
-        assertThat(rabbitTemplate.receive(DLQ, 250)).isNull();
+        assertThat(body(message)).isEqualTo("failed-event");
     }
 
-    private java.util.List<String> receivedBodies(int count) {
-        java.util.List<String> bodies = new java.util.ArrayList<>();
-        for (int index = 0; index < count; index++) {
-            Message message = rabbitTemplate.receive(QUEUE, 5000);
-            assertThat(message).isNotNull();
-            bodies.add(new String(message.getBody(), StandardCharsets.UTF_8));
-        }
-        return bodies;
+    @Test
+    void ignoresDeadLettersFromOtherServices() {
+        // Act
+        rabbitTemplate.convertAndSend(DLX, "clinical.failed", "clinical-failure");
+
+        // Assert
+        assertThat(rabbitTemplate.receive(DLQ, 1000)).isNull();
+    }
+
+    private String body(Message message) {
+        return new String(message.getBody(), StandardCharsets.UTF_8);
     }
 }

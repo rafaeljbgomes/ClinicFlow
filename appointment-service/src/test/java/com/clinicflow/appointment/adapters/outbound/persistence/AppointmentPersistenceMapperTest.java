@@ -22,25 +22,45 @@ class AppointmentPersistenceMapperTest {
 
     @Test
     void roundTripsDomainAndPersistenceModels() {
+        // Arrange
         Appointment appointment = appointment();
 
+        // Act
         Appointment restored = mapper.toDomain(mapper.toJpa(appointment));
 
+        // Assert
         assertThat(restored).isEqualTo(appointment);
         assertThat(restored.scheduledAt()).isEqualTo(appointment.scheduledAt());
     }
 
     @Test
-    void repositorySaveKeepsTheSuppliedDomainInstance() {
+    void repositorySavePersistsTheMappedEntity() {
+        // Arrange
         SpringDataAppointmentJpaRepository delegate = mock(SpringDataAppointmentJpaRepository.class);
         AppointmentPersistenceMapper mockedMapper = mock(AppointmentPersistenceMapper.class);
         Appointment appointment = appointment();
         JpaAppointmentEntity jpa = mapper.toJpa(appointment);
         when(mockedMapper.toJpa(appointment)).thenReturn(jpa);
+        JpaAppointmentRepository repository = new JpaAppointmentRepository(delegate, mockedMapper);
 
-        new JpaAppointmentRepository(delegate, mockedMapper).save(appointment);
+        // Act
+        repository.save(appointment);
 
+        // Assert
         verify(delegate).save(jpa);
+    }
+
+    @Test
+    void repositorySaveKeepsTheSuppliedDomainInstance() {
+        // Arrange
+        SpringDataAppointmentJpaRepository delegate = mock(SpringDataAppointmentJpaRepository.class);
+        Appointment appointment = appointment();
+        JpaAppointmentRepository repository = new JpaAppointmentRepository(delegate, mapper);
+
+        // Act
+        repository.save(appointment);
+
+        // Assert
         assertThat(appointment.type()).isEqualTo(AppointmentType.ONLINE);
     }
 

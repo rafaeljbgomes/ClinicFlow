@@ -1,9 +1,15 @@
 package com.clinicflow.notification.adapters.inbound.rest;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -22,32 +28,72 @@ import static org.mockito.Mockito.mock;
 class ApiProblemContractTest {
     private final ApiExceptionHandler handler = new ApiExceptionHandler();
 
-    @Test
-    void mapsFrameworkRequestFailuresToStableProblemCodes() {
-        assertProblem(handler.malformed(new HttpMessageNotReadableException(
-                "bad json", new MockHttpInputMessage(new byte[0]))),
-                HttpStatus.BAD_REQUEST, "malformed_request");
-        assertProblem(handler.invalidParameter(new MethodArgumentTypeMismatchException(
-                "not-a-uuid", UUID.class, "id", mock(MethodParameter.class), new IllegalArgumentException())),
-                HttpStatus.BAD_REQUEST, "invalid_parameter");
-        assertProblem(handler.missingParameter(new MissingServletRequestParameterException("id", "UUID")),
-                HttpStatus.BAD_REQUEST, "missing_parameter");
-        assertProblem(handler.methodNotAllowed(new HttpRequestMethodNotSupportedException("TRACE")),
-                HttpStatus.METHOD_NOT_ALLOWED, "method_not_allowed");
-        assertProblem(handler.unsupportedMediaType(new HttpMediaTypeNotSupportedException("text/plain")),
-                HttpStatus.UNSUPPORTED_MEDIA_TYPE, "unsupported_media_type");
+    static Stream<Arguments> frameworkFailures() {
+        return Stream.of(
+                Arguments.of("malformed body",
+                        (Function<ApiExceptionHandler, ProblemDetail>) handler -> handler.malformed(
+                                new HttpMessageNotReadableException("bad json", new MockHttpInputMessage(new byte[0]))),
+                        HttpStatus.BAD_REQUEST, "malformed_request"),
+                Arguments.of("invalid parameter",
+                        (Function<ApiExceptionHandler, ProblemDetail>) handler -> handler.invalidParameter(
+                                new MethodArgumentTypeMismatchException("not-a-uuid", UUID.class, "id",
+                                        mock(MethodParameter.class), new IllegalArgumentException())),
+                        HttpStatus.BAD_REQUEST, "invalid_parameter"),
+                Arguments.of("missing parameter",
+                        (Function<ApiExceptionHandler, ProblemDetail>) handler -> handler.missingParameter(
+                                new MissingServletRequestParameterException("id", "UUID")),
+                        HttpStatus.BAD_REQUEST, "missing_parameter"),
+                Arguments.of("unsupported method",
+                        (Function<ApiExceptionHandler, ProblemDetail>) handler -> handler.methodNotAllowed(
+                                new HttpRequestMethodNotSupportedException("TRACE")),
+                        HttpStatus.METHOD_NOT_ALLOWED, "method_not_allowed"),
+                Arguments.of("unsupported media type",
+                        (Function<ApiExceptionHandler, ProblemDetail>) handler -> handler.unsupportedMediaType(
+                                new HttpMediaTypeNotSupportedException("text/plain")),
+                        HttpStatus.UNSUPPORTED_MEDIA_TYPE, "unsupported_media_type"));
+    }
+
+    @ParameterizedTest(name = "maps {0} to {3}")
+    @MethodSource("frameworkFailures")
+    void mapsFrameworkRequestFailureToStableProblemCode(String failure,
+                                                         Function<ApiExceptionHandler, ProblemDetail> handle,
+                                                         HttpStatus expectedStatus, String expectedCode) {
+        // Act
+        ProblemDetail problem = handle.apply(handler);
+
+        // Assert
+        assertProblem(problem, expectedStatus, expectedCode);
     }
 
     @Test
-    void exposesGroupedFieldErrorsWithoutLosingTheProblemContract() {
+    void validationFailureKeepsTheProblemContract() {
+        // Arrange
+        MethodArgumentNotValidException failure = invalidEmailFailure();
+
+        // Act
+        ProblemDetail problem = handler.beanValidation(failure);
+
+        // Assert
+        assertProblem(problem, HttpStatus.BAD_REQUEST, "validation_failed");
+    }
+
+    @Test
+    void validationFailureExposesGroupedFieldErrors() {
+        // Arrange
+        MethodArgumentNotValidException failure = invalidEmailFailure();
+
+        // Act
+        ProblemDetail problem = handler.beanValidation(failure);
+
+        // Assert
+        assertThat(problem.getProperties()).containsEntry(
+                "fieldErrors", Map.of("email", List.of("Must be a valid email")));
+    }
+
+    private static MethodArgumentNotValidException invalidEmailFailure() {
         MapBindingResult bindingResult = new MapBindingResult(new HashMap<>(), "request");
         bindingResult.rejectValue("email", "invalid", "Must be a valid email");
-        ProblemDetail problem = handler.beanValidation(new MethodArgumentNotValidException(
-                mock(MethodParameter.class), bindingResult));
-
-        assertProblem(problem, HttpStatus.BAD_REQUEST, "validation_failed");
-        assertThat(problem.getProperties()).containsEntry(
-                "fieldErrors", Map.of("email", java.util.List.of("Must be a valid email")));
+        return new MethodArgumentNotValidException(mock(MethodParameter.class), bindingResult);
     }
 
     private static void assertProblem(ProblemDetail problem, HttpStatus status, String code) {

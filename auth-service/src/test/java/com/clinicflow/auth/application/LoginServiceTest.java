@@ -24,9 +24,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
+import static org.assertj.core.api.Assertions.catchThrowable;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -50,13 +49,16 @@ class LoginServiceTest {
 
     @Test
     void authenticatesEnabledUserAndReturnsIssuedToken() {
+        // Arrange
         User user = user(true);
         when(repository.findByEmail(command.email())).thenReturn(Optional.of(user));
         when(passwordHasher.matches(command.password(), user.passwordHash())).thenReturn(true);
         when(tokenIssuer.issue(user)).thenReturn(new TokenIssuer.IssuedToken("jwt", 1800));
 
+        // Act
         LoginResult result = service.login(command);
 
+        // Assert
         assertThat(result.accessToken()).isEqualTo("jwt");
         assertThat(result.tokenType()).isEqualTo("Bearer");
         assertThat(result.expiresInSeconds()).isEqualTo(1800);
@@ -64,44 +66,79 @@ class LoginServiceTest {
     }
 
     @Test
-    void rejectsMissingUserWithoutCheckingPassword() {
+    void rejectsUnknownEmail() {
+        // Arrange
         when(repository.findByEmail(command.email())).thenReturn(Optional.empty());
 
-        assertInvalidCredentials();
+        // Act
+        Throwable thrown = catchThrowable(() -> service.login(command));
 
-        verify(passwordHasher, never()).matches(
-                org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.any()
-        );
+        // Assert
+        assertThat(thrown).isInstanceOf(InvalidCredentialsException.class);
     }
 
     @Test
-    void rejectsDisabledUserWithoutCheckingPassword() {
+    void unknownEmailStopsBeforeCredentialVerification() {
+        // Arrange
+        when(repository.findByEmail(command.email())).thenReturn(Optional.empty());
+
+        // Act
+        catchThrowable(() -> service.login(command));
+
+        // Assert
+        verifyNoInteractions(passwordHasher, tokenIssuer);
+    }
+
+    @Test
+    void rejectsDisabledUser() {
+        // Arrange
         when(repository.findByEmail(command.email())).thenReturn(Optional.of(user(false)));
 
-        assertInvalidCredentials();
+        // Act
+        Throwable thrown = catchThrowable(() -> service.login(command));
 
-        verify(passwordHasher, never()).matches(
-                org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.any()
-        );
+        // Assert
+        assertThat(thrown).isInstanceOf(InvalidCredentialsException.class);
     }
 
     @Test
-    void rejectsWrongPasswordWithoutIssuingToken() {
+    void disabledUserStopsBeforeCredentialVerification() {
+        // Arrange
+        when(repository.findByEmail(command.email())).thenReturn(Optional.of(user(false)));
+
+        // Act
+        catchThrowable(() -> service.login(command));
+
+        // Assert
+        verifyNoInteractions(passwordHasher, tokenIssuer);
+    }
+
+    @Test
+    void rejectsWrongPassword() {
+        // Arrange
         User user = user(true);
         when(repository.findByEmail(command.email())).thenReturn(Optional.of(user));
         when(passwordHasher.matches(command.password(), user.passwordHash())).thenReturn(false);
 
-        assertInvalidCredentials();
+        // Act
+        Throwable thrown = catchThrowable(() -> service.login(command));
 
-        verify(tokenIssuer, never()).issue(org.mockito.ArgumentMatchers.any());
+        // Assert
+        assertThat(thrown).isInstanceOf(InvalidCredentialsException.class);
     }
 
-    private void assertInvalidCredentials() {
-        assertThatThrownBy(() -> service.login(command))
-                .isInstanceOf(InvalidCredentialsException.class);
-        verify(tokenIssuer, never()).issue(org.mockito.ArgumentMatchers.any());
+    @Test
+    void wrongPasswordDoesNotIssueToken() {
+        // Arrange
+        User user = user(true);
+        when(repository.findByEmail(command.email())).thenReturn(Optional.of(user));
+        when(passwordHasher.matches(command.password(), user.passwordHash())).thenReturn(false);
+
+        // Act
+        catchThrowable(() -> service.login(command));
+
+        // Assert
+        verifyNoInteractions(tokenIssuer);
     }
 
     private User user(boolean enabled) {

@@ -22,26 +22,46 @@ class UserPersistenceMapperTest {
 
     @Test
     void roundTripsDomainAndPersistenceModels() {
+        // Arrange
         User user = user();
 
+        // Act
         User restored = mapper.toDomain(mapper.toJpa(user));
 
+        // Assert
         assertThat(restored).isEqualTo(user);
         assertThat(restored.email()).isEqualTo(user.email());
         assertThat(restored.fullName()).isEqualTo(user.fullName());
     }
 
     @Test
-    void repositorySavePersistsWithoutReturningAReplacementEntity() {
+    void repositorySavePersistsTheMappedEntity() {
+        // Arrange
         SpringDataUserJpaRepository delegate = mock(SpringDataUserJpaRepository.class);
         UserPersistenceMapper mockedMapper = mock(UserPersistenceMapper.class);
         User user = user();
         JpaUserEntity jpa = mapper.toJpa(user);
         when(mockedMapper.toJpa(user)).thenReturn(jpa);
+        JpaUserRepository repository = new JpaUserRepository(delegate, mockedMapper);
 
-        new JpaUserRepository(delegate, mockedMapper).save(user);
+        // Act
+        repository.save(user);
 
+        // Assert
         verify(delegate).save(jpa);
+    }
+
+    @Test
+    void repositorySaveKeepsTheSuppliedDomainUser() {
+        // Arrange
+        SpringDataUserJpaRepository delegate = mock(SpringDataUserJpaRepository.class);
+        User user = user();
+        JpaUserRepository repository = new JpaUserRepository(delegate, mapper);
+
+        // Act
+        repository.save(user);
+
+        // Assert
         assertThat(user.email()).isEqualTo(new EmailAddress("user@example.com"));
     }
 

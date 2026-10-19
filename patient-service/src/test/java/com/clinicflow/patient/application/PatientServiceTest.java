@@ -39,7 +39,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -67,8 +68,236 @@ class PatientServiceTest {
     }
 
     @Test
-    void createsPatientThenPublishesEvent() {
+    void createSavesPatientBeforePublishingEvent() {
+        // Arrange
+        CreatePatientCommand command = completeCreateCommand();
+
+        // Act
+        service.create(command);
+
+        // Assert
+        InOrder order = inOrder(repository, publisher);
+        order.verify(repository).save(any(Patient.class));
+        order.verify(publisher).publish(any(PatientCreatedEvent.class));
+    }
+
+    @Test
+    void createPublishesEventForTheSavedPatient() {
+        // Arrange
+        CreatePatientCommand command = completeCreateCommand();
+
+        // Act
+        service.create(command);
+
+        // Assert
+        PatientCreatedEvent event = publishedEvent();
+        assertThat(event.patientId()).isEqualTo(savedPatient().id());
+        assertThat(event.psychologistId()).isEqualTo(OWNER);
+    }
+
+    @Test
+    void createReturnsActiveResultForTheSavedPatient() {
+        // Arrange
+        CreatePatientCommand command = completeCreateCommand();
+
+        // Act
+        var result = service.create(command);
+
+        // Assert
+        assertThat(result.id()).isEqualTo(savedPatient().id().value());
+        assertThat(result.status()).isEqualTo(PatientStatus.ACTIVE);
+    }
+
+    @Test
+    void defaultsContactPreferenceOnCreateWhenMissing() {
+        // Arrange
         CreatePatientCommand command = new CreatePatientCommand(
+                OWNER,
+                new EmailAddress("patient@example.com"),
+                new FullName("Patient Name"),
+                null,
+                null,
+                null,
+                null,
+                null,
+                ConsentStatus.GRANTED
+        );
+
+        // Act
+        var result = service.create(command);
+
+        // Assert
+        assertThat(result.contactPreference()).isEqualTo(ContactPreference.EMAIL);
+    }
+
+    @Test
+    void listsOnlyRepositoryResultsForPsychologist() {
+        // Arrange
+        when(repository.findByPsychologistId(OWNER)).thenReturn(List.of(patient()));
+
+        // Act
+        var results = service.list(new ListPatientsQuery(OWNER));
+
+        // Assert
+        assertThat(results).singleElement().satisfies(result -> {
+            assertThat(result.id()).isEqualTo(PATIENT_ID.value());
+            assertThat(result.psychologistId()).isEqualTo(OWNER.value());
+        });
+    }
+
+    @Test
+    void getsOwnedPatient() {
+        // Arrange
+        when(repository.findById(PATIENT_ID)).thenReturn(Optional.of(patient()));
+
+        // Act
+        var result = service.get(new GetPatientQuery(OWNER, PATIENT_ID));
+
+        // Assert
+        assertThat(result.id()).isEqualTo(PATIENT_ID.value());
+    }
+
+    @Test
+    void updatePersistsTheLoadedEntity() {
+        // Arrange
+        Patient patient = patient();
+        when(repository.findById(PATIENT_ID)).thenReturn(Optional.of(patient));
+
+        // Act
+        service.update(phoneContactUpdate());
+
+        // Assert
+        verify(repository).save(patient);
+    }
+
+    @Test
+    void updateReturnsTheChangedProfile() {
+        // Arrange
+        when(repository.findById(PATIENT_ID)).thenReturn(Optional.of(patient()));
+
+        // Act
+        var result = service.update(phoneContactUpdate());
+
+        // Assert
+        assertThat(result.fullName()).isEqualTo("Updated Name");
+        assertThat(result.phone()).isNull();
+        assertThat(result.contactPreference()).isEqualTo(ContactPreference.PHONE);
+        assertThat(result.consentStatus()).isEqualTo(ConsentStatus.REVOKED);
+    }
+
+    @Test
+    void keepsCurrentContactPreferenceWhenUpdateOmitsIt() {
+        // Arrange
+        when(repository.findById(PATIENT_ID)).thenReturn(Optional.of(patient()));
+        UpdatePatientCommand command = new UpdatePatientCommand(
+                OWNER,
+                PATIENT_ID,
+                new FullName("Updated Name"),
+                null,
+                null,
+                null,
+                null,
+                null,
+                ConsentStatus.GRANTED
+        );
+
+        // Act
+        var result = service.update(command);
+
+        // Assert
+        assertThat(result.contactPreference()).isEqualTo(ContactPreference.EMAIL);
+    }
+
+    @Test
+    void changeStatusPersistsTheLoadedEntity() {
+        // Arrange
+        Patient patient = patient();
+        when(repository.findById(PATIENT_ID)).thenReturn(Optional.of(patient));
+
+        // Act
+        service.changeStatus(new ChangePatientStatusCommand(OWNER, PATIENT_ID, PatientStatus.INACTIVE));
+
+        // Assert
+        verify(repository).save(patient);
+    }
+
+    @Test
+    void changeStatusReturnsTheNewStatus() {
+        // Arrange
+        when(repository.findById(PATIENT_ID)).thenReturn(Optional.of(patient()));
+
+        // Act
+        var result = service.changeStatus(
+                new ChangePatientStatusCommand(OWNER, PATIENT_ID, PatientStatus.INACTIVE));
+
+        // Assert
+        assertThat(result.status()).isEqualTo(PatientStatus.INACTIVE);
+    }
+
+    @Test
+    void getRejectsMissingPatient() {
+        // Arrange
+        when(repository.findById(PATIENT_ID)).thenReturn(Optional.empty());
+
+        // Act
+        Throwable thrown = catchThrowable(() -> service.get(new GetPatientQuery(OWNER, PATIENT_ID)));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(PatientNotFoundException.class);
+    }
+
+    @Test
+    void missingPatientIsNeverSaved() {
+        // Arrange
+        when(repository.findById(PATIENT_ID)).thenReturn(Optional.empty());
+
+        // Act
+        catchThrowable(() -> service.get(new GetPatientQuery(OWNER, PATIENT_ID)));
+
+        // Assert
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void changeStatusRejectsPatientOwnedByAnotherPsychologist() {
+        // Arrange
+        when(repository.findById(PATIENT_ID)).thenReturn(Optional.of(patient()));
+
+        // Act
+        Throwable thrown = catchThrowable(() -> service.changeStatus(
+                new ChangePatientStatusCommand(OTHER, PATIENT_ID, PatientStatus.INACTIVE)));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(PatientAccessDeniedException.class);
+    }
+
+    @Test
+    void foreignPatientStatusChangeIsNeverSaved() {
+        // Arrange
+        when(repository.findById(PATIENT_ID)).thenReturn(Optional.of(patient()));
+
+        // Act
+        catchThrowable(() -> service.changeStatus(
+                new ChangePatientStatusCommand(OTHER, PATIENT_ID, PatientStatus.INACTIVE)));
+
+        // Assert
+        verify(repository, never()).save(any());
+    }
+
+    private Patient savedPatient() {
+        ArgumentCaptor<Patient> captor = ArgumentCaptor.forClass(Patient.class);
+        verify(repository).save(captor.capture());
+        return captor.getValue();
+    }
+
+    private PatientCreatedEvent publishedEvent() {
+        ArgumentCaptor<PatientCreatedEvent> captor = ArgumentCaptor.forClass(PatientCreatedEvent.class);
+        verify(publisher).publish(captor.capture());
+        return captor.getValue();
+    }
+
+    private CreatePatientCommand completeCreateCommand() {
+        return new CreatePatientCommand(
                 OWNER,
                 new EmailAddress("patient@example.com"),
                 new FullName("Patient Name"),
@@ -79,66 +308,10 @@ class PatientServiceTest {
                 ContactPreference.EMAIL,
                 ConsentStatus.GRANTED
         );
-
-        var result = service.create(command);
-
-        ArgumentCaptor<Patient> patientCaptor = ArgumentCaptor.forClass(Patient.class);
-        ArgumentCaptor<PatientCreatedEvent> eventCaptor = ArgumentCaptor.forClass(PatientCreatedEvent.class);
-        InOrder order = inOrder(repository, publisher);
-        order.verify(repository).save(patientCaptor.capture());
-        order.verify(publisher).publish(eventCaptor.capture());
-        assertThat(eventCaptor.getValue().patientId()).isEqualTo(patientCaptor.getValue().id());
-        assertThat(eventCaptor.getValue().psychologistId()).isEqualTo(OWNER);
-        assertThat(result.id()).isEqualTo(patientCaptor.getValue().id().value());
-        assertThat(result.status()).isEqualTo(PatientStatus.ACTIVE);
     }
 
-    @Test
-    void defaultsContactPreferenceOnCreateWhenMissing() {
-        CreatePatientCommand command = new CreatePatientCommand(
-                OWNER,
-                new EmailAddress("patient@example.com"),
-                new FullName("Patient Name"),
-                null,
-                null,
-                null,
-                null,
-                null,
-                ConsentStatus.GRANTED
-        );
-
-        var result = service.create(command);
-
-        assertThat(result.contactPreference()).isEqualTo(ContactPreference.EMAIL);
-    }
-
-    @Test
-    void listsOnlyRepositoryResultsForPsychologist() {
-        when(repository.findByPsychologistId(OWNER)).thenReturn(List.of(patient()));
-
-        var results = service.list(new ListPatientsQuery(OWNER));
-
-        assertThat(results).singleElement().satisfies(result -> {
-            assertThat(result.id()).isEqualTo(PATIENT_ID.value());
-            assertThat(result.psychologistId()).isEqualTo(OWNER.value());
-        });
-    }
-
-    @Test
-    void getsOwnedPatient() {
-        when(repository.findById(PATIENT_ID)).thenReturn(Optional.of(patient()));
-
-        var result = service.get(new GetPatientQuery(OWNER, PATIENT_ID));
-
-        assertThat(result.id()).isEqualTo(PATIENT_ID.value());
-    }
-
-    @Test
-    void updatesOwnedPatientAndPersistsSameEntity() {
-        Patient patient = patient();
-        when(repository.findById(PATIENT_ID)).thenReturn(Optional.of(patient));
-
-        var result = service.update(new UpdatePatientCommand(
+    private UpdatePatientCommand phoneContactUpdate() {
+        return new UpdatePatientCommand(
                 OWNER,
                 PATIENT_ID,
                 new FullName("Updated Name"),
@@ -148,67 +321,7 @@ class PatientServiceTest {
                 null,
                 ContactPreference.PHONE,
                 ConsentStatus.REVOKED
-        ));
-
-        verify(repository).save(patient);
-        assertThat(result.fullName()).isEqualTo("Updated Name");
-        assertThat(result.phone()).isNull();
-        assertThat(result.contactPreference()).isEqualTo(ContactPreference.PHONE);
-        assertThat(result.consentStatus()).isEqualTo(ConsentStatus.REVOKED);
-    }
-
-    @Test
-    void keepsCurrentContactPreferenceWhenUpdateOmitsIt() {
-        Patient patient = patient();
-        when(repository.findById(PATIENT_ID)).thenReturn(Optional.of(patient));
-
-        var result = service.update(new UpdatePatientCommand(
-                OWNER,
-                PATIENT_ID,
-                new FullName("Updated Name"),
-                null,
-                null,
-                null,
-                null,
-                null,
-                ConsentStatus.GRANTED
-        ));
-
-        verify(repository).save(patient);
-        assertThat(result.contactPreference()).isEqualTo(ContactPreference.EMAIL);
-    }
-
-    @Test
-    void changesStatusAndPersistsSameEntity() {
-        Patient patient = patient();
-        when(repository.findById(PATIENT_ID)).thenReturn(Optional.of(patient));
-
-        var result = service.changeStatus(
-                new ChangePatientStatusCommand(OWNER, PATIENT_ID, PatientStatus.INACTIVE));
-
-        verify(repository).save(patient);
-        assertThat(result.status()).isEqualTo(PatientStatus.INACTIVE);
-    }
-
-    @Test
-    void rejectsMissingPatientWithoutSaving() {
-        when(repository.findById(PATIENT_ID)).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() -> service.get(new GetPatientQuery(OWNER, PATIENT_ID)))
-                .isInstanceOf(PatientNotFoundException.class);
-
-        verify(repository, never()).save(org.mockito.ArgumentMatchers.any());
-    }
-
-    @Test
-    void rejectsPatientOwnedByAnotherPsychologistWithoutSaving() {
-        when(repository.findById(PATIENT_ID)).thenReturn(Optional.of(patient()));
-
-        assertThatThrownBy(() -> service.changeStatus(
-                new ChangePatientStatusCommand(OTHER, PATIENT_ID, PatientStatus.INACTIVE)))
-                .isInstanceOf(PatientAccessDeniedException.class);
-
-        verify(repository, never()).save(org.mockito.ArgumentMatchers.any());
+        );
     }
 
     private Patient patient() {

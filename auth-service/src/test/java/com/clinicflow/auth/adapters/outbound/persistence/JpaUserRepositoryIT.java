@@ -18,10 +18,11 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 @DataJpaTest(properties = {
         "spring.jpa.hibernate.ddl-auto=validate",
@@ -44,26 +45,58 @@ class JpaUserRepositoryIT {
     private SpringDataUserJpaRepository delegate;
 
     @Test
-    void persistsAndFindsUserThroughEveryRepositoryOperation() {
-        User user = user(UUID.randomUUID(), "user@example.com");
+    void existsByEmailFindsPersistedUser() {
+        // Arrange
+        User user = persisted(user(UUID.randomUUID(), "user@example.com"));
 
-        repository.save(user);
-        delegate.flush();
+        // Act
+        boolean exists = repository.existsByEmail(user.email());
 
-        assertThat(repository.existsByEmail(user.email())).isTrue();
-        assertThat(repository.findByEmail(user.email())).contains(user);
-        assertThat(repository.findById(user.id())).contains(user);
+        // Assert
+        assertThat(exists).isTrue();
+    }
+
+    @Test
+    void findByEmailReturnsPersistedUser() {
+        // Arrange
+        User user = persisted(user(UUID.randomUUID(), "user@example.com"));
+
+        // Act
+        Optional<User> found = repository.findByEmail(user.email());
+
+        // Assert
+        assertThat(found).contains(user);
+    }
+
+    @Test
+    void findByIdReturnsPersistedUser() {
+        // Arrange
+        User user = persisted(user(UUID.randomUUID(), "user@example.com"));
+
+        // Act
+        Optional<User> found = repository.findById(user.id());
+
+        // Assert
+        assertThat(found).contains(user);
     }
 
     @Test
     void enforcesUniqueEmailConstraint() {
+        // Arrange
+        persisted(user(UUID.randomUUID(), "duplicate@example.com"));
         repository.save(user(UUID.randomUUID(), "duplicate@example.com"));
+
+        // Act
+        Throwable thrown = catchThrowable(delegate::flush);
+
+        // Assert
+        assertThat(thrown).isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    private User persisted(User user) {
+        repository.save(user);
         delegate.flush();
-
-        repository.save(user(UUID.randomUUID(), "duplicate@example.com"));
-
-        assertThatThrownBy(delegate::flush)
-                .isInstanceOf(DataIntegrityViolationException.class);
+        return user;
     }
 
     private User user(UUID id, String email) {

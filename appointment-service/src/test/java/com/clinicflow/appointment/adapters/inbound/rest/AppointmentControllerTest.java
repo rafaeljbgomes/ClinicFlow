@@ -15,6 +15,7 @@ import org.springframework.http.MediaType;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
 
 import java.time.Instant;
 import java.util.List;
@@ -48,73 +49,144 @@ class AppointmentControllerTest {
     private JwtDecoder jwtDecoder;
 
     @Test
-    void rejectsMissingOrWrongRole() throws Exception {
-        mvc.perform(get("/appointments"))
-                .andExpect(status().isUnauthorized());
+    void rejectsRequestWithoutToken() throws Exception {
+        // Arrange
+        var request = get("/appointments");
 
-        mvc.perform(get("/appointments").with(jwtFor("ROLE_PATIENT")))
-                .andExpect(status().isForbidden());
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isUnauthorized());
     }
 
     @Test
-    void executesAllAppointmentEndpointsForPsychologist() throws Exception {
+    void rejectsPatientRole() throws Exception {
+        // Arrange
+        var request = get("/appointments").with(jwtFor("ROLE_PATIENT"));
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isForbidden());
+    }
+
+    @Test
+    void scheduleReturnsCreatedAppointment() throws Exception {
+        // Arrange
         when(appointmentService.schedule(any())).thenReturn(result());
-        when(appointmentService.listForPsychologist(any())).thenReturn(List.of(result()));
-        when(appointmentService.get(any())).thenReturn(result());
-        when(appointmentService.reschedule(any())).thenReturn(result());
-        when(appointmentService.cancel(any())).thenReturn(result());
-        when(appointmentService.complete(any())).thenReturn(result());
+        var request = post("/appointments")
+                .with(jwtFor("ROLE_PSYCHOLOGIST"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {
+                          "patientId": "%s",
+                          "scheduledAt": "%s",
+                          "type": "ONLINE"
+                        }
+                        """.formatted(PATIENT_ID, APPOINTMENT_DATE));
 
-        mvc.perform(post("/appointments")
-                        .with(jwtFor("ROLE_PSYCHOLOGIST"))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "patientId": "%s",
-                                  "scheduledAt": "%s",
-                                  "type": "ONLINE"
-                                }
-                                """.formatted(PATIENT_ID, APPOINTMENT_DATE)))
-                .andExpect(status().isCreated())
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value(APPOINTMENT_ID.toString()));
+    }
 
-        mvc.perform(get("/appointments").with(jwtFor("ROLE_PSYCHOLOGIST")))
-                .andExpect(status().isOk())
+    @Test
+    void listReturnsPsychologistAppointments() throws Exception {
+        // Arrange
+        when(appointmentService.listForPsychologist(any())).thenReturn(List.of(result()));
+        var request = get("/appointments").with(jwtFor("ROLE_PSYCHOLOGIST"));
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value(APPOINTMENT_ID.toString()));
+    }
 
-        mvc.perform(get("/appointments/{id}", APPOINTMENT_ID).with(jwtFor("ROLE_PSYCHOLOGIST")))
-                .andExpect(status().isOk());
+    @Test
+    void getReturnsRequestedAppointment() throws Exception {
+        // Arrange
+        when(appointmentService.get(any())).thenReturn(result());
+        var request = get("/appointments/{id}", APPOINTMENT_ID).with(jwtFor("ROLE_PSYCHOLOGIST"));
 
-        mvc.perform(patch("/appointments/{id}/reschedule", APPOINTMENT_ID)
-                        .with(jwtFor("ROLE_PSYCHOLOGIST"))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"newDate\":\"2099-06-13T10:00:00Z\"}"))
-                .andExpect(status().isOk());
+        // Act
+        ResultActions response = mvc.perform(request);
 
-        mvc.perform(patch("/appointments/{id}/cancel", APPOINTMENT_ID)
-                        .with(jwtFor("ROLE_PSYCHOLOGIST"))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"reason\":\"Patient requested cancellation\"}"))
-                .andExpect(status().isOk());
+        // Assert
+        response.andExpect(status().isOk());
+    }
 
-        mvc.perform(patch("/appointments/{id}/complete", APPOINTMENT_ID)
-                        .with(jwtFor("ROLE_PSYCHOLOGIST")))
-                .andExpect(status().isOk());
+    @Test
+    void rescheduleReturnsUpdatedAppointment() throws Exception {
+        // Arrange
+        when(appointmentService.reschedule(any())).thenReturn(result());
+        var request = patch("/appointments/{id}/reschedule", APPOINTMENT_ID)
+                .with(jwtFor("ROLE_PSYCHOLOGIST"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"newDate\":\"2099-06-13T10:00:00Z\"}");
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isOk());
+    }
+
+    @Test
+    void cancelReturnsUpdatedAppointment() throws Exception {
+        // Arrange
+        when(appointmentService.cancel(any())).thenReturn(result());
+        var request = patch("/appointments/{id}/cancel", APPOINTMENT_ID)
+                .with(jwtFor("ROLE_PSYCHOLOGIST"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"reason\":\"Patient requested cancellation\"}");
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isOk());
+    }
+
+    @Test
+    void completeReturnsUpdatedAppointment() throws Exception {
+        // Arrange
+        when(appointmentService.complete(any())).thenReturn(result());
+        var request = patch("/appointments/{id}/complete", APPOINTMENT_ID)
+                .with(jwtFor("ROLE_PSYCHOLOGIST"));
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isOk());
     }
 
     @Test
     void rejectsPastAppointmentDate() throws Exception {
-        mvc.perform(post("/appointments")
-                        .with(jwtFor("ROLE_PSYCHOLOGIST"))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "patientId": "%s",
-                                  "scheduledAt": "2020-01-01T10:00:00Z",
-                                  "type": "ONLINE"
-                                }
-                                """.formatted(PATIENT_ID)))
-                .andExpect(status().isBadRequest())
+        // Arrange
+        var request = post("/appointments")
+                .with(jwtFor("ROLE_PSYCHOLOGIST"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {
+                          "patientId": "%s",
+                          "scheduledAt": "2020-01-01T10:00:00Z",
+                          "type": "ONLINE"
+                        }
+                        """.formatted(PATIENT_ID));
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.title").value("Validation failed"))
                 .andExpect(jsonPath("$.code").value("validation_failed"))
                 .andExpect(jsonPath("$.correlationId").isNotEmpty());
@@ -122,10 +194,15 @@ class AppointmentControllerTest {
 
     @Test
     void mapsOwnershipFailureToForbiddenProblemDetail() throws Exception {
+        // Arrange
         when(appointmentService.get(any())).thenThrow(new AppointmentAccessDeniedException());
+        var request = get("/appointments/{id}", APPOINTMENT_ID).with(jwtFor("ROLE_PSYCHOLOGIST"));
 
-        mvc.perform(get("/appointments/{id}", APPOINTMENT_ID).with(jwtFor("ROLE_PSYCHOLOGIST")))
-                .andExpect(status().isForbidden())
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.title").value("Access denied"));
     }
 
