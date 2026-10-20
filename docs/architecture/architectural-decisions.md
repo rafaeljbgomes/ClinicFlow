@@ -301,6 +301,53 @@ failure metrics plus structured event-id, routing-key, retry-count, and outcome
 logs make the relay observable. This implementation is intentionally duplicated
 inside the two bounded services instead of creating a shared runtime module.
 
+## ADR-021: Owning Services Verify Cross-Service References
+
+Decision: a service that stores another service's identifier on behalf of a
+psychologist first asks the owning service whether the caller owns it, using the
+caller's own bearer token. appointment-service and clinical-service call
+`HEAD /patients/{id}` on patient-service before scheduling an appointment or
+opening a clinical case. clinical-service calls `GET /appointments/{id}` on
+appointment-service before a manual session record links an appointment, and
+accepts the link only when the appointment belongs to the case's patient and has
+no session record yet.
+
+Rationale: patient ownership lives only in patient-service (ADR-004), and the API
+hostname reaches services directly, so BFF checks cannot protect it. Before this
+decision a psychologist could attach appointments and clinical cases to another
+psychologist's patient, and a manual session record could claim another
+psychologist's appointment id. Because `session_records.appointment_id` is unique,
+that claim silently stopped the real owner's completed appointment from creating a
+session record. Forwarding the caller's token keeps patient-service and
+appointment-service as the only authorities. It needs no service credentials or
+replicated ownership data. `HEAD` returns only a status, so no patient details reach
+the calling service. An event-fed ownership copy was rejected: demo patients are
+seeded without events, so it would need backfill and reconciliation, and it would
+reject newly created patients until the event arrived.
+
+Contract: `2xx` means owned. `403` and `404` both become `404 patient_not_found`
+or `404 appointment_not_found`, so callers cannot probe for other practices'
+identifiers. Any other status, a timeout, a transport error, or a caller token that
+does not belong to the checked psychologist fails closed with
+`503 ownership_check_unavailable`. A linked appointment of another patient returns
+`400 appointment_patient_mismatch`, and an appointment that already has a session
+record returns `409 appointment_already_recorded`. The ownership check runs before
+the local duplicate check, so a foreign appointment id reveals nothing. Clients use
+one-second connect and two-second read timeouts, never follow redirects, and
+forward the correlation id.
+
+Consequences: scheduling and case creation now depend on patient-service at
+request time, and linking a session record depends on appointment-service. Reads
+and the other lifecycle operations do not. The check runs inside the write
+transaction, so a slow neighbour holds a database connection for up to the read
+timeout. Helm declares the new service-to-service NetworkPolicy flows per release
+(`networkPolicy.serviceIngress` and `serviceEgress`), and Compose sets the base URLs.
+The `appointment.completed` consumer still trusts its producer, because
+appointment-service now verifies patients at scheduling time. Session records that
+were linked to foreign appointments before this decision are not rewritten; the
+consumer logs `session_record_appointment_conflict` when it meets one. Patient
+status (for example `ARCHIVED`) is not part of the check.
+
 ## ADR-022: GitHub Actions as the PR Gate of Record
 
 Decision: pull requests, `main`, nightly and manual validation run on

@@ -66,6 +66,10 @@ The following properties must hold for supported behavior:
   services, not only in frontend visibility checks or optimistic proxy logic.
 - A psychologist cannot read or modify another psychologist's patients,
   appointments, clinical records, or scoped notifications.
+- A psychologist cannot attach appointments, clinical cases, or session records
+  to another psychologist's patient or appointment. The owning service confirms
+  every such reference with the caller's token, and the check fails closed when
+  it cannot answer (ADR-021).
 - JWT signing keys and infrastructure credentials are not committed, exposed in
   logs, or returned in API responses.
 - Browser access tokens remain in HttpOnly cookies; mutating same-origin BFF
