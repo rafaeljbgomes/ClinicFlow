@@ -58,7 +58,7 @@ class AutomationContractTest(unittest.TestCase):
                 return {"scans": [{"id": "1", "progress": "100", "state": "FINISHED"}]}
             if operation == "view/messagesIds":
                 return {"messagesIds": ["1", "2", "3"]}
-            return {"messages": [{"requestHeader": "GET / HTTP/1.1\r\nHost: api.clinicflow.localhost:8443\r\n", "responseHeader": "HTTP/1.1 401 Unauthorized"}]}
+            return {"messagesById": [{"requestHeader": "GET / HTTP/1.1\r\nHost: api.clinicflow.localhost:8443\r\n", "responseHeader": "HTTP/1.1 401 Unauthorized"}]}
         with patch.object(dast, "zap_api", side_effect=api), self.assertRaises(RuntimeError):
             dast.verify_traffic(set(), [dast.API])
 
@@ -68,7 +68,7 @@ class AutomationContractTest(unittest.TestCase):
                 return {"scans": [{"id": "1", "progress": "100", "state": "FINISHED"}]}
             if operation == "view/messagesIds":
                 return {"messagesIds": ["1", "2", "3"]}
-            return {"messages": [
+            return {"messagesById": [
                 {"requestHeader": "GET / HTTP/1.1\r\nHost: api.clinicflow.localhost:8443\r\n", "responseHeader": "HTTP/1.1 200 OK"},
                 {"requestHeader": "GET / HTTP/1.1\r\nHost: clinicflow.localhost:8443\r\n", "responseHeader": "HTTP/1.1 200 OK"},
                 {"requestHeader": "POST /api/v1/auth/login HTTP/1.1\r\nHost: api.clinicflow.localhost:8443\r\n", "responseHeader": "HTTP/1.1 401 Unauthorized"}]}
@@ -81,7 +81,7 @@ class AutomationContractTest(unittest.TestCase):
                 return {"scans": [{"id": "1", "progress": "64", "state": "FINISHED"}]}
             if operation == "view/messagesIds":
                 return {"messagesIds": ["1", "2", "3"]}
-            return {"messages": [
+            return {"messagesById": [
                 {"requestHeader": "GET / HTTP/1.1\r\nHost: api.clinicflow.localhost:8443\r\n", "responseHeader": "HTTP/1.1 200 OK"},
                 {"requestHeader": "GET / HTTP/1.1\r\nHost: clinicflow.localhost:8443\r\n", "responseHeader": "HTTP/1.1 200 OK"}]}
         with patch.object(dast, "zap_api", side_effect=api):

@@ -118,7 +118,11 @@ def verify_traffic(before, urls):
     # Sample actual scanner messages, not proxy-history authentication probes.
     stride = max(1, len(message_ids) // 50)
     sampled = message_ids[::stride][:50]
-    messages = zap_api("core", "view/messagesById", ids=",".join(sampled))["messages"]
+    # The list's response key differs across ZAP versions, so require exactly one list as for messagesIds.
+    response = zap_api("core", "view/messagesById", ids=",".join(sampled))
+    lists = [value for value in response.values() if isinstance(value, list)]
+    require(len(lists) == 1, "Active message sample missing")
+    messages = lists[0]
     statuses = []
     origins = set()
     for message in messages:
