@@ -11,6 +11,7 @@ import ssl
 import subprocess
 import sys
 import time
+import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -284,13 +285,24 @@ def main():
                 zap.kill()
 
 
+def failure_detail(error):
+    # Messages raised by this script never contain credentials or response data. For data-shape errors,
+    # name only the failing line and missing key, never values taken from responses.
+    if isinstance(error, RuntimeError):
+        return str(error)
+    if isinstance(error, (KeyError, IndexError, TypeError, ValueError)) and error.__traceback__:
+        frame = traceback.extract_tb(error.__traceback__)[-1]
+        missing = ": missing key " + repr(error.args[0])[:80] if isinstance(error, KeyError) and error.args else ""
+        return "line " + str(frame.lineno) + " in " + frame.name + missing
+    return ""
+
+
 if __name__ == "__main__":
     try:
         main()
     except Exception as error:
         REPORTS.mkdir(parents=True, exist_ok=True)
-        # Only messages raised by this script are shown; they never contain credentials or response data.
-        detail = str(error) if isinstance(error, RuntimeError) else ""
+        detail = failure_detail(error)
         (REPORTS / "failure.json").write_text(json.dumps({"complete": False, "errorType": type(error).__name__, "detail": detail}))
         print("DAST failed: " + type(error).__name__ + (": " + detail if detail else "") + ". No passing scan result was produced.", file=sys.stderr)
         sys.exit(1)

@@ -87,6 +87,17 @@ class AutomationContractTest(unittest.TestCase):
         with patch.object(dast, "zap_api", side_effect=api):
             self.assertEqual(dast.verify_traffic(set(), [dast.API])["progress"], 64)
 
+    def test_failure_detail_names_missing_key_without_values(self):
+        try:
+            {"accessToken": "secret-value"}["planId"]
+        except KeyError as error:
+            detail = dast.failure_detail(error)
+        self.assertIn("missing key 'planId'", detail)
+        self.assertNotIn("secret-value", detail)
+
+    def test_failure_detail_hides_unexpected_errors(self):
+        self.assertEqual(dast.failure_detail(OSError("connection to 10.0.0.1 reset")), "")
+
     def test_running_scan_fails(self):
         def api(section, operation, **params):
             return {"scans": [{"id": "1", "progress": "40", "state": "RUNNING"}]}
