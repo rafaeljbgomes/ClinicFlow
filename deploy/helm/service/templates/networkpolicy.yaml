@@ -15,6 +15,16 @@ spec:
           podSelector:
             matchLabels: {clinicflow.io/edge: gateway}
       ports: [{port: {{ .Values.port }}, protocol: TCP}]
+    {{- with .Values.networkPolicy.serviceIngress }}
+    - from:
+        {{- range . }}
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: {{ $.Release.Namespace }}}
+          podSelector:
+            matchLabels: {app.kubernetes.io/component: {{ . }}}
+        {{- end }}
+      ports: [{port: {{ $.Values.port }}, protocol: TCP}]
+    {{- end }}
     - from:
         - namespaceSelector:
             matchLabels: {kubernetes.io/metadata.name: {{ .Release.Namespace }}}
@@ -38,6 +48,14 @@ spec:
           podSelector:
             matchLabels: {app.kubernetes.io/component: postgres}
       ports: [{port: {{ .Values.database.port }}, protocol: TCP}]
+    {{- range .Values.networkPolicy.serviceEgress }}
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: {{ $.Release.Namespace }}}
+          podSelector:
+            matchLabels: {app.kubernetes.io/component: {{ .component }}}
+      ports: [{port: {{ .port }}, protocol: TCP}]
+    {{- end }}
     {{- if .Values.rabbitmq.enabled }}
     - to:
         - namespaceSelector:

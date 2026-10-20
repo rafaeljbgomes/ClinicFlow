@@ -123,6 +123,7 @@ services:
       dockerfile: appointment-service/Dockerfile
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/clinicflow_appointment
+      CLINICFLOW_SERVICES_PATIENT_BASE_URL: http://patient-service:8082
       SPRING_DATASOURCE_USERNAME: clinicflow
       SPRING_DATASOURCE_PASSWORD: clinicflow
       SPRING_RABBITMQ_HOST: rabbitmq
@@ -146,6 +147,8 @@ services:
       dockerfile: clinical-service/Dockerfile
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/clinicflow_clinical
+      CLINICFLOW_SERVICES_PATIENT_BASE_URL: http://patient-service:8082
+      CLINICFLOW_SERVICES_APPOINTMENT_BASE_URL: http://appointment-service:8083
       SPRING_DATASOURCE_USERNAME: clinicflow
       SPRING_DATASOURCE_PASSWORD: clinicflow
       SPRING_RABBITMQ_HOST: rabbitmq

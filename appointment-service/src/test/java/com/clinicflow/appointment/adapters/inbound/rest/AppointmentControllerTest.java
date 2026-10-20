@@ -2,6 +2,8 @@ package com.clinicflow.appointment.adapters.inbound.rest;
 
 import com.clinicflow.appointment.application.AppointmentService;
 import com.clinicflow.appointment.application.exceptions.AppointmentAccessDeniedException;
+import com.clinicflow.appointment.application.exceptions.OwnershipCheckUnavailableException;
+import com.clinicflow.appointment.application.exceptions.PatientNotFoundException;
 import com.clinicflow.appointment.application.results.AppointmentResult;
 import com.clinicflow.appointment.domain.AppointmentStatus;
 import com.clinicflow.appointment.domain.AppointmentType;
@@ -93,6 +95,34 @@ class AppointmentControllerTest {
         // Assert
         response.andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value(APPOINTMENT_ID.toString()));
+    }
+
+    @Test
+    void scheduleForUnownedPatientReturnsPatientNotFound() throws Exception {
+        // Arrange
+        when(appointmentService.schedule(any())).thenThrow(new PatientNotFoundException());
+        var request = scheduleRequest();
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("patient_not_found"));
+    }
+
+    @Test
+    void scheduleReturnsServiceUnavailableWhenOwnershipCannotBeVerified() throws Exception {
+        // Arrange
+        when(appointmentService.schedule(any())).thenThrow(new OwnershipCheckUnavailableException("down"));
+        var request = scheduleRequest();
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("ownership_check_unavailable"));
     }
 
     @Test
@@ -210,6 +240,19 @@ class AppointmentControllerTest {
         return jwt()
                 .jwt(token -> token.claim("userId", PSYCHOLOGIST_ID.toString()))
                 .authorities(new SimpleGrantedAuthority(authority));
+    }
+
+    private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder scheduleRequest() {
+        return post("/appointments")
+                .with(jwtFor("ROLE_PSYCHOLOGIST"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {
+                          "patientId": "%s",
+                          "scheduledAt": "%s",
+                          "type": "ONLINE"
+                        }
+                        """.formatted(PATIENT_ID, APPOINTMENT_DATE));
     }
 
     private AppointmentResult result() {

@@ -6,9 +6,11 @@ import com.clinicflow.appointment.application.commands.RescheduleAppointmentComm
 import com.clinicflow.appointment.application.commands.ScheduleAppointmentCommand;
 import com.clinicflow.appointment.application.exceptions.AppointmentAccessDeniedException;
 import com.clinicflow.appointment.application.exceptions.AppointmentNotFoundException;
+import com.clinicflow.appointment.application.exceptions.PatientNotFoundException;
 import com.clinicflow.appointment.application.mapping.AppointmentApplicationMapper;
 import com.clinicflow.appointment.application.ports.AppointmentEventPublisher;
 import com.clinicflow.appointment.application.ports.AppointmentRepository;
+import com.clinicflow.appointment.application.ports.PatientDirectory;
 import com.clinicflow.appointment.application.queries.GetAppointmentQuery;
 import com.clinicflow.appointment.application.queries.ListAppointmentsQuery;
 import com.clinicflow.appointment.application.results.AppointmentResult;
@@ -32,17 +34,23 @@ import java.util.UUID;
 public class AppointmentService {
     private final AppointmentRepository appointmentRepository;
     private final AppointmentEventPublisher eventPublisher;
+    private final PatientDirectory patientDirectory;
     private final AppointmentApplicationMapper mapper;
 
     public AppointmentService(AppointmentRepository appointmentRepository, AppointmentEventPublisher eventPublisher,
-                              AppointmentApplicationMapper mapper) {
+                              PatientDirectory patientDirectory, AppointmentApplicationMapper mapper) {
         this.appointmentRepository = appointmentRepository;
         this.eventPublisher = eventPublisher;
+        this.patientDirectory = patientDirectory;
         this.mapper = mapper;
     }
 
     @Transactional
     public AppointmentResult schedule(ScheduleAppointmentCommand command) {
+        // Unknown and foreign patients get the same answer so the endpoint is not an existence oracle.
+        if (!patientDirectory.isOwnedBy(command.patientId(), command.psychologistId())) {
+            throw new PatientNotFoundException();
+        }
         Instant now = Instant.now();
         Appointment appointment = Appointment.create(new AppointmentId(UUID.randomUUID()), command.psychologistId(),
                 command.patientId(), command.scheduledAt(), command.type(), now);

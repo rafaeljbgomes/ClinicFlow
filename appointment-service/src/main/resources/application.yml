@@ -48,6 +48,11 @@ clinicflow:
       public-key-path: ${CLINICFLOW_SECURITY_JWT_PUBLIC_KEY_PATH:}
   messaging:
     exchange: therapy.events.exchange
+  services:
+    connect-timeout: ${CLINICFLOW_SERVICES_CONNECT_TIMEOUT:1s}
+    read-timeout: ${CLINICFLOW_SERVICES_READ_TIMEOUT:2s}
+    patient:
+      base-url: ${CLINICFLOW_SERVICES_PATIENT_BASE_URL:http://localhost:8082}
   outbox:
     enabled: ${CLINICFLOW_OUTBOX_ENABLED:true}
     poll-interval: ${CLINICFLOW_OUTBOX_POLL_INTERVAL:1s}

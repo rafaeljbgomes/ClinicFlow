@@ -10,3 +10,8 @@ environment:
   CLINICFLOW_DEMO_BOOTSTRAP_ENABLED: "true"
   CLINICFLOW_MESSAGING_EXCHANGE: therapy.events.exchange
   CLINICFLOW_MESSAGING_DEAD_LETTER_EXCHANGE: therapy.events.dlx
+  CLINICFLOW_SERVICES_PATIENT_BASE_URL: http://patient-service:8082
+networkPolicy:
+  serviceIngress: [clinical-service]
+  serviceEgress:
+    - {component: patient-service, port: 8082}

@@ -6,6 +6,11 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Stream;
+import com.clinicflow.clinical.application.exceptions.AppointmentAlreadyRecordedException;
+import com.clinicflow.clinical.application.exceptions.AppointmentNotFoundException;
+import com.clinicflow.clinical.application.exceptions.AppointmentPatientMismatchException;
+import com.clinicflow.clinical.application.exceptions.OwnershipCheckUnavailableException;
+import com.clinicflow.clinical.application.exceptions.PatientNotFoundException;
 import com.clinicflow.clinical.domain.InvalidNoteTransitionException;
 import com.clinicflow.clinical.domain.SessionRecordNotSignableException;
 import com.clinicflow.clinical.domain.SignedSessionRecordException;
@@ -70,6 +75,42 @@ class ApiProblemContractTest {
                         (Function<ApiExceptionHandler, ProblemDetail>) handler -> handler.invalidNoteTransition(
                                 new InvalidNoteTransitionException()),
                         HttpStatus.BAD_REQUEST, "invalid_note_transition"));
+    }
+
+    static Stream<Arguments> ownershipFailures() {
+        return Stream.of(
+                Arguments.of("unknown or foreign patient",
+                        (Function<ApiExceptionHandler, ProblemDetail>) handler -> handler.patientNotFound(
+                                new PatientNotFoundException()),
+                        HttpStatus.NOT_FOUND, "patient_not_found"),
+                Arguments.of("unknown or foreign appointment",
+                        (Function<ApiExceptionHandler, ProblemDetail>) handler -> handler.appointmentNotFound(
+                                new AppointmentNotFoundException()),
+                        HttpStatus.NOT_FOUND, "appointment_not_found"),
+                Arguments.of("appointment of another patient",
+                        (Function<ApiExceptionHandler, ProblemDetail>) handler -> handler.appointmentPatientMismatch(
+                                new AppointmentPatientMismatchException()),
+                        HttpStatus.BAD_REQUEST, "appointment_patient_mismatch"),
+                Arguments.of("appointment already recorded",
+                        (Function<ApiExceptionHandler, ProblemDetail>) handler -> handler.appointmentAlreadyRecorded(
+                                new AppointmentAlreadyRecordedException()),
+                        HttpStatus.CONFLICT, "appointment_already_recorded"),
+                Arguments.of("unavailable ownership check",
+                        (Function<ApiExceptionHandler, ProblemDetail>) handler -> handler.ownershipCheckUnavailable(
+                                new OwnershipCheckUnavailableException("connect timed out")),
+                        HttpStatus.SERVICE_UNAVAILABLE, "ownership_check_unavailable"));
+    }
+
+    @ParameterizedTest(name = "maps {0} to {3}")
+    @MethodSource("ownershipFailures")
+    void mapsOwnershipFailureToStableProblemCode(String failure,
+                                                 Function<ApiExceptionHandler, ProblemDetail> handle,
+                                                 HttpStatus expectedStatus, String expectedCode) {
+        // Act
+        ProblemDetail problem = handle.apply(handler);
+
+        // Assert
+        assertProblem(problem, expectedStatus, expectedCode);
     }
 
     @ParameterizedTest(name = "maps {0} to {3}")

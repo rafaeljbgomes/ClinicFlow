@@ -66,6 +66,41 @@ class PatientApiIT {
         reset(jwtDecoder);
         when(jwtDecoder.decode("psychologist-token")).thenReturn(jwt(PSYCHOLOGIST_ID, "PSYCHOLOGIST"));
         when(jwtDecoder.decode("patient-token")).thenReturn(jwt(UUID.randomUUID(), "PATIENT"));
+        when(jwtDecoder.decode("other-psychologist-token")).thenReturn(jwt(UUID.randomUUID(), "PSYCHOLOGIST"));
+    }
+
+    // appointment-service and clinical-service rely on HEAD /patients/{id} as their ownership check.
+    @Test
+    void ownershipCheckConfirmsTheOwnersPatient() {
+        // Arrange
+        String patientId = createPatient();
+
+        // Act
+        var response = ownershipCheck("psychologist-token", patientId);
+
+        // Assert
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.OK);
+    }
+
+    @Test
+    void ownershipCheckReturnsNoPatientDetails() {
+        // Arrange
+        String patientId = createPatient();
+
+        // Act
+        var response = ownershipCheck("psychologist-token", patientId);
+
+        // Assert
+        assertThat(response.getResponseBody()).isNull();
+    }
+
+    @Test
+    void ownershipCheckReportsUnknownPatient() {
+        // Act
+        var response = ownershipCheck("psychologist-token", UUID.randomUUID().toString());
+
+        // Assert
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.NOT_FOUND);
     }
 
     @Test
@@ -233,6 +268,10 @@ class PatientApiIT {
         var response = exchange("/patients", HttpMethod.POST, createRequest("patient@example.com"));
         arrangeStep("create patient", response, HttpStatus.CREATED);
         return response.getResponseBody().get("id").toString();
+    }
+
+    private EntityExchangeResult<String> ownershipCheck(String token, String patientId) {
+        return exchange("/patients/" + patientId, HttpMethod.HEAD, new HttpEntity<>(bearer(token)), String.class);
     }
 
     private static void arrangeStep(String step, ExchangeResult response, HttpStatus expected) {

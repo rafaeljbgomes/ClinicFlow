@@ -2,6 +2,8 @@ package com.clinicflow.appointment.adapters.inbound.rest;
 
 import com.clinicflow.appointment.application.exceptions.AppointmentAccessDeniedException;
 import com.clinicflow.appointment.application.exceptions.AppointmentNotFoundException;
+import com.clinicflow.appointment.application.exceptions.OwnershipCheckUnavailableException;
+import com.clinicflow.appointment.application.exceptions.PatientNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,6 +28,17 @@ public class ApiExceptionHandler {
     @ExceptionHandler(AppointmentNotFoundException.class)
     ProblemDetail notFound(AppointmentNotFoundException ex) {
         return ApiProblems.create(HttpStatus.NOT_FOUND, "appointment_not_found", "Resource not found", "Appointment not found");
+    }
+
+    @ExceptionHandler(PatientNotFoundException.class)
+    ProblemDetail patientNotFound(PatientNotFoundException ex) {
+        return ApiProblems.create(HttpStatus.NOT_FOUND, "patient_not_found", "Resource not found", "Patient not found");
+    }
+
+    @ExceptionHandler(OwnershipCheckUnavailableException.class)
+    ProblemDetail ownershipCheckUnavailable(OwnershipCheckUnavailableException ex) {
+        return ApiProblems.create(HttpStatus.SERVICE_UNAVAILABLE, "ownership_check_unavailable",
+                "Service unavailable", "Patient ownership could not be verified; try again later");
     }
 
     @ExceptionHandler({AppointmentAccessDeniedException.class, AccessDeniedException.class})

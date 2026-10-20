@@ -6,9 +6,12 @@ import com.clinicflow.appointment.application.commands.RescheduleAppointmentComm
 import com.clinicflow.appointment.application.commands.ScheduleAppointmentCommand;
 import com.clinicflow.appointment.application.exceptions.AppointmentAccessDeniedException;
 import com.clinicflow.appointment.application.exceptions.AppointmentNotFoundException;
+import com.clinicflow.appointment.application.exceptions.OwnershipCheckUnavailableException;
+import com.clinicflow.appointment.application.exceptions.PatientNotFoundException;
 import com.clinicflow.appointment.application.mapping.AppointmentApplicationMapper;
 import com.clinicflow.appointment.application.ports.AppointmentEventPublisher;
 import com.clinicflow.appointment.application.ports.AppointmentRepository;
+import com.clinicflow.appointment.application.ports.PatientDirectory;
 import com.clinicflow.appointment.application.queries.GetAppointmentQuery;
 import com.clinicflow.appointment.application.queries.ListAppointmentsQuery;
 import com.clinicflow.appointment.domain.Appointment;
@@ -43,6 +46,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -62,18 +66,21 @@ class AppointmentServiceTest {
     private AppointmentRepository repository;
     @Mock
     private AppointmentEventPublisher publisher;
+    @Mock
+    private PatientDirectory patientDirectory;
 
     private AppointmentService service;
 
     @BeforeEach
     void setUp() {
-        service = new AppointmentService(repository, publisher,
+        service = new AppointmentService(repository, publisher, patientDirectory,
                 Mappers.getMapper(AppointmentApplicationMapper.class));
     }
 
     @Test
     void scheduleSavesAppointmentBeforePublishingEvent() {
         // Arrange
+        when(patientDirectory.isOwnedBy(PATIENT_ID, OWNER)).thenReturn(true);
         ScheduleAppointmentCommand command = scheduleCommand();
 
         // Act
@@ -88,6 +95,7 @@ class AppointmentServiceTest {
     @Test
     void schedulePublishesEventForTheSavedAppointment() {
         // Arrange
+        when(patientDirectory.isOwnedBy(PATIENT_ID, OWNER)).thenReturn(true);
         ScheduleAppointmentCommand command = scheduleCommand();
 
         // Act
@@ -101,6 +109,7 @@ class AppointmentServiceTest {
     @Test
     void scheduleReturnsScheduledAppointment() {
         // Arrange
+        when(patientDirectory.isOwnedBy(PATIENT_ID, OWNER)).thenReturn(true);
         ScheduleAppointmentCommand command = scheduleCommand();
 
         // Act
@@ -108,6 +117,60 @@ class AppointmentServiceTest {
 
         // Assert
         assertThat(result.status()).isEqualTo(AppointmentStatus.SCHEDULED);
+    }
+
+    @Test
+    void scheduleRejectsPatientOwnedBySomeoneElse() {
+        // Arrange
+        when(patientDirectory.isOwnedBy(PATIENT_ID, OWNER)).thenReturn(false);
+        ScheduleAppointmentCommand command = scheduleCommand();
+
+        // Act
+        Throwable thrown = catchThrowable(() -> service.schedule(command));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(PatientNotFoundException.class);
+    }
+
+    @Test
+    void scheduleForForeignPatientStoresNothing() {
+        // Arrange
+        when(patientDirectory.isOwnedBy(PATIENT_ID, OWNER)).thenReturn(false);
+        ScheduleAppointmentCommand command = scheduleCommand();
+
+        // Act
+        catchThrowable(() -> service.schedule(command));
+
+        // Assert
+        verifyNoInteractions(repository, publisher);
+    }
+
+    @Test
+    void scheduleReportsUnavailableOwnershipCheck() {
+        // Arrange
+        when(patientDirectory.isOwnedBy(PATIENT_ID, OWNER))
+                .thenThrow(new OwnershipCheckUnavailableException("patient-service unavailable"));
+        ScheduleAppointmentCommand command = scheduleCommand();
+
+        // Act
+        Throwable thrown = catchThrowable(() -> service.schedule(command));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(OwnershipCheckUnavailableException.class);
+    }
+
+    @Test
+    void scheduleStoresNothingWhenOwnershipCannotBeVerified() {
+        // Arrange
+        when(patientDirectory.isOwnedBy(PATIENT_ID, OWNER))
+                .thenThrow(new OwnershipCheckUnavailableException("patient-service unavailable"));
+        ScheduleAppointmentCommand command = scheduleCommand();
+
+        // Act
+        catchThrowable(() -> service.schedule(command));
+
+        // Assert
+        verifyNoInteractions(repository, publisher);
     }
 
     @Test
