@@ -58,6 +58,10 @@ jobs:
       - name: Prepare security context
         run: node scripts/ci/security-policy.cjs prepare system
 
+      # Manifest validation loads ajv and yaml from the frontend dependency tree.
+      - name: Install frontend dependencies
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Invoke-FrontendPhase.ps1 -Phase Install
+
       - name: Platform validation
         run: pwsh -NoLogo -NoProfile -File scripts/ci/Test-Platform.ps1
 

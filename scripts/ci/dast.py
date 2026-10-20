@@ -38,9 +38,19 @@ def require(ok, message):
 def request(opener, url, method="GET", body=None, headers=None, expected=200):
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method, headers={"Content-Type": "application/json", **(headers or {})})
-    with opener.open(req, timeout=30) as response:
-        require(response.status == expected, "Unexpected status during authenticated discovery")
-        return response.read(), response.headers
+    # Diagnostics name the endpoint and status only: no query strings, bodies, cookies or tokens.
+    target = urllib.parse.urlsplit(url)
+    try:
+        with opener.open(req, timeout=30) as response:
+            require(response.status == expected, method + " " + target.netloc + target.path + " returned HTTP " + str(response.status) + ", expected " + str(expected))
+            return response.read(), response.headers
+    except urllib.error.HTTPError as error:
+        raise RuntimeError(method + " " + target.netloc + target.path + " returned HTTP " + str(error.code) + ", expected " + str(expected)) from None
+
+
+def summarize(messages):
+    # ZAP plan messages name jobs and URLs; strip query strings and bound the length.
+    return "; ".join(re.sub(r"\?\S*", "", str(message))[:200] for message in (messages or [])[:3])
 
 
 def zap_api(section, operation, **params):
@@ -145,8 +155,8 @@ def run_plan(role, urls, full_scan, extra):
     while time.monotonic() < deadline:
         progress = zap_api("automation", "view/planProgress", planId=plan_id)
         require(isinstance(progress.get("error"), list), "ZAP automation progress schema is incomplete")
-        require(not progress["error"], "ZAP automation reported an error")
-        require(not progress.get("warn"), "ZAP automation reported a warning; scan is incomplete")
+        require(not progress["error"], "ZAP automation reported an error: " + summarize(progress["error"]))
+        require(not progress.get("warn"), "ZAP automation reported a warning; scan is incomplete: " + summarize(progress.get("warn")))
         if re.match(r"^\d{4}-\d{2}-\d{2}T", str(progress.get("finished", ""))):
             authenticate(role)
             return verify_traffic(before, urls)
@@ -167,7 +177,7 @@ def main():
         try:
             request(DIRECT, UI + "/login")
             break
-        except (OSError, urllib.error.URLError):
+        except (OSError, urllib.error.URLError, RuntimeError):
             require(time.monotonic() < deadline, "HTTPS application readiness failed")
             time.sleep(2)
     with open("/tmp/zap.log", "w") as log:
@@ -274,6 +284,8 @@ if __name__ == "__main__":
         main()
     except Exception as error:
         REPORTS.mkdir(parents=True, exist_ok=True)
-        (REPORTS / "failure.json").write_text(json.dumps({"complete": False, "errorType": type(error).__name__}))
-        print("DAST failed: " + type(error).__name__ + ". No passing scan result was produced.", file=sys.stderr)
+        # Only messages raised by this script are shown; they never contain credentials or response data.
+        detail = str(error) if isinstance(error, RuntimeError) else ""
+        (REPORTS / "failure.json").write_text(json.dumps({"complete": False, "errorType": type(error).__name__, "detail": detail}))
+        print("DAST failed: " + type(error).__name__ + (": " + detail if detail else "") + ". No passing scan result was produced.", file=sys.stderr)
         sys.exit(1)

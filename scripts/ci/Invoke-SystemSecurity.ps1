@@ -19,10 +19,17 @@ try {
         return
     }
     Initialize-TrivyDatabase
+    # Evaluate every target before failing so one report shows all blocking findings.
+    $Violations = [System.Collections.Generic.List[string]]::new()
+    function Invoke-CollectedGate([string]$Target, [string]$Kind, [string[]]$ScanArguments) {
+        try { Invoke-TrivyGate platform $Target $Kind $ScanArguments }
+        catch { $Violations.Add($_.Exception.Message) }
+    }
     if ($Phase -in @('Configuration','All')) {
         if (-not (Test-Path 'reports/platform/auth-rendered.yaml')) { throw 'Rendered platform manifests missing.' }
-        Invoke-TrivyGate platform manifests misconfiguration @('config','reports/platform')
-        Invoke-TrivyGate platform dockerfiles misconfiguration @('config','deploy')
+        Invoke-CollectedGate manifests misconfiguration @('config','reports/platform')
+        # Helm templates are covered by the rendered manifests above; this target is the deploy Dockerfiles.
+        Invoke-CollectedGate dockerfiles misconfiguration @('config','--misconfig-scanners','dockerfile','deploy')
     }
     if ($Phase -in @('Images','All')) {
         # Resolve the exact images of running isolated containers, including vendor images.
@@ -35,8 +42,9 @@ try {
             $Service = $Details.Config.Labels.'com.docker.compose.service'
             if ($Seen.ContainsKey($Details.Image)) { continue }
             $Seen[$Details.Image] = $true
-            Invoke-TrivyGate platform $Service vulnerability @('image','--image-src','docker','--scanners','vuln','--list-all-pkgs',$Details.Image)
+            Invoke-CollectedGate $Service vulnerability @('image','--image-src','docker','--scanners','vuln','--list-all-pkgs',$Details.Image)
         }
     }
+    if ($Violations.Count) { throw ($Violations -join ' ') }
 }
 finally { Pop-Location }
