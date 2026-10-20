@@ -27,7 +27,7 @@ the roadmap.
 | Kubernetes | Helm-packaged Docker Desktop Kubernetes deployment |
 | Observability | Spring Actuator, Micrometer, Prometheus, Grafana, and structured logs |
 | Quality approach | Unit, MVC slice, persistence, messaging, API, and Playwright tests |
-| Delivery status | CI and independent local release packaging; production CD is not implemented |
+| Delivery status | GitHub Actions PR gates with security scanning and independent local release packaging; production CD is not implemented |
 
 ## Why this project exists
 
@@ -336,9 +336,12 @@ event-contracts/       Shared event contract examples and tests
 frontend/              Next.js application and BFF
 deploy/helm/           Platform, observability, service, and frontend charts
 deploy/jenkins/        Local Jenkins controller and agent setup
+deploy/security/       ZAP DAST image for the CI security scan
 docker/                PostgreSQL initialization and bootstrap scripts
 docs/                  Architecture, security, delivery, testing, and operations
 scripts/               Local development, deployment, and CI validation scripts
+.github/               GitHub Actions workflows, shared setup action, and Dependabot
+.ci/                   Pinned CI tools, security policy, and reviewed exceptions
 ```
 
 Important references:
@@ -346,10 +349,20 @@ Important references:
 - [Project overview and functional requirements](Project_Overview.md)
 - [Local development guide](docs/development/local-development.md)
 - [Testing strategy](docs/development/testing-strategy.md)
+- [GitHub Actions CI](docs/development/github-actions.md) and [PR quality and security gates](docs/development/pr-quality-security.md)
+- [Contributing](CONTRIBUTING.md) and the [agent guide](AGENTS.md)
 - [Architecture decisions](docs/architecture/architectural-decisions.md)
 - [Security mapping](docs/security/asvs-l2-mapping.md)
 - [Kubernetes and observability](docs/infrastructure/kubernetes-observability.md)
 - [Frontend notes](frontend/README.md)
+
+## Contributing
+
+Contributions follow [CONTRIBUTING.md](CONTRIBUTING.md): synthetic data only,
+conventional branches and commits, Arrange-Act-Assert tests, and eight
+GitHub Actions checks that must pass before merging. Coding agents also follow
+[AGENTS.md](AGENTS.md). Report vulnerabilities privately as described in
+[SECURITY.md](SECURITY.md).
 
 ## Data and usage disclaimer
 

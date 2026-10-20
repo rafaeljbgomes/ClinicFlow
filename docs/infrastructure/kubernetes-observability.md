@@ -73,6 +73,12 @@ and troubleshooting.
 - `NetworkPolicy`: declares default-deny traffic and then allows only the
   frontend, backend, database, RabbitMQ, DNS, and monitoring flows required by
   the prototype.
+- `SecurityContext`: application, PostgreSQL, and RabbitMQ pods run as fixed
+  non-root UIDs (10001 for ClinicFlow images, the images' own `postgres` and
+  `rabbitmq` users otherwise) with RuntimeDefault seccomp, no privilege
+  escalation, all capabilities dropped, and read-only root filesystems. Each
+  writable path (`/tmp`, the Next.js cache, the PostgreSQL socket directory)
+  is an `emptyDir`; data stays on the persistent volumes.
 - `ServiceMonitor`: tells Prometheus Operator how to scrape Spring Actuator and
   RabbitMQ metrics.
 

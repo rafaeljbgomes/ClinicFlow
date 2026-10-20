@@ -5,7 +5,8 @@
 ClinicFlow is an actively developed cloud-native therapy-practice platform
 prototype. It contains a Next.js backend-for-frontend, five Spring Boot
 services, PostgreSQL databases, RabbitMQ messaging, Docker Compose, Helm
-charts, local Kubernetes resources, and Jenkins CI pipelines.
+charts, local Kubernetes resources, GitHub Actions workflows, and local Jenkins
+CI pipelines.
 
 This policy covers:
 
@@ -17,8 +18,8 @@ This policy covers:
 - RabbitMQ event contracts and payload handling;
 - Docker, Helm, Kubernetes, NetworkPolicy, Actuator, and observability
   configuration;
-- Jenkins pipelines and repository automation that can affect build or
-  release integrity.
+- GitHub Actions workflows, Jenkins pipelines, and repository automation that
+  can affect build or release integrity.
 
 The supported deployment scope is local Docker Compose and local Docker Desktop
 Kubernetes. ClinicFlow is not production clinical software, is not a medical
@@ -48,7 +49,9 @@ Important trust boundaries are:
 3. Each service to its own PostgreSQL database and to RabbitMQ.
 4. Kubernetes workloads to platform infrastructure, Secrets, and management
    endpoints.
-5. Repository changes to Jenkins build, test, packaging, and image operations.
+5. Repository changes to GitHub Actions and Jenkins build, test, scanning,
+   packaging, and image operations. Fork pull requests run with a read-only
+   token and no secrets.
 
 The local demo credentials, local database credentials, and generated JWT keys
 are development conveniences only. They must not be treated as production
@@ -151,8 +154,9 @@ workload-isolation vulnerability.
 - Local infrastructure uses development credentials and local Secrets. A
   non-local deployment requires managed persistence and externally provisioned
   Secrets.
-- TLS, HSTS, production ingress controls, image scanning, and SBOM generation
-  remain future hardening work.
+- TLS, HSTS, and production ingress controls remain future hardening work.
+  CI generates CycloneDX SBOMs and scans dependencies and images with Trivy,
+  but images are not published, signed, or attested.
 - Auth services currently use configured RSA public-key material; dynamic JWKS
   discovery and other identity-provider improvements remain roadmap work.
 - RabbitMQ event publication does not yet provide the full reliability
