@@ -47,6 +47,7 @@
         <jackson-bom.version>2.21.8</jackson-bom.version>
         <postgresql.version>42.7.14</postgresql.version>
         <rabbit-amqp-client.version>5.34.0</rabbit-amqp-client.version>
+        <netty.version>4.1.139.Final</netty.version>
     </properties>
 
     <dependencies>
