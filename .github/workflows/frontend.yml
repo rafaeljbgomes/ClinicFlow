@@ -1,0 +1,214 @@
+name: frontend
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "15 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  CHANGE_ID: ${{ github.event.pull_request.number }}
+  CHANGE_TARGET: ${{ github.base_ref }}
+  CHANGE_BRANCH: ${{ github.head_ref }}
+  GIT_PREVIOUS_SUCCESSFUL_COMMIT: ${{ github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000' && github.event.before || '' }}
+  CLINICFLOW_FORCE: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+  CLINICFLOW_SECURITY_MODE: ${{ vars.CLINICFLOW_SECURITY_MODE || 'enforce' }}
+
+jobs:
+  route:
+    name: Route
+    uses: ./.github/workflows/_route.yml
+    with:
+      component: frontend
+
+  build:
+    name: Build, test and quality gate
+    needs: route
+    if: needs.route.outputs.affected == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up toolchain
+        uses: ./.github/actions/setup
+        with:
+          node: "true"
+          tools: sonar-scanner
+
+      - name: Prepare security context
+        run: node scripts/ci/security-policy.cjs prepare frontend
+
+      - name: Install dependencies
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Invoke-FrontendPhase.ps1 -Phase Install
+
+      - name: Unit tests with coverage
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Invoke-FrontendPhase.ps1 -Phase Unit
+
+      - name: Lint and type check
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Invoke-FrontendPhase.ps1 -Phase Quality
+
+      - name: Production build
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Invoke-FrontendPhase.ps1 -Phase Build
+
+      - name: Package
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Invoke-FrontendPhase.ps1 -Phase Package
+
+      - name: SonarQube Cloud quality gate
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Invoke-SonarGate.ps1 -Component frontend
+
+      - name: Test summary
+        if: always()
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Write-TestSummary.ps1 -Title "frontend tests" -JUnit frontend/test-results/unit.xml -Lcov frontend/coverage/lcov.info
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: frontend-evidence
+          path: |
+            frontend/test-results/
+            frontend/coverage/
+            reports/frontend/frontend-standalone.zip
+            reports/security/
+          if-no-files-found: warn
+          retention-days: 14
+
+  dependencies:
+    name: Dependency security
+    needs: route
+    if: needs.route.outputs.affected == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up toolchain
+        uses: ./.github/actions/setup
+        with:
+          tools: trivy
+          trivy-db: "true"
+
+      - name: Prepare security context
+        run: node scripts/ci/security-policy.cjs prepare frontend
+
+      - name: SBOM and dependency scan
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Invoke-ComponentSecurity.ps1 -Component frontend -Phase Dependencies
+
+      - name: Export SARIF
+        if: always() && github.event_name != 'pull_request'
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Export-TrivySarif.ps1 -Component frontend
+
+      - name: Upload to code scanning
+        if: always() && github.event_name != 'pull_request' && hashFiles('reports/sarif/*.sarif') != ''
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        with:
+          sarif_file: reports/sarif
+
+      - name: Upload security evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: frontend-dependency-security
+          path: reports/security/
+          if-no-files-found: warn
+          retention-days: 14
+
+  image:
+    name: Image build and security
+    needs: route
+    if: needs.route.outputs.affected == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    env:
+      IMAGE_TAG: clinicflow/frontend:${{ needs.route.outputs.run-id }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up toolchain
+        uses: ./.github/actions/setup
+        with:
+          tools: trivy
+          trivy-db: "true"
+
+      - name: Prepare security context
+        run: node scripts/ci/security-policy.cjs prepare frontend
+
+      - name: Image build
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Build-ComponentImage.ps1 -Component frontend -Tag "$IMAGE_TAG"
+
+      - name: Image scan
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Invoke-ComponentSecurity.ps1 -Component frontend -Phase Image -Image "$IMAGE_TAG"
+
+      - name: Dockerfile scan
+        if: success() || failure()
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Invoke-ComponentSecurity.ps1 -Component frontend -Phase Config
+
+      - name: Export SARIF
+        if: always() && github.event_name != 'pull_request'
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Export-TrivySarif.ps1 -Component frontend
+
+      - name: Upload to code scanning
+        if: always() && github.event_name != 'pull_request' && hashFiles('reports/sarif/*.sarif') != ''
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        with:
+          sarif_file: reports/sarif
+
+      - name: Upload security evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: frontend-image-security
+          path: reports/security/
+          if-no-files-found: warn
+          retention-days: 14
+
+  result:
+    name: clinicflow/frontend
+    if: always()
+    needs: [route, build, dependencies, image]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Evaluate the pipeline result
+        env:
+          ROUTE: ${{ needs.route.result }}
+          AFFECTED: ${{ needs.route.outputs.affected }}
+          FAILED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: |
+          echo "route=$ROUTE affected=$AFFECTED failed=$FAILED"
+          if [ "$ROUTE" != "success" ]; then echo "::error::Change routing finished with '$ROUTE'."; exit 1; fi
+          if [ "$AFFECTED" != "true" ]; then echo "Not affected by this change."; exit 0; fi
+          if [ "$FAILED" = "true" ]; then echo "::error::At least one frontend job failed or was cancelled."; exit 1; fi

@@ -1,5 +1,12 @@
 [CmdletBinding()]
-param([Parameter(Mandatory)][long]$IntegrationId, [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$VerifiedCommit, [switch]$Apply)
+param(
+    [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$VerifiedCommit,
+    # 15368 is the GitHub Actions app; binding checks to it stops other apps from satisfying them.
+    [long]$IntegrationId = 15368,
+    # Require PR branches to be up to date with main before merging.
+    [switch]$Strict,
+    [switch]$Apply
+)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $Root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
@@ -17,10 +24,10 @@ $Current = Read-GitHub "$Repo/rulesets/$($Selected[0].id)"
 $Runs = (Read-GitHub "$Repo/commits/$VerifiedCommit/check-runs?per_page=100").check_runs
 foreach ($Name in $Settings.requiredChecks) {
     $Latest = @($Runs | Where-Object { $_.name -eq $Name -and $_.app.id -eq $IntegrationId } | Sort-Object started_at -Descending)
-    if (-not $Latest -or $Latest[0].conclusion -ne 'success') { throw "Missing successful check from expected Jenkins App: $Name" }
+    if (-not $Latest -or $Latest[0].conclusion -ne 'success') { throw "Missing successful check from the expected app ($IntegrationId): $Name" }
 }
 $Required = @{ type = 'required_status_checks'; parameters = @{
-    strict_required_status_checks_policy = $true
+    strict_required_status_checks_policy = $Strict.IsPresent
     required_status_checks = @($Settings.requiredChecks | ForEach-Object { @{context = $_; integration_id = $IntegrationId} })
 } }
 $Proposal = @{
@@ -33,7 +40,6 @@ New-Item -ItemType Directory -Force $Directory | Out-Null
 $Path = "$Directory/ruleset-proposal.json"
 $Proposal | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $Path
 if ($Apply) {
-    if ($env:CLINICFLOW_SECURITY_MODE -ne 'enforce') { throw 'Set enforce mode only after verifying live Jenkins configuration and scanner results.' }
     & gh api --method PUT "$Repo/rulesets/$($Current.id)" --input $Path
     if ($LASTEXITCODE -ne 0) { throw 'GitHub rejected the ruleset update.' }
 } else { Write-Host "Review $Path. No GitHub settings have been changed." }

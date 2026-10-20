@@ -1,0 +1,58 @@
+name: appointment-service
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "15 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  route:
+    name: Route
+    uses: ./.github/workflows/_route.yml
+    with:
+      component: appointment-service
+
+  pipeline:
+    name: Pipeline
+    needs: route
+    if: needs.route.outputs.affected == 'true'
+    uses: ./.github/workflows/_backend-service.yml
+    permissions:
+      contents: read
+      security-events: write
+    with:
+      service: appointment-service
+      run-id: ${{ needs.route.outputs.run-id }}
+      # Mutation testing is too slow for every PR; it runs on main and nightly instead.
+      mutation: ${{ github.event_name != 'pull_request' }}
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  result:
+    name: clinicflow/appointment
+    if: always()
+    needs: [route, pipeline]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Evaluate the pipeline result
+        env:
+          ROUTE: ${{ needs.route.result }}
+          AFFECTED: ${{ needs.route.outputs.affected }}
+          PIPELINE: ${{ needs.pipeline.result }}
+        run: |
+          echo "route=$ROUTE affected=$AFFECTED pipeline=$PIPELINE"
+          if [ "$ROUTE" != "success" ]; then echo "::error::Change routing finished with '$ROUTE'."; exit 1; fi
+          if [ "$AFFECTED" != "true" ]; then echo "Not affected by this change."; exit 0; fi
+          if [ "$PIPELINE" != "success" ]; then echo "::error::The pipeline finished with '$PIPELINE'."; exit 1; fi

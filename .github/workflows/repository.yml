@@ -1,0 +1,50 @@
+name: repository
+
+# Always-on repository gate: secret hygiene, CI policy regression tests, configuration parsing and
+# workflow linting. It runs for every change, including documentation-only pull requests.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  repository:
+    name: clinicflow/repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up toolchain
+        uses: ./.github/actions/setup
+        with:
+          node: "true"
+          tools: betterleaks actionlint zizmor
+
+      - name: Repository hygiene
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Test-RepositoryHygiene.ps1
+
+      - name: Workflow lint
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Test-Workflows.ps1
+
+      - name: Security policy regression tests
+        run: |
+          node --test scripts/ci/tests/*.test.cjs
+          pwsh -NoLogo -NoProfile -File scripts/ci/tests/Test-TrivyCache.ps1
+          python3 -m unittest discover -s scripts/ci/tests -p test_dast.py -v
+
+      - name: Configuration validation
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Test-SecurityConfiguration.ps1

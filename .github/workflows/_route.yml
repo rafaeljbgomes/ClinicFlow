@@ -1,0 +1,58 @@
+name: Route changes
+
+# Decides whether a component is affected by the change under test. The routing rules live in
+# scripts/ci/security-policy.cjs so Jenkins and GitHub Actions share one definition.
+on:
+  workflow_call:
+    inputs:
+      component:
+        description: Component key understood by security-policy.cjs.
+        type: string
+        required: true
+    outputs:
+      affected:
+        description: Whether the component must be validated.
+        value: ${{ jobs.route.outputs.affected }}
+      full-system:
+        description: Whether the change needs full-system acceptance.
+        value: ${{ jobs.route.outputs.full-system }}
+      dast:
+        description: Whether the change needs authenticated DAST.
+        value: ${{ jobs.route.outputs.dast }}
+      run-id:
+        description: Stable identifier for isolated Compose projects and image tags.
+        value: ${{ jobs.route.outputs.run-id }}
+
+permissions:
+  contents: read
+
+env:
+  CHANGE_ID: ${{ github.event.pull_request.number }}
+  CHANGE_TARGET: ${{ github.base_ref }}
+  GIT_PREVIOUS_SUCCESSFUL_COMMIT: ${{ github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000' && github.event.before || '' }}
+  CLINICFLOW_FORCE: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+
+jobs:
+  route:
+    name: Route
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      affected: ${{ steps.prepare.outputs.affected }}
+      full-system: ${{ steps.prepare.outputs.full-system }}
+      dast: ${{ steps.prepare.outputs.dast }}
+      run-id: ${{ steps.prepare.outputs.run-id }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Route the change
+        id: prepare
+        env:
+          COMPONENT: ${{ inputs.component }}
+        run: |
+          node scripts/ci/security-policy.cjs prepare "$COMPONENT"
+          node -e "const c=require('./reports/security/context.json');console.log(JSON.stringify({affected:c.affected,fullSystem:c.fullSystem,dast:c.dast,components:c.components,files:c.files.length},null,2))"

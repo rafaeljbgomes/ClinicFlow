@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "tools": {
+    "helm": {
+      "version": "4.2.4",
+      "url": "https://get.helm.sh/helm-v{version}-linux-amd64.tar.gz",
+      "sha256": "c306b46f719b0a4da32d0f78ee21bf90ce8d602f15b22ab753f0674d1670a7f3",
+      "binary": "linux-amd64/helm"
+    },
+    "kubeconform": {
+      "version": "0.8.0",
+      "url": "https://github.com/yannh/kubeconform/releases/download/v{version}/kubeconform-linux-amd64.tar.gz",
+      "sha256": "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883",
+      "binary": "kubeconform"
+    },
+    "actionlint": {
+      "version": "1.7.12",
+      "url": "https://github.com/rhysd/actionlint/releases/download/v{version}/actionlint_{version}_linux_amd64.tar.gz",
+      "sha256": "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8",
+      "binary": "actionlint"
+    },
+    "betterleaks": {
+      "version": "1.8.1",
+      "url": "https://github.com/betterleaks/betterleaks/releases/download/v{version}/betterleaks_{version}_linux_x64.tar.gz",
+      "sha256": "efa407244e1ea8e35f582b8a42becdeac08bdead04f68eb752adda722d583c2a",
+      "binary": "betterleaks"
+    },
+    "trivy": {
+      "version": "0.76.0",
+      "url": "https://github.com/aquasecurity/trivy/releases/download/v{version}/trivy_{version}_Linux-64bit.tar.gz",
+      "sha256": "e24b1c51293c1b15e4ba8d45bbc7891ba053f90278ec2698f3562c993e145fe7",
+      "binary": "trivy"
+    },
+    "sonar-scanner": {
+      "version": "8.1.0.6389",
+      "url": "https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-{version}.zip",
+      "sha256": "ab76ab3c360025e9108be5b55be066f304a164f8b2850d2f2f333915db51bc1b",
+      "binary": "sonar-scanner-{version}/bin/sonar-scanner"
+    },
+    "zizmor": {
+      "version": "1.31.1",
+      "url": "https://files.pythonhosted.org/packages/py3/z/zizmor/zizmor-{version}-py3-none-manylinux_2_28_x86_64.whl",
+      "sha256": "58e878eb2dbd2c6183c105e1ac28c14f7dd1eca44a783f1fe2a69647d012c410",
+      "binary": "zizmor-{version}.data/scripts/zizmor"
+    }
+  }
+}

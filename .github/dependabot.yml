@@ -1,0 +1,80 @@
+version: 2
+updates:
+  - package-ecosystem: maven
+    directories:
+      - /
+      - /auth-service
+      - /patient-service
+      - /appointment-service
+      - /clinical-service
+      - /notification-service
+      - /event-contracts
+      - /coverage-report
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Lisbon
+    open-pull-requests-limit: 5
+    # Let new releases settle for a week before proposing them.
+    cooldown:
+      default-days: 7
+    groups:
+      maven-minor-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "build(deps)"
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Lisbon
+    open-pull-requests-limit: 5
+    # Let new releases settle for a week before proposing them.
+    cooldown:
+      default-days: 7
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "build(deps)"
+  - package-ecosystem: docker
+    directories:
+      - /auth-service
+      - /patient-service
+      - /appointment-service
+      - /clinical-service
+      - /notification-service
+      - /frontend
+      - /deploy/gateway
+      - /deploy/security
+      - /deploy/jenkins/agent
+      - /deploy/jenkins/controller
+      - /docker/postgres/bootstrap
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Lisbon
+    open-pull-requests-limit: 5
+    # Let new releases settle for a week before proposing them.
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "build(deps)"
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/setup
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Lisbon
+    open-pull-requests-limit: 5
+    # Let new releases settle for a week before proposing them.
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci(deps)"

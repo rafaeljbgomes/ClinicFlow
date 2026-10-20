@@ -1,0 +1,66 @@
+name: Set up ClinicFlow CI
+description: Installs the pinned toolchain shared by the ClinicFlow workflows.
+
+inputs:
+  java:
+    description: Install Temurin 21 with the Maven cache.
+    default: "false"
+  node:
+    description: Install Node.js with the frontend npm cache.
+    default: "false"
+  tools:
+    description: Space-separated tools from .ci/tools.json.
+    default: ""
+  trivy-db:
+    description: Restore the daily Trivy vulnerability database cache.
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Java 21
+      if: inputs.java == 'true'
+      uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      with:
+        distribution: temurin
+        java-version: "21"
+        cache: maven
+
+    - name: Set up Node.js
+      if: inputs.node == 'true'
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: "24.19.0"
+        cache: npm
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Restore pinned CI tools
+      if: inputs.tools != ''
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.tool_cache }}/clinicflow
+        key: clinicflow-tools-${{ runner.os }}-${{ hashFiles('.ci/tools.json') }}-${{ inputs.tools }}
+
+    - name: Install pinned CI tools
+      if: inputs.tools != ''
+      shell: pwsh
+      env:
+        CLINICFLOW_TOOLS: ${{ inputs.tools }}
+      run: ./scripts/ci/Install-CiTools.ps1 -Tools ($env:CLINICFLOW_TOOLS -split '\s+' | Where-Object { $_ })
+
+    - name: Resolve the Trivy database date
+      id: trivy-date
+      if: inputs.trivy-db == 'true'
+      shell: bash
+      # Security-Common.ps1 defaults TRIVY_CACHE_DIR to $RUNNER_TEMP/trivy-cache on GitHub runners.
+      run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the Trivy database
+      if: inputs.trivy-db == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ${{ runner.temp }}/trivy-cache/db
+          ${{ runner.temp }}/trivy-cache/java-db
+        key: trivy-db-${{ steps.trivy-date.outputs.date }}
+        restore-keys: trivy-db-
