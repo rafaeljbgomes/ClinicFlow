@@ -14,6 +14,19 @@ postgres:
     limits:
       cpu: 500m
       memory: 512Mi
+  # The image's postgres user (70) runs without the gosu privilege drop. No fsGroup: a recursive
+  # group change would loosen PGDATA permissions, which PostgreSQL refuses to start with.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 70
+    runAsGroup: 70
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
 
 rabbitmq:
   name: rabbitmq
@@ -30,6 +43,18 @@ rabbitmq:
     limits:
       cpu: 500m
       memory: 512Mi
+  # The image's rabbitmq user (100:101); the data volume holds the Erlang cookie and plugin list.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 100
+    runAsGroup: 101
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
 
 serviceMonitor:
   enabled: true

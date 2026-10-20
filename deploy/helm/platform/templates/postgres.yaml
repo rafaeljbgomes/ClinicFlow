@@ -47,10 +47,14 @@ spec:
         {{- include "clinicflow-platform.labels" . | nindent 8 }}
         app.kubernetes.io/component: postgres
     spec:
+      securityContext:
+        {{- toYaml .Values.postgres.podSecurityContext | nindent 8 }}
       containers:
         - name: postgres
           image: {{ .Values.postgres.image | quote }}
           imagePullPolicy: IfNotPresent
+          securityContext:
+            {{- toYaml .Values.postgres.securityContext | nindent 12 }}
           ports:
             - name: postgres
               containerPort: 5432
@@ -87,7 +91,16 @@ spec:
             - name: init
               mountPath: /docker-entrypoint-initdb.d
               readOnly: true
+            # Writable paths beside PGDATA on the read-only root filesystem.
+            - name: run
+              mountPath: /var/run/postgresql
+            - name: tmp
+              mountPath: /tmp
       volumes:
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
         - name: init
           configMap:
             name: postgres-init

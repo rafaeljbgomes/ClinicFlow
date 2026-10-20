@@ -15,10 +15,14 @@ spec:
         {{- include "clinicflow-service.labels" . | nindent 8 }}
         app.kubernetes.io/component: {{ .Values.name }}
     spec:
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: {{ .Values.name }}
           image: {{ include "clinicflow-service.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
           ports:
             - name: http
               containerPort: {{ .Values.port }}
@@ -86,7 +90,12 @@ spec:
             - name: jwt
               mountPath: /run/secrets/clinicflow
               readOnly: true
+            # The root filesystem is read-only; Tomcat and the JVM write only to /tmp.
+            - name: tmp
+              mountPath: /tmp
       volumes:
+        - name: tmp
+          emptyDir: {}
         - name: jwt
           secret:
             secretName: {{ .Values.jwt.secretName }}

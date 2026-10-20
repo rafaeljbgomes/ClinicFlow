@@ -23,7 +23,7 @@ ENV PORT=3000
 # The standalone server needs only node; package managers would ship their own dependency tree.
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
         /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /opt/yarn-* /usr/local/bin/yarn /usr/local/bin/yarnpkg \
-    && addgroup -S nextjs && adduser -S nextjs -G nextjs
+    && addgroup -S -g 10001 nextjs && adduser -S -u 10001 -G nextjs nextjs
 
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nextjs /app/.next/standalone ./
