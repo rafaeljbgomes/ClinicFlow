@@ -311,3 +311,14 @@ shared `security-policy.cjs` rules, and always report a final
 `main`, nightly and on demand rather than on PRs. Jenkins remains an on-demand
 local runner. See [ADR-022](decisions/ADR-022-github-actions-ci.md) for the
 trade-offs, including how workflow changes are debugged before they are merged.
+
+## ADR-023: Spring Boot 4 Platform Baseline
+
+Decision: the services run on Spring Boot 4.1 with Spring Framework 7, Spring
+Security 7, Spring AMQP 4, Hibernate 7, Jackson 3, Testcontainers 2 and JUnit 6,
+on Java 21. They use the modular starters and per-technology test starters,
+Jackson 3 for application and message JSON, Spring Framework's core retry for
+listener retry (four deliveries before dead-lettering, unchanged), and
+`RestTestClient` for API integration tests. See
+[ADR-023](decisions/ADR-023-spring-boot-4.md) for the migration details and
+consequences.

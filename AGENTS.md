@@ -17,7 +17,7 @@ follow the same rules in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 | Path | Contents |
 | --- | --- |
-| `*-service/` | Spring Boot 3 services (Java 21, Clean Architecture, MapStruct, Flyway, PostgreSQL per service). |
+| `*-service/` | Spring Boot 4 services (Java 21, Spring Framework 7, Jackson 3, Clean Architecture, MapStruct, Flyway, PostgreSQL per service). |
 | `event-contracts/` | Shared RabbitMQ event payload contracts. |
 | `frontend/` | Next.js App Router UI and same-origin BFF. Read `frontend/AGENTS.md` before frontend changes. |
 | `deploy/` | Helm charts, gateway (Traefik) configuration, Jenkins and security tooling. |
