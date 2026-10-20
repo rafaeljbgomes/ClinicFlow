@@ -1,5 +1,9 @@
 # DM-02: Independent Service-Scoped Jenkins CI
 
+> GitHub Actions now hosts the PR gates with the same component boundaries and
+> scripts ([ADR-021](../decisions/ADR-021-github-actions-ci.md)). The Jenkins
+> pipelines described here remain the local, on-demand runner.
+
 Tracked by [GitHub issue #6](https://github.com/rafaeljbgomes/ClinicFlow/issues/6).
 
 ## Problem

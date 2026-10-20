@@ -148,9 +148,11 @@ through RabbitMQ.
   Desktop Kubernetes.
 - Spring Actuator, Micrometer, ECS-style JSON logging, Prometheus, Grafana,
   ServiceMonitors, and Kubernetes NetworkPolicies.
-- Service-scoped Jenkins CI pipelines for deployable components, alongside a
-  shared system-validation pipeline. These pipelines are CI only: they do not
-  publish images, promote artifacts, or deploy an environment.
+- GitHub Actions CI with one workflow per deployable component plus system and
+  repository gates, including SonarQube Cloud, Trivy SBOM/dependency/image/
+  configuration scans, and authenticated HTTPS ZAP DAST. The same scripts also
+  run as service-scoped Jenkins pipelines locally. CI does not publish images,
+  promote artifacts, or deploy an environment.
 
 ## Security position
 
@@ -280,8 +282,10 @@ server according to the Playwright configuration.
 
 The repository includes PowerShell validation scripts for hygiene, backend
 quality, frontend quality, Compose/Playwright validation, image builds, and
-Helm rendering/schema validation. `Jenkinsfile.system` owns cross-service
-validation, while the service pipelines own component-level CI.
+Helm rendering/schema validation. GitHub Actions runs them on every pull
+request through per-component workflows and a cross-service `system` workflow;
+see [GitHub Actions CI](docs/development/github-actions.md). The equivalent
+Jenkinsfiles remain available for local runs.
 
 See the [testing strategy](docs/development/testing-strategy.md) for suite
 conventions, coverage thresholds, reports, and CI details.
