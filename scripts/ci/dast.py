@@ -231,9 +231,11 @@ def main():
                     require(isinstance(existing, list) and existing, "Synthetic patient fixtures missing")
                     patient_id = existing[0]["id"]
                     stamp = str(time.time_ns())
+                    # A fresh synthetic patient keeps case creation clear of the one-active-case rule.
+                    body = {"email": "dast." + stamp + "@demo.clinicflow.local", "fullName": "Synthetic DAST Patient", "consentStatus": "GRANTED"}
+                    raw, _ = request(PROXY, API + "/api/v1/patients", "POST", body, expected=201)
+                    fresh_patient_id = json.loads(raw)["id"]
                     if "patient-service" in selected:
-                        body = {"email": "dast." + stamp + "@demo.clinicflow.local", "fullName": "Synthetic DAST Patient", "consentStatus": "GRANTED"}
-                        request(PROXY, API + "/api/v1/patients", "POST", body, expected=201)
                         body["email"] = "dast.bff." + stamp + "@demo.clinicflow.local"
                         request(PROXY, UI + "/api/patients", "POST", body, expected=201)
                         extra += [API + "/api/v1/patients", UI + "/api/patients"]
@@ -242,7 +244,7 @@ def main():
                         request(PROXY, API + "/api/v1/appointments", "POST", {"patientId": patient_id, "scheduledAt": when, "type": "IN_PERSON"}, expected=201)
                         extra.append(API + "/api/v1/appointments")
                     if "clinical-service" in selected:
-                        raw, _ = request(PROXY, API + "/api/v1/clinical/clinical-cases", "POST", {"patientId": patient_id, "presentingConcern": "Synthetic DAST case"}, expected=201)
+                        raw, _ = request(PROXY, API + "/api/v1/clinical/clinical-cases", "POST", {"patientId": fresh_patient_id, "presentingConcern": "Synthetic DAST case"}, expected=201)
                         case_id = json.loads(raw)["id"]
                         sessions = API + "/api/v1/clinical/clinical-cases/" + case_id + "/session-records"
                         raw, _ = request(PROXY, sessions, "POST", {"sessionDate": datetime.now(timezone.utc).isoformat(), "modality": "IN_PERSON", "durationMinutes": 30, "attendanceStatus": "ATTENDED", "summary": "Synthetic DAST note"}, expected=201)
