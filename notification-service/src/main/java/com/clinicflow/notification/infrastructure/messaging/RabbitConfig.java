@@ -10,7 +10,7 @@ import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFacto
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.config.RetryInterceptorBuilder;
 import org.springframework.amqp.rabbit.retry.MessageRecoverer;
-import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
+import org.springframework.amqp.support.converter.JacksonJsonMessageConverter;
 import org.springframework.amqp.support.converter.MessageConverter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -64,7 +64,7 @@ public class RabbitConfig {
 
     @Bean
     MessageConverter messageConverter() {
-        return new Jackson2JsonMessageConverter();
+        return new JacksonJsonMessageConverter();
     }
 
     @Bean
@@ -85,7 +85,8 @@ public class RabbitConfig {
         factory.setAutoStartup(autoStartup);
         factory.setDefaultRequeueRejected(false);
         factory.setAdviceChain(RetryInterceptorBuilder.stateless()
-                .maxAttempts(retry.maxAttempts())
+                // maxAttempts counts the first delivery; Spring AMQP 4 configures only the retries after it.
+                .maxRetries(retry.maxAttempts() - 1)
                 .backOffOptions(retry.initialInterval().toMillis(), retry.multiplier(), retry.maxInterval().toMillis())
                 .recoverer(messageRecoverer)
                 .build());

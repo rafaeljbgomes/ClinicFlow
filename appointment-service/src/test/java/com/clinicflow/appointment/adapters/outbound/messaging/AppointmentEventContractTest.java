@@ -12,9 +12,10 @@ import com.clinicflow.appointment.domain.events.AppointmentCancelledEvent;
 import com.clinicflow.appointment.domain.events.AppointmentCompletedEvent;
 import com.clinicflow.appointment.domain.events.AppointmentRescheduledEvent;
 import com.clinicflow.appointment.domain.events.AppointmentScheduledEvent;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.cfg.DateTimeFeature;
+import tools.jackson.databind.JsonNode;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -36,8 +37,9 @@ class AppointmentEventContractTest {
     private static final PsychologistId PSYCHOLOGIST_ID = new PsychologistId(
             UUID.fromString("33333333-3333-3333-3333-333333333333"));
 
-    private final ObjectMapper json = new ObjectMapper().findAndRegisterModules()
-            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+    private final ObjectMapper json = JsonMapper.builder().findAndAddModules()
+            .disable(DateTimeFeature.WRITE_DATES_AS_TIMESTAMPS)
+            .build();
     private final AppointmentEventMapper mapper = Mappers.getMapper(AppointmentEventMapper.class);
 
     static Stream<Arguments> canonicalContracts() {

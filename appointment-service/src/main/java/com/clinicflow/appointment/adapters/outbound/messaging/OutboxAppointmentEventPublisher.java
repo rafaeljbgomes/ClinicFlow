@@ -5,8 +5,8 @@ import com.clinicflow.appointment.domain.events.AppointmentCancelledEvent;
 import com.clinicflow.appointment.domain.events.AppointmentCompletedEvent;
 import com.clinicflow.appointment.domain.events.AppointmentRescheduledEvent;
 import com.clinicflow.appointment.domain.events.AppointmentScheduledEvent;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 
@@ -66,7 +66,7 @@ public class OutboxAppointmentEventPublisher implements AppointmentEventPublishe
     private String serialize(Object payload) {
         try {
             return objectMapper.writeValueAsString(payload);
-        } catch (JsonProcessingException exception) {
+        } catch (JacksonException exception) {
             throw new IllegalStateException("Could not serialize appointment event for the outbox", exception);
         }
     }

@@ -4,9 +4,10 @@ import com.clinicflow.patient.domain.EmailAddress;
 import com.clinicflow.patient.domain.PatientId;
 import com.clinicflow.patient.domain.PsychologistId;
 import com.clinicflow.patient.domain.events.PatientCreatedEvent;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.cfg.DateTimeFeature;
 import org.junit.jupiter.api.Test;
 import org.mapstruct.factory.Mappers;
 
@@ -16,8 +17,9 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class PatientEventContractTest {
-    private final ObjectMapper json = new ObjectMapper().findAndRegisterModules()
-            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+    private final ObjectMapper json = JsonMapper.builder().findAndAddModules()
+            .disable(DateTimeFeature.WRITE_DATES_AS_TIMESTAMPS)
+            .build();
     private final PatientEventMapper mapper = Mappers.getMapper(PatientEventMapper.class);
 
     @Test

@@ -1,8 +1,9 @@
 package com.clinicflow.notification.adapters.inbound.messaging;
 
 import com.clinicflow.notification.application.commands.ProcessNotificationEventCommand;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -11,8 +12,9 @@ import org.mapstruct.factory.Mappers;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class NotificationEventContractTest {
-    private final ObjectMapper json = new ObjectMapper().findAndRegisterModules()
-            .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+    private final ObjectMapper json = JsonMapper.builder().findAndAddModules()
+            .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+            .build();
     private final NotificationEventMapper mapper = Mappers.getMapper(NotificationEventMapper.class);
 
     @ParameterizedTest(name = "consumes {0}")
