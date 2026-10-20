@@ -1,4 +1,4 @@
-# ADR-021: GitHub Actions as the PR gate of record
+# ADR-022: GitHub Actions as the PR gate of record
 
 Status: implemented; required checks are activated after live acceptance. Date: 2026-10-20.
 

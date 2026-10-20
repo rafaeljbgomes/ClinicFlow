@@ -301,7 +301,7 @@ failure metrics plus structured event-id, routing-key, retry-count, and outcome
 logs make the relay observable. This implementation is intentionally duplicated
 inside the two bounded services instead of creating a shared runtime module.
 
-## ADR-021: GitHub Actions as the PR Gate of Record
+## ADR-022: GitHub Actions as the PR Gate of Record
 
 Decision: pull requests, `main`, nightly and manual validation run on
 GitHub-hosted runners. One workflow per deployable component plus `system` and
@@ -309,5 +309,5 @@ GitHub-hosted runners. One workflow per deployable component plus `system` and
 shared `security-policy.cjs` rules, and always report a final
 `clinicflow/<component>` check that branch rules can require. PIT runs on
 `main`, nightly and on demand rather than on PRs. Jenkins remains an on-demand
-local runner. See [ADR-021](decisions/ADR-021-github-actions-ci.md) for the
+local runner. See [ADR-022](decisions/ADR-022-github-actions-ci.md) for the
 trade-offs, including how workflow changes are debugged before they are merged.
