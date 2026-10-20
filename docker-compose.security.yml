@@ -2,7 +2,7 @@
 # No security target publishes host ports or uses workstation secrets.
 services:
   certificate-bootstrap:
-    image: alpine/openssl:3.5.7@sha256:47f40fac08a77cbdfb02444e543808aa36b9e31e21a261f4d94ffaf0c5c73832
+    image: alpine/openssl:3.5.8@sha256:3f25da71f70eba788067daac3f3df03bd1de7a7c52ed89fa93b94ad2c92d986b
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
