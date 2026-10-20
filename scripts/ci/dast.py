@@ -189,15 +189,17 @@ def main():
             require(time.monotonic() < deadline, "HTTPS application readiness failed")
             time.sleep(2)
     with open("/tmp/zap.log", "w") as log:
-        zap = subprocess.Popen(["/zap/zap.sh", "-daemon", "-host", "127.0.0.1", "-port", "8090", "-config", "api.disablekey=true", "-config", "connection.timeoutInSecs=10"], stdout=log, stderr=subprocess.STDOUT)
+        # -silent skips the add-on update and telemetry calls that made startup time depend on the network.
+        zap = subprocess.Popen(["/zap/zap.sh", "-daemon", "-silent", "-host", "127.0.0.1", "-port", "8090", "-config", "api.disablekey=true", "-config", "connection.timeoutInSecs=10"], stdout=log, stderr=subprocess.STDOUT)
         try:
-            deadline = time.monotonic() + 120
+            deadline = time.monotonic() + 300
             while True:
                 try:
                     version = zap_api("core", "view/version")["version"]
                     break
                 except (OSError, urllib.error.URLError):
-                    require(time.monotonic() < deadline and zap.poll() is None, "ZAP startup failed")
+                    require(zap.poll() is None, "ZAP exited during startup with code " + str(zap.poll()))
+                    require(time.monotonic() < deadline, "ZAP API did not answer within 300 seconds of startup")
                     time.sleep(2)
             root_bytes = urllib.request.urlopen(ZAP + "/OTHER/core/other/rootcert/", timeout=30).read()
             root_cert = root_bytes.decode() if root_bytes.startswith(b"-----BEGIN") else ssl.DER_cert_to_PEM_cert(root_bytes)
