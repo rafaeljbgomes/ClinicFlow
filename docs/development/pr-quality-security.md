@@ -122,7 +122,9 @@ narrowly excepted; Medium/Low alerts remain visible.
 
 PR scans cover auth-service plus the affected components, with a two-minute
 active-scan budget per role. Scheduled and manual runs scan every component with
-a twelve-minute budget per role. Unfinished scans fail. Sensitive ZAP sessions,
+a twelve-minute budget per role. A scan the budget stops still has to end
+normally, and the coverage report records how far it got; a scan that is still
+running at the outer timeout, or ends in any other state, fails. Sensitive ZAP sessions,
 requests, response bodies and cookies stay inside the disposable container;
 only sanitized findings and coverage are uploaded.
 

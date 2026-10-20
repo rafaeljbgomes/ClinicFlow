@@ -103,8 +103,11 @@ def verify_traffic(before, urls):
     scans = [scan for scan in zap_api("ascan", "view/scans")["scans"] if str(scan["id"]) not in before]
     require(scans, "Automation produced no active scan")
     message_ids = []
+    progress = []
     for scan in scans:
-        require(str(scan.get("progress")) == "100", "Active scan did not finish")
+        # A scan stopped by its time budget ends FINISHED below 100%; its progress is reported, not hidden.
+        require(str(scan.get("state", "")).upper() == "FINISHED", "Active scan ended in state " + str(scan.get("state")))
+        progress.append(int(scan.get("progress", 0)))
         response = zap_api("ascan", "view/messagesIds", scanId=scan["id"])
         lists = [value for value in response.values() if isinstance(value, list)]
         require(len(lists) == 1, "Active message inventory missing")
@@ -128,7 +131,7 @@ def verify_traffic(before, urls):
             statuses.append(int(match.group(1)))
     require(statuses and sum(code in (401, 403) for code in statuses) <= len(statuses) / 2, "Active traffic predominantly lost authenticated access")
     require(all(urllib.parse.urlsplit(origin).netloc in origins for origin in (API, UI)), "Active API/BFF traffic missing")
-    return {"requests": len(message_ids), "sampleSize": len(statuses), "rejected": sum(code in (401, 403) for code in statuses)}
+    return {"requests": len(message_ids), "sampleSize": len(statuses), "rejected": sum(code in (401, 403) for code in statuses), "progress": min(progress)}
 
 
 def run_plan(role, urls, full_scan, extra):

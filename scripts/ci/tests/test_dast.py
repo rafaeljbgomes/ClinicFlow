@@ -55,7 +55,7 @@ class AutomationContractTest(unittest.TestCase):
     def test_active_authentication_loss_fails(self):
         def api(section, operation, **params):
             if operation == "view/scans":
-                return {"scans": [{"id": "1", "progress": "100"}]}
+                return {"scans": [{"id": "1", "progress": "100", "state": "FINISHED"}]}
             if operation == "view/messagesIds":
                 return {"messagesIds": ["1", "2", "3"]}
             return {"messages": [{"requestHeader": "GET / HTTP/1.1\r\nHost: api.clinicflow.localhost:8443\r\n", "responseHeader": "HTTP/1.1 401 Unauthorized"}]}
@@ -65,7 +65,7 @@ class AutomationContractTest(unittest.TestCase):
     def test_verified_active_api_and_bff_traffic(self):
         def api(section, operation, **params):
             if operation == "view/scans":
-                return {"scans": [{"id": "1", "progress": "100"}]}
+                return {"scans": [{"id": "1", "progress": "100", "state": "FINISHED"}]}
             if operation == "view/messagesIds":
                 return {"messagesIds": ["1", "2", "3"]}
             return {"messages": [
@@ -74,6 +74,24 @@ class AutomationContractTest(unittest.TestCase):
                 {"requestHeader": "POST /api/v1/auth/login HTTP/1.1\r\nHost: api.clinicflow.localhost:8443\r\n", "responseHeader": "HTTP/1.1 401 Unauthorized"}]}
         with patch.object(dast, "zap_api", side_effect=api):
             self.assertEqual(dast.verify_traffic(set(), [dast.API])["requests"], 3)
+
+    def test_budget_stopped_scan_reports_partial_progress(self):
+        def api(section, operation, **params):
+            if operation == "view/scans":
+                return {"scans": [{"id": "1", "progress": "64", "state": "FINISHED"}]}
+            if operation == "view/messagesIds":
+                return {"messagesIds": ["1", "2", "3"]}
+            return {"messages": [
+                {"requestHeader": "GET / HTTP/1.1\r\nHost: api.clinicflow.localhost:8443\r\n", "responseHeader": "HTTP/1.1 200 OK"},
+                {"requestHeader": "GET / HTTP/1.1\r\nHost: clinicflow.localhost:8443\r\n", "responseHeader": "HTTP/1.1 200 OK"}]}
+        with patch.object(dast, "zap_api", side_effect=api):
+            self.assertEqual(dast.verify_traffic(set(), [dast.API])["progress"], 64)
+
+    def test_running_scan_fails(self):
+        def api(section, operation, **params):
+            return {"scans": [{"id": "1", "progress": "40", "state": "RUNNING"}]}
+        with patch.object(dast, "zap_api", side_effect=api), self.assertRaises(RuntimeError):
+            dast.verify_traffic(set(), [dast.API])
 
 
 if __name__ == "__main__":
