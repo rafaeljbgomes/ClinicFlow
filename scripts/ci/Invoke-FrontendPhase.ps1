@@ -18,7 +18,7 @@ try {
             if ($LASTEXITCODE -ne 0) { throw "Frontend dependency installation failed." }
         }
         "Unit" {
-            & npm run test:unit
+            & npm run test:unit:coverage
             if ($LASTEXITCODE -ne 0) { throw "Frontend unit tests failed." }
         }
         "Quality" {

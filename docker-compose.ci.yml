@@ -1,5 +1,6 @@
 services:
   gateway:
+    image: clinicflow/gateway:ci-${CLINICFLOW_CI_IMAGE_TAG:-local}
     environment:
       CLINICFLOW_GATEWAY_TLS: "false"
       CLINICFLOW_GATEWAY_PUBLIC_AVERAGE: "1000"
@@ -18,7 +19,7 @@ services:
     build:
       context: ./docker/postgres/bootstrap
       dockerfile: Dockerfile
-    image: clinicflow/postgres-bootstrap:ci
+    image: clinicflow/postgres-bootstrap:ci-${CLINICFLOW_CI_IMAGE_TAG:-local}
     volumes: !override []
 
   jwt-secrets-bootstrap:

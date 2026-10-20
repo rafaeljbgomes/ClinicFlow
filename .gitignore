@@ -20,3 +20,5 @@ deploy/jenkins/.env
 deploy/jenkins/secrets/
 
 secrets/edge/
+
+__pycache__/

@@ -1,0 +1,55 @@
+# Last override after docker-compose.yml and docker-compose.ci.yml.
+# No security target publishes host ports or uses workstation secrets.
+services:
+  certificate-bootstrap:
+    image: alpine/openssl:3.5.7@sha256:47f40fac08a77cbdfb02444e543808aa36b9e31e21a261f4d94ffaf0c5c73832
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        umask 077
+        openssl req -x509 -newkey rsa:2048 -nodes -keyout /tmp/ca.key -out /certs/ca.crt -days 1 -subj '/CN=ClinicFlow ephemeral DAST CA' -addext 'basicConstraints=critical,CA:TRUE'
+        openssl req -new -newkey rsa:2048 -nodes -keyout /certs/edge.key -out /tmp/edge.csr -subj '/CN=clinicflow.localhost'
+        printf '%s\n' 'subjectAltName=DNS:clinicflow.localhost,DNS:api.clinicflow.localhost' 'extendedKeyUsage=serverAuth' 'basicConstraints=critical,CA:FALSE' > /tmp/edge.ext
+        openssl x509 -req -in /tmp/edge.csr -CA /certs/ca.crt -CAkey /tmp/ca.key -CAcreateserial -out /certs/edge.crt -days 1 -extfile /tmp/edge.ext
+        chmod 644 /certs/edge.crt /certs/ca.crt
+        chown 65532:65532 /certs/edge.key
+        chmod 400 /certs/edge.key
+        chown 1000:1000 /reports
+    volumes: [dast-certificates:/certs, dast-reports:/reports]
+    restart: "no"
+  gateway:
+    environment:
+      CLINICFLOW_GATEWAY_TLS: "true"
+      CLINICFLOW_GATEWAY_HTTPS_PORT: "8443"
+    ports: !override []
+    volumes: !override [dast-certificates:/certs:ro]
+    networks:
+      default:
+        aliases: [clinicflow.localhost, api.clinicflow.localhost]
+    depends_on:
+      certificate-bootstrap: {condition: service_completed_successfully}
+  postgres:
+    ports: !override []
+  rabbitmq:
+    ports: !override []
+  frontend:
+    environment:
+      CLINICFLOW_AUTH_COOKIE_SECURE: "true"
+  zap:
+    profiles: [security]
+    build:
+      context: .
+      dockerfile: deploy/security/Dockerfile
+    image: clinicflow/zap:${CLINICFLOW_SECURITY_TAG:?Set an isolated security tag}
+    environment:
+      DAST_COMPONENTS: ${DAST_COMPONENTS:-auth-service,patient-service,appointment-service,clinical-service,notification-service,frontend}
+      DAST_FULL_SCAN: ${DAST_FULL_SCAN:-false}
+      DAST_SMOKE_ONLY: ${DAST_SMOKE_ONLY:-false}
+    volumes:
+      - dast-certificates:/certs:ro
+      - dast-reports:/zap/wrk/reports
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+volumes:
+  dast-certificates:
+  dast-reports:

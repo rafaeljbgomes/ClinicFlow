@@ -14,3 +14,10 @@ secrets/*.pem
 secrets/*.key
 secrets/*.crt
 *.log
+
+# CI reports and ignored workstation material must never enter backend build contexts.
+reports/
+secrets/
+.env
+.env.*
+**/__pycache__/
