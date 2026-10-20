@@ -42,3 +42,13 @@ b5e7c4f6c2c8ea3e55985d1e53f4b692fbafadea:frontend/tests/e2e/gateway-api.spec.ts:
 b5e7c4f6c2c8ea3e55985d1e53f4b692fbafadea:frontend/tests/e2e/gateway-api.spec.ts:generic-password:33
 b5e7c4f6c2c8ea3e55985d1e53f4b692fbafadea:frontend/tests/e2e/gateway-api.spec.ts:generic-password:65
 b5e7c4f6c2c8ea3e55985d1e53f4b692fbafadea:scripts/gateway/test-kubernetes-contract.cjs:generic-password:111
+
+# Reviewed 2026-10-20: the same synthetic test/demo credentials, relocated by the AAA test split (#30, #31).
+5ca07c10128e06f103012b5815ccbb3741e2b92a:frontend/tests/e2e/gateway-api.spec.ts:generic-password:10
+5ca07c10128e06f103012b5815ccbb3741e2b92a:frontend/tests/e2e/gateway-api.spec.ts:generic-password:334
+5ca07c10128e06f103012b5815ccbb3741e2b92a:auth-service/src/test/java/com/clinicflow/auth/adapters/inbound/rest/AuthControllerTest.java:generic-password:51
+5ca07c10128e06f103012b5815ccbb3741e2b92a:auth-service/src/test/java/com/clinicflow/auth/adapters/inbound/rest/AuthControllerTest.java:generic-password:81
+5ca07c10128e06f103012b5815ccbb3741e2b92a:auth-service/src/test/java/com/clinicflow/auth/adapters/inbound/rest/AuthControllerTest.java:generic-password:103
+5ca07c10128e06f103012b5815ccbb3741e2b92a:auth-service/src/test/java/com/clinicflow/auth/AuthApiIT.java:generic-password:36
+e03842936f19b73604003c0f9f8895d449d81afa:frontend/tests/e2e/clinicflow-smoke.spec.ts:generic-password:17
+e03842936f19b73604003c0f9f8895d449d81afa:frontend/tests/e2e/clinicflow-smoke.spec.ts:generic-password:51

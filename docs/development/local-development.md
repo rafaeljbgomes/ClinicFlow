@@ -17,7 +17,10 @@ Compose:
 .\scripts\generate-dev-jwt-keys.ps1
 ```
 
-The generated files are written under `secrets/` and ignored by Git.
+The generated files are written under `secrets/` and ignored by Git. The
+service containers run as UID 10001, so on a Linux host the key files must be
+readable by that user (for example `chmod 644 secrets/jwt-*.pem`); Docker
+Desktop bind mounts on Windows and macOS already are.
 
 ## Run Tests
 

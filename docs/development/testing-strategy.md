@@ -148,9 +148,17 @@ intended for local investigation of uncovered lines and branches.
 
 ## Continuous integration
 
-Local Jenkins CI is split into independently executable component jobs and a
-focused system job. All jobs run on the dedicated `clinicflow-ci` agent, build
-only local image evidence, and publish or deploy nothing. Backend jobs expose
+GitHub Actions is the PR gate: one workflow per component plus `system` and
+`repository`, each reporting a `clinicflow/<component>` check. PRs skip PIT,
+which runs on `main`, nightly and on demand. See
+[GitHub Actions CI](github-actions.md) for routing, evidence and how to debug
+workflow changes, and [PR quality and security gates](pr-quality-security.md)
+for the Sonar, Trivy and ZAP policy.
+
+Local Jenkins CI remains available on demand. It is split into independently
+executable component jobs and a focused system job. All jobs run on the
+dedicated `clinicflow-ci` agent, build only local image evidence, and publish or
+deploy nothing. Backend jobs expose
 separate build, unit, integration, mutation, package, and image stages; the
 frontend job exposes separate unit, static-analysis, production-build, package,
 and image stages. Their phase interfaces can be run directly with PowerShell 7:

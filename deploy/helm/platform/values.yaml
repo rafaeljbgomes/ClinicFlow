@@ -1,6 +1,6 @@
 postgres:
   name: postgres
-  image: postgres:16.14-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+  image: postgres:16.15-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
   database: clinicflow
   username: clinicflow
   password: clinicflow
@@ -14,10 +14,23 @@ postgres:
     limits:
       cpu: 500m
       memory: 512Mi
+  # The image's postgres user (70) runs without the gosu privilege drop. No fsGroup: a recursive
+  # group change would loosen PGDATA permissions, which PostgreSQL refuses to start with.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 70
+    runAsGroup: 70
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
 
 rabbitmq:
   name: rabbitmq
-  image: rabbitmq:4.3.4-management-alpine@sha256:44bf7eb50fe1765885659e49ccfdc775f8e531964d979321aee380a071f49f94
+  image: rabbitmq:4.3.6-management-alpine@sha256:3505b6096cdbc083bcc363e74366f575ecd0c1a55be4dadcbc60fa08e34647e1
   username: clinicflow
   password: clinicflow
   existingSecret: ""
@@ -30,6 +43,18 @@ rabbitmq:
     limits:
       cpu: 500m
       memory: 512Mi
+  # The image's rabbitmq user (100:101); the data volume holds the Erlang cookie and plugin list.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 100
+    runAsGroup: 101
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
 
 serviceMonitor:
   enabled: true

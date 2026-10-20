@@ -1,0 +1,21 @@
+# This Dockerfile uses the repository root as context; override its backend-only ignore file.
+**
+!deploy/
+!deploy/security/
+!deploy/security/Dockerfile
+!deploy/security/Dockerfile.dockerignore
+!scripts/
+!scripts/ci/
+!scripts/ci/dast.py
+!.ci/
+!.ci/dast-requests.json
+!auth-service/
+!auth-service/src/
+!auth-service/src/main/
+!auth-service/src/main/java/
+!auth-service/src/main/java/com/
+!auth-service/src/main/java/com/clinicflow/
+!auth-service/src/main/java/com/clinicflow/auth/
+!auth-service/src/main/java/com/clinicflow/auth/infrastructure/
+!auth-service/src/main/java/com/clinicflow/auth/infrastructure/bootstrap/
+!auth-service/src/main/java/com/clinicflow/auth/infrastructure/bootstrap/DemoDataBootstrap.java

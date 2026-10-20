@@ -8,7 +8,10 @@ param(
         "clinical-service",
         "notification-service"
     )]
-    [string]$Service
+    [string]$Service,
+
+    # PR pipelines defer mutation testing to main and the nightly schedule.
+    [switch]$SkipMutationEvidence
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,10 +29,14 @@ if ($Jars.Count -ne 1) {
 
 $RequiredEvidence = @(
     (Join-Path $TargetDirectory "site/jacoco/index.html"),
-    (Join-Path $TargetDirectory "site/jacoco/jacoco.xml"),
-    (Join-Path $TargetDirectory "pit-reports/index.html"),
-    (Join-Path $TargetDirectory "pit-reports/mutations.xml")
+    (Join-Path $TargetDirectory "site/jacoco/jacoco.xml")
 )
+if (-not $SkipMutationEvidence) {
+    $RequiredEvidence += @(
+        (Join-Path $TargetDirectory "pit-reports/index.html"),
+        (Join-Path $TargetDirectory "pit-reports/mutations.xml")
+    )
+}
 foreach ($Path in $RequiredEvidence) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         throw "Required ${Service} package evidence is missing: $Path"

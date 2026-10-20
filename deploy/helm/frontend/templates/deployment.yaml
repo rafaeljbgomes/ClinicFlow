@@ -17,10 +17,14 @@ spec:
         {{- include "clinicflow-frontend.labels" . | nindent 8 }}
         app.kubernetes.io/component: {{ .Values.name }}
     spec:
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: frontend
           image: {{ include "clinicflow-frontend.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
           ports:
             - name: http
               containerPort: {{ .Values.port }}
@@ -36,6 +40,11 @@ spec:
             - name: jwt-public-key
               mountPath: /run/secrets/clinicflow
               readOnly: true
+            # The root filesystem is read-only; Next.js writes its cache and temporary files here.
+            - name: next-cache
+              mountPath: /app/.next/cache
+            - name: tmp
+              mountPath: /tmp
           livenessProbe:
             httpGet:
               path: /login
@@ -51,6 +60,10 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       volumes:
+        - name: next-cache
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
         - name: jwt-public-key
           secret:
             secretName: {{ .Values.jwt.secretName }}

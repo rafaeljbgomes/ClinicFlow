@@ -9,12 +9,13 @@ $ComposeArguments = @("compose", "--file", "docker-compose.yml", "--file", "dock
 if ($RunId) {
     . (Join-Path $PSScriptRoot "Compose-Project.ps1")
     $ProjectName = ConvertTo-ComposeProjectName -RunId $RunId
+    Set-IsolatedPorts -RunId $RunId
     $ComposeArguments += @("--project-name", $ProjectName)
 }
 
 Push-Location $RepositoryRoot
 try {
-    & docker @ComposeArguments build gateway auth-service patient-service appointment-service clinical-service notification-service frontend
+    & docker @ComposeArguments build postgres-bootstrap gateway auth-service patient-service appointment-service clinical-service notification-service frontend
     if ($LASTEXITCODE -ne 0) { throw "Container image build failed." }
 }
 finally { Pop-Location }

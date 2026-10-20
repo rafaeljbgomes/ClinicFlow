@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "requests": [
+    {
+      "component": "auth-service",
+      "path": "/api/v1/auth/users/me",
+      "roles": [
+        "psychologist",
+        "patient",
+        "administrator"
+      ],
+      "bff": "/api/auth/me"
+    },
+    {
+      "component": "patient-service",
+      "path": "/api/v1/patients",
+      "roles": [
+        "psychologist"
+      ],
+      "fixture": "patients",
+      "bff": "/api/patients"
+    },
+    {
+      "component": "appointment-service",
+      "path": "/api/v1/appointments",
+      "roles": [
+        "psychologist"
+      ],
+      "bff": "/api/appointments"
+    },
+    {
+      "component": "clinical-service",
+      "path": "/api/v1/clinical/clinical-cases",
+      "roles": [
+        "psychologist"
+      ],
+      "fixture": "cases",
+      "bff": "/api/clinical-cases"
+    },
+    {
+      "component": "clinical-service",
+      "path": "/api/v1/clinical/practice-profile",
+      "roles": [
+        "psychologist"
+      ],
+      "bff": "/api/practice-profile"
+    },
+    {
+      "component": "notification-service",
+      "path": "/api/v1/notifications",
+      "roles": [
+        "psychologist",
+        "administrator"
+      ],
+      "bff": "/api/notifications"
+    }
+  ]
+}

@@ -37,5 +37,20 @@ resources:
     cpu: 500m
     memory: 512Mi
 
+# UID/GID 10001 matches the non-root nextjs user in the frontend image.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
 networkPolicy:
   enabled: true

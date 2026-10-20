@@ -1,0 +1,227 @@
+name: Backend service pipeline
+
+# Reusable pipeline for one Spring Boot service. It mirrors Jenkinsfile.<service> through the same
+# scripts/ci entry points, splitting independent stages into parallel jobs.
+on:
+  workflow_call:
+    inputs:
+      service:
+        description: Maven module name, for example auth-service.
+        type: string
+        required: true
+      run-id:
+        description: Run identifier from the routing job.
+        type: string
+        required: true
+      mutation:
+        description: Run PIT mutation testing.
+        type: boolean
+        default: false
+    secrets:
+      SONAR_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  CHANGE_ID: ${{ github.event.pull_request.number }}
+  CHANGE_TARGET: ${{ github.base_ref }}
+  CHANGE_BRANCH: ${{ github.head_ref }}
+  GIT_PREVIOUS_SUCCESSFUL_COMMIT: ${{ github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000' && github.event.before || '' }}
+  CLINICFLOW_FORCE: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+  CLINICFLOW_SECURITY_MODE: ${{ vars.CLINICFLOW_SECURITY_MODE || 'enforce' }}
+  SERVICE: ${{ inputs.service }}
+
+jobs:
+  test:
+    name: Build, test and quality gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up toolchain
+        uses: ./.github/actions/setup
+        with:
+          java: "true"
+
+      - name: Prepare security context
+        run: node scripts/ci/security-policy.cjs prepare "$SERVICE"
+
+      - name: Build
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Invoke-ServiceBackend.ps1 -Service "$SERVICE" -Phase Build
+
+      - name: Unit tests
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Invoke-ServiceBackend.ps1 -Service "$SERVICE" -Phase Unit
+
+      - name: Integration tests
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Invoke-ServiceBackend.ps1 -Service "$SERVICE" -Phase Integration
+
+      - name: Package evidence
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Assert-ServicePackage.ps1 -Service "$SERVICE" -SkipMutationEvidence
+
+      - name: SonarQube Cloud quality gate
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Invoke-SonarGate.ps1 -Component "$SERVICE"
+
+      - name: Test summary
+        if: always()
+        shell: pwsh
+        run: >-
+          ./scripts/ci/Write-TestSummary.ps1 -Title "$env:SERVICE tests"
+          -JUnit "$env:SERVICE/target/surefire-reports/*.xml", "$env:SERVICE/target/failsafe-reports/*.xml"
+          -JaCoCo "$env:SERVICE/target/site/jacoco/jacoco.xml"
+
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.service }}-test-evidence
+          path: |
+            ${{ inputs.service }}/target/surefire-reports/
+            ${{ inputs.service }}/target/failsafe-reports/
+            ${{ inputs.service }}/target/site/jacoco/
+            ${{ inputs.service }}/target/${{ inputs.service }}-*.jar
+            reports/security/
+          if-no-files-found: warn
+          retention-days: 14
+
+  mutation:
+    name: Mutation tests
+    if: inputs.mutation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up toolchain
+        uses: ./.github/actions/setup
+        with:
+          java: "true"
+
+      - name: Mutation tests
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Invoke-ServiceBackend.ps1 -Service "$SERVICE" -Phase Mutation
+
+      - name: Mutation summary
+        if: always()
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Write-TestSummary.ps1 -Title "$SERVICE mutation tests" -Pit "$SERVICE/target/pit-reports/mutations.xml"
+
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.service }}-pit-report
+          path: ${{ inputs.service }}/target/pit-reports/
+          if-no-files-found: warn
+          retention-days: 14
+
+  dependencies:
+    name: Dependency security
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up toolchain
+        uses: ./.github/actions/setup
+        with:
+          java: "true"
+          tools: trivy
+          trivy-db: "true"
+
+      - name: Prepare security context
+        run: node scripts/ci/security-policy.cjs prepare "$SERVICE"
+
+      - name: SBOM and dependency scan
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Invoke-ComponentSecurity.ps1 -Component "$SERVICE" -Phase Dependencies
+
+      - name: Export SARIF
+        if: always() && github.event_name != 'pull_request'
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Export-TrivySarif.ps1 -Component "$SERVICE"
+
+      - name: Upload to code scanning
+        if: always() && github.event_name != 'pull_request' && hashFiles('reports/sarif/*.sarif') != ''
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        with:
+          sarif_file: reports/sarif
+
+      - name: Upload security evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.service }}-dependency-security
+          path: reports/security/
+          if-no-files-found: warn
+          retention-days: 14
+
+  image:
+    name: Image build and security
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    env:
+      IMAGE_TAG: clinicflow/${{ inputs.service }}:${{ inputs.run-id }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up toolchain
+        uses: ./.github/actions/setup
+        with:
+          tools: trivy
+          trivy-db: "true"
+
+      - name: Prepare security context
+        run: node scripts/ci/security-policy.cjs prepare "$SERVICE"
+
+      - name: Image build
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Build-ComponentImage.ps1 -Component "$SERVICE" -Tag "$IMAGE_TAG"
+
+      - name: Image scan
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Invoke-ComponentSecurity.ps1 -Component "$SERVICE" -Phase Image -Image "$IMAGE_TAG"
+
+      - name: Dockerfile scan
+        if: success() || failure()
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Invoke-ComponentSecurity.ps1 -Component "$SERVICE" -Phase Config
+
+      - name: Export SARIF
+        if: always() && github.event_name != 'pull_request'
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Export-TrivySarif.ps1 -Component "$SERVICE"
+
+      - name: Upload to code scanning
+        if: always() && github.event_name != 'pull_request' && hashFiles('reports/sarif/*.sarif') != ''
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        with:
+          sarif_file: reports/sarif
+
+      - name: Upload security evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.service }}-image-security
+          path: reports/security/
+          if-no-files-found: warn
+          retention-days: 14

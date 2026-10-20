@@ -1,0 +1,208 @@
+name: system
+
+# Cross-service acceptance: platform manifests, gateway contract, the composed stack with Playwright,
+# platform image scanning and authenticated HTTPS DAST. Component unit/integration suites run in the
+# component workflows, which the same routing always selects for shared changes.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  CHANGE_ID: ${{ github.event.pull_request.number }}
+  CHANGE_TARGET: ${{ github.base_ref }}
+  GIT_PREVIOUS_SUCCESSFUL_COMMIT: ${{ github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000' && github.event.before || '' }}
+  CLINICFLOW_FORCE: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+  CLINICFLOW_SECURITY_MODE: ${{ vars.CLINICFLOW_SECURITY_MODE || 'enforce' }}
+
+jobs:
+  route:
+    name: Route
+    uses: ./.github/workflows/_route.yml
+    with:
+      component: system
+
+  platform:
+    name: Platform and gateway contract
+    needs: route
+    if: needs.route.outputs.full-system == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      RUN_ID: ${{ needs.route.outputs.run-id }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up toolchain
+        uses: ./.github/actions/setup
+        with:
+          node: "true"
+          tools: helm kubeconform trivy
+          trivy-db: "true"
+
+      - name: Prepare security context
+        run: node scripts/ci/security-policy.cjs prepare system
+
+      # Manifest validation loads ajv and yaml from the frontend dependency tree.
+      - name: Install frontend dependencies
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Invoke-FrontendPhase.ps1 -Phase Install
+
+      - name: Platform validation
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Test-Platform.ps1
+
+      - name: Gateway contract acceptance
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Invoke-GatewayContract.ps1 -RunId "$RUN_ID"
+
+      - name: Platform configuration security
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Invoke-SystemSecurity.ps1 -RunId "$RUN_ID" -Phase Configuration
+
+      - name: Upload platform evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: system-platform-evidence
+          path: |
+            reports/platform/
+            reports/gateway/
+            reports/security/
+          if-no-files-found: warn
+          retention-days: 14
+
+  end-to-end:
+    name: Composed stack and Playwright
+    needs: route
+    if: needs.route.outputs.full-system == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      RUN_ID: ${{ needs.route.outputs.run-id }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up toolchain
+        uses: ./.github/actions/setup
+        with:
+          node: "true"
+          tools: trivy
+          trivy-db: "true"
+
+      - name: Prepare security context
+        run: node scripts/ci/security-policy.cjs prepare system
+
+      - name: System image build
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Build-Images.ps1 -RunId "$RUN_ID"
+
+      - name: Start the isolated Compose environment
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Start-IsolatedCompose.ps1 -RunId "$RUN_ID"
+
+      - name: Install frontend dependencies
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Invoke-FrontendPhase.ps1 -Phase Install
+
+      - name: Resolve the Playwright version
+        id: playwright
+        working-directory: frontend
+        run: echo "version=$(node -p "require('./package-lock.json').packages['node_modules/@playwright/test'].version")" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Playwright browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
+      - name: Install Playwright Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Playwright end-to-end tests
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Invoke-SystemPlaywright.ps1 -RunId "$RUN_ID"
+
+      - name: Platform image security
+        if: success() || failure()
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Invoke-SystemSecurity.ps1 -RunId "$RUN_ID" -Phase Images
+
+      - name: Stop the isolated Compose environment
+        if: always()
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Stop-IsolatedCompose.ps1 -RunId "$RUN_ID"
+
+      - name: Upload end-to-end evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: system-end-to-end-evidence
+          path: |
+            frontend/test-results/
+            frontend/playwright-report/
+            reports/security/
+          if-no-files-found: warn
+          retention-days: 14
+
+  dast:
+    name: Authenticated HTTPS DAST
+    needs: route
+    if: needs.route.outputs.dast == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      RUN_ID: ${{ needs.route.outputs.run-id }}
+      # Scheduled and manual runs on main sweep every component with the broader active-scan budget.
+      DAST_FULL_SCAN: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prepare security context
+        run: node scripts/ci/security-policy.cjs prepare system
+
+      - name: ZAP scan of the composed stack
+        timeout-minutes: 65
+        shell: pwsh
+        run: ./scripts/ci/Invoke-Dast.ps1 -RunId $env:RUN_ID -FullScan:($env:DAST_FULL_SCAN -eq 'true')
+
+      - name: Upload DAST evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: system-dast-evidence
+          path: reports/security/
+          if-no-files-found: warn
+          retention-days: 14
+
+  result:
+    name: clinicflow/system
+    if: always()
+    needs: [route, platform, end-to-end, dast]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Evaluate the pipeline result
+        env:
+          ROUTE: ${{ needs.route.result }}
+          AFFECTED: ${{ needs.route.outputs.affected }}
+          FAILED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: |
+          echo "route=$ROUTE affected=$AFFECTED failed=$FAILED"
+          if [ "$ROUTE" != "success" ]; then echo "::error::Change routing finished with '$ROUTE'."; exit 1; fi
+          if [ "$AFFECTED" != "true" ]; then echo "Not affected by this change."; exit 0; fi
+          if [ "$FAILED" = "true" ]; then echo "::error::At least one system job failed or was cancelled."; exit 1; fi
