@@ -6,18 +6,18 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.resttestclient.TestRestTemplate;
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate;
+import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.client.EntityExchangeResult;
+import org.springframework.test.web.servlet.client.RestTestClient;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -33,7 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.when;
 
-@AutoConfigureTestRestTemplate
+@AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "clinicflow.demo.enabled=false",
         "spring.rabbitmq.listener.simple.auto-startup=false"
@@ -52,7 +52,7 @@ class ClinicalApiIT {
                     .parse("postgres:16.14-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777")
                     .asCompatibleSubstituteFor("postgres"));
 
-    @Autowired private TestRestTemplate http;
+    @Autowired private RestTestClient http;
     @Autowired private JdbcTemplate jdbc;
     @MockitoBean private JwtDecoder jwtDecoder;
 
@@ -80,8 +80,8 @@ class ClinicalApiIT {
         var response = exchange("/practice-profile", HttpMethod.PUT, request);
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(response.getBody()).containsEntry("professionalRegistration", "OPP 12345");
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getResponseBody()).containsEntry("professionalRegistration", "OPP 12345");
     }
 
     @Test
@@ -94,8 +94,8 @@ class ClinicalApiIT {
         var response = exchange("/clinical-cases", HttpMethod.POST, request);
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(response.getBody()).containsKey("id");
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.CREATED);
+        assertThat(response.getResponseBody()).containsKey("id");
     }
 
     @Test
@@ -108,8 +108,8 @@ class ClinicalApiIT {
                 "description", "Complete graded exposure", "status", "IN_PROGRESS", "progressPercentage", 20)));
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(goalIds(response.getBody())).hasSize(1);
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.OK);
+        assertThat(goalIds(response.getResponseBody())).hasSize(1);
     }
 
     @Test
@@ -122,8 +122,8 @@ class ClinicalApiIT {
                 newSession("Initial formulation"));
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(response.getBody()).containsEntry("noteStatus", "DRAFT");
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.CREATED);
+        assertThat(response.getResponseBody()).containsEntry("noteStatus", "DRAFT");
     }
 
     @Test
@@ -139,10 +139,10 @@ class ClinicalApiIT {
         var response = exchange("/patients/" + PATIENT_ID + "/clinical-history", HttpMethod.GET, null);
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat((List<?>) response.getBody().get("cases")).hasSize(1);
-        assertThat((List<?>) response.getBody().get("carePlans")).hasSize(1);
-        assertThat((List<?>) response.getBody().get("sessionRecords")).hasSize(1);
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.OK);
+        assertThat((List<?>) response.getResponseBody().get("cases")).hasSize(1);
+        assertThat((List<?>) response.getResponseBody().get("carePlans")).hasSize(1);
+        assertThat((List<?>) response.getResponseBody().get("sessionRecords")).hasSize(1);
     }
 
     @Test
@@ -156,7 +156,7 @@ class ClinicalApiIT {
         var response = exchange("/clinical-cases", HttpMethod.POST, request);
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.CONFLICT);
     }
 
     @Test
@@ -169,16 +169,16 @@ class ClinicalApiIT {
         var response = exchange("/practice-profile", HttpMethod.PUT, invalid);
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
     }
 
     @Test
     void rejectsMissingAuthentication() {
         // Act
-        var response = http.getForEntity("/clinical-cases", Map.class);
+        var response = exchange("/clinical-cases", HttpMethod.GET, HttpEntity.EMPTY, Map.class);
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
     @Test
@@ -187,29 +187,29 @@ class ClinicalApiIT {
         var request = new HttpEntity<>(bearer("patient-token"));
 
         // Act
-        var response = http.exchange("/clinical-cases", HttpMethod.GET, request, Map.class);
+        var response = exchange("/clinical-cases", HttpMethod.GET, request, Map.class);
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.FORBIDDEN);
     }
 
     @Test
     void rejectsAnotherPsychologistsGoalIdWhenCreatingAPlan() {
         // Arrange
-        String ownerGoalId = goalIds(ownerPlan().getBody()).getFirst();
+        String ownerGoalId = goalIds(ownerPlan().getResponseBody()).getFirst();
         String attackerCaseId = createCase("other-psychologist-token", OTHER_PATIENT_ID);
 
         // Act
         var response = putCarePlan("other-psychologist-token", attackerCaseId, List.of(hijack(ownerGoalId)));
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.FORBIDDEN);
     }
 
     @Test
     void rejectsAnotherPsychologistsGoalIdWhenReplacingAPlan() {
         // Arrange
-        String ownerGoalId = goalIds(ownerPlan().getBody()).getFirst();
+        String ownerGoalId = goalIds(ownerPlan().getResponseBody()).getFirst();
         String attackerCaseId = createCase("other-psychologist-token", OTHER_PATIENT_ID);
         arrangeStep("put attacker plan", putCarePlan("other-psychologist-token", attackerCaseId, List.of(Map.of(
                 "description", "Attacker goal", "status", "NOT_STARTED", "progressPercentage", 0))), HttpStatus.OK);
@@ -218,15 +218,15 @@ class ClinicalApiIT {
         var response = putCarePlan("other-psychologist-token", attackerCaseId, List.of(hijack(ownerGoalId)));
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.FORBIDDEN);
     }
 
     @Test
     void rejectedGoalHijackLeavesTheOwnersGoalUntouched() {
         // Arrange
         var ownerPlan = ownerPlan();
-        String ownerPlanId = ownerPlan.getBody().get("id").toString();
-        String ownerGoalId = goalIds(ownerPlan.getBody()).getFirst();
+        String ownerPlanId = ownerPlan.getResponseBody().get("id").toString();
+        String ownerGoalId = goalIds(ownerPlan.getResponseBody()).getFirst();
         String attackerCaseId = createCase("other-psychologist-token", OTHER_PATIENT_ID);
 
         // Act
@@ -244,8 +244,8 @@ class ClinicalApiIT {
     void ownerKeepsGoalIdentityWhileAddingGoals() {
         // Arrange
         var ownerPlan = ownerPlan();
-        String ownerCaseId = ownerPlan.getBody().get("clinicalCaseId").toString();
-        String ownerGoalId = goalIds(ownerPlan.getBody()).getFirst();
+        String ownerCaseId = ownerPlan.getResponseBody().get("clinicalCaseId").toString();
+        String ownerGoalId = goalIds(ownerPlan.getResponseBody()).getFirst();
 
         // Act
         var response = putCarePlan("psychologist-token", ownerCaseId, List.of(
@@ -254,23 +254,23 @@ class ClinicalApiIT {
                 Map.of("description", "Second goal", "status", "NOT_STARTED", "progressPercentage", 0)));
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(goalIds(response.getBody())).hasSize(2).first().isEqualTo(ownerGoalId);
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.OK);
+        assertThat(goalIds(response.getResponseBody())).hasSize(2).first().isEqualTo(ownerGoalId);
     }
 
     @Test
     void rejectsDuplicateGoalIdsInOnePlan() {
         // Arrange
         var ownerPlan = ownerPlan();
-        String ownerCaseId = ownerPlan.getBody().get("clinicalCaseId").toString();
-        Map<String, Object> duplicate = Map.of("id", goalIds(ownerPlan.getBody()).getFirst(),
+        String ownerCaseId = ownerPlan.getResponseBody().get("clinicalCaseId").toString();
+        Map<String, Object> duplicate = Map.of("id", goalIds(ownerPlan.getResponseBody()).getFirst(),
                 "description", "Owner goal", "status", "IN_PROGRESS", "progressPercentage", 60);
 
         // Act
         var response = putCarePlan("psychologist-token", ownerCaseId, List.of(duplicate, duplicate));
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
     }
 
     @Test
@@ -295,7 +295,7 @@ class ClinicalApiIT {
         var response = signAs("other-psychologist-token", sessionId);
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.FORBIDDEN);
     }
 
     @Test
@@ -319,10 +319,10 @@ class ClinicalApiIT {
         var response = signAs("psychologist-token", sessionId);
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(response.getBody()).containsEntry("noteStatus", "SIGNED")
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getResponseBody()).containsEntry("noteStatus", "SIGNED")
                 .containsEntry("signedBy", PSYCHOLOGIST_ID.toString());
-        assertThat(response.getBody().get("signedAt")).isNotNull();
+        assertThat(response.getResponseBody().get("signedAt")).isNotNull();
     }
 
     @Test
@@ -386,7 +386,7 @@ class ClinicalApiIT {
         var response = exchange("/patients/" + PATIENT_ID + "/clinical-history", HttpMethod.GET, null);
 
         // Assert
-        Map<?, ?> listed = (Map<?, ?>) ((List<?>) response.getBody().get("sessionRecords")).getFirst();
+        Map<?, ?> listed = (Map<?, ?>) ((List<?>) response.getResponseBody().get("sessionRecords")).getFirst();
         assertThat(listed.get("noteStatus")).isEqualTo("SIGNED");
         assertThat(listed.get("signedBy")).isEqualTo(PSYCHOLOGIST_ID.toString());
     }
@@ -433,10 +433,10 @@ class ClinicalApiIT {
         var response = signAs("psychologist-token", UUID.randomUUID().toString());
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.NOT_FOUND);
     }
 
-    private ResponseEntity<Map> ownerPlan() {
+    private EntityExchangeResult<Map> ownerPlan() {
         String ownerCaseId = createCase("psychologist-token", PATIENT_ID);
         return arrangeStep("put owner plan", putCarePlan("psychologist-token", ownerCaseId, List.of(Map.of(
                 "description", "Owner goal", "status", "IN_PROGRESS", "progressPercentage", 30))), HttpStatus.OK);
@@ -459,8 +459,8 @@ class ClinicalApiIT {
         return pendingId;
     }
 
-    private ResponseEntity<Map> signAs(String token, String sessionId) {
-        return http.exchange("/session-records/" + sessionId + "/sign", HttpMethod.POST,
+    private EntityExchangeResult<Map> signAs(String token, String sessionId) {
+        return exchange("/session-records/" + sessionId + "/sign", HttpMethod.POST,
                 new HttpEntity<>(null, bearer(token)), Map.class);
     }
 
@@ -468,7 +468,7 @@ class ClinicalApiIT {
         var session = arrangeStep("create session record",
                 exchange("/clinical-cases/" + caseId + "/session-records", HttpMethod.POST, newSession(summary)),
                 HttpStatus.CREATED);
-        return session.getBody().get("id").toString();
+        return session.getResponseBody().get("id").toString();
     }
 
     private Map<String, Object> newSession(String summary) {
@@ -483,10 +483,11 @@ class ClinicalApiIT {
         return body;
     }
 
-    private static ResponseEntity<Map> arrangeStep(String step, ResponseEntity<Map> response, HttpStatus expected) {
-        if (response.getStatusCode().value() != expected.value()) {
+    private static EntityExchangeResult<Map> arrangeStep(String step, EntityExchangeResult<Map> response,
+                                                         HttpStatus expected) {
+        if (response.getStatus().value() != expected.value()) {
             throw new IllegalStateException(
-                    "Arrange step \"" + step + "\" returned " + response.getStatusCode() + ", expected " + expected);
+                    "Arrange step \"" + step + "\" returned " + response.getStatus() + ", expected " + expected);
         }
         return response;
     }
@@ -508,22 +509,22 @@ class ClinicalApiIT {
         return jdbc.queryForMap("SELECT * FROM session_records WHERE id = ?::uuid", sessionId);
     }
 
-    private void assertProblem(ResponseEntity<Map> response, HttpStatus status,
+    private void assertProblem(EntityExchangeResult<Map> response, HttpStatus status,
                                String code) {
-        assertThat(response.getStatusCode()).isEqualTo(status);
-        assertThat(response.getBody()).containsEntry("code", code);
+        assertThat(response.getStatus()).isEqualTo(status);
+        assertThat(response.getResponseBody()).containsEntry("code", code);
     }
 
     private String createCase(String token, UUID patientId) {
-        var response = arrangeStep("create clinical case", http.exchange("/clinical-cases", HttpMethod.POST,
+        var response = arrangeStep("create clinical case", exchange("/clinical-cases", HttpMethod.POST,
                 new HttpEntity<>(Map.of("patientId", patientId.toString(), "presentingConcern",
                         "Anxiety and avoidance"), bearer(token)), Map.class), HttpStatus.CREATED);
-        return response.getBody().get("id").toString();
+        return response.getResponseBody().get("id").toString();
     }
 
-    private ResponseEntity<Map> putCarePlan(String token, String caseId,
+    private EntityExchangeResult<Map> putCarePlan(String token, String caseId,
                                                                      List<Map<String, Object>> goals) {
-        return http.exchange("/clinical-cases/" + caseId + "/care-plan", HttpMethod.PUT, new HttpEntity<>(Map.of(
+        return exchange("/clinical-cases/" + caseId + "/care-plan", HttpMethod.PUT, new HttpEntity<>(Map.of(
                 "therapeuticFocus", "Reduce avoidance",
                 "plannedFrequency", "Weekly",
                 "reviewDate", LocalDate.now().plusMonths(1).toString(),
@@ -536,8 +537,13 @@ class ClinicalApiIT {
                 .toList();
     }
 
-    private ResponseEntity<Map> exchange(String path, HttpMethod method, Object body) {
-        return http.exchange(path, method, new HttpEntity<>(body, bearer("psychologist-token")), Map.class);
+    private EntityExchangeResult<Map> exchange(String path, HttpMethod method, Object body) {
+        return exchange(path, method, new HttpEntity<>(body, bearer("psychologist-token")), Map.class);
+    }
+
+    private <T> EntityExchangeResult<T> exchange(String path, HttpMethod method, HttpEntity<?> request, Class<T> type) {
+        var spec = http.method(method).uri(path).headers(headers -> headers.addAll(request.getHeaders()));
+        return (request.hasBody() ? spec.body(request.getBody()) : spec).exchange().returnResult(type);
     }
 
     private HttpHeaders bearer(String token) {

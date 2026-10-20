@@ -10,18 +10,18 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.resttestclient.TestRestTemplate;
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate;
+import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.client.EntityExchangeResult;
+import org.springframework.test.web.servlet.client.RestTestClient;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -37,7 +37,7 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.when;
 
-@AutoConfigureTestRestTemplate
+@AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "clinicflow.demo.enabled=false",
         "clinicflow.outbox.enabled=false",
@@ -55,7 +55,7 @@ class AppointmentApiIT {
                     .parse("postgres:16.14-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777")
                     .asCompatibleSubstituteFor("postgres"));
 
-    @Autowired private TestRestTemplate http;
+    @Autowired private RestTestClient http;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private AppointmentService appointmentService;
     @Autowired private TransactionTemplate transactions;
@@ -78,8 +78,8 @@ class AppointmentApiIT {
         var response = exchange("/appointments", HttpMethod.POST, request);
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(response.getBody()).containsKey("id");
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.CREATED);
+        assertThat(response.getResponseBody()).containsKey("id");
     }
 
     @Test
@@ -106,8 +106,8 @@ class AppointmentApiIT {
                 Map.of("newDate", newDate.toString()));
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(response.getBody()).containsEntry("status", "RESCHEDULED")
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getResponseBody()).containsEntry("status", "RESCHEDULED")
                 .containsEntry("scheduledAt", newDate.toString());
     }
 
@@ -134,8 +134,8 @@ class AppointmentApiIT {
         var response = exchange("/appointments/" + id + "/complete", HttpMethod.PATCH, null);
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(response.getBody()).containsEntry("status", "COMPLETED");
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getResponseBody()).containsEntry("status", "COMPLETED");
     }
 
     @Test
@@ -157,10 +157,10 @@ class AppointmentApiIT {
         var request = new HttpEntity<>(bearer("psychologist-token"));
 
         // Act
-        var response = http.exchange("/appointments", HttpMethod.GET, request, Object[].class);
+        var response = exchange("/appointments", HttpMethod.GET, request, Object[].class);
 
         // Assert
-        assertThat(response.getBody()).hasSize(1);
+        assertThat(response.getResponseBody()).hasSize(1);
     }
 
     @Test
@@ -190,10 +190,10 @@ class AppointmentApiIT {
         HttpEntity<Map<String, Object>> request = scheduleRequestWithOversizedCorrelationId();
 
         // Act
-        var response = http.exchange("/appointments", HttpMethod.POST, request, Map.class);
+        var response = exchange("/appointments", HttpMethod.POST, request, Map.class);
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.CREATED);
     }
 
     @Test
@@ -202,10 +202,10 @@ class AppointmentApiIT {
         HttpEntity<Map<String, Object>> request = scheduleRequestWithOversizedCorrelationId();
 
         // Act
-        var response = http.exchange("/appointments", HttpMethod.POST, request, Map.class);
+        var response = exchange("/appointments", HttpMethod.POST, request, Map.class);
 
         // Assert
-        String correlationId = response.getHeaders().getFirst("X-Correlation-Id");
+        String correlationId = response.getResponseHeaders().getFirst("X-Correlation-Id");
         assertThat(catchThrowable(() -> UUID.fromString(correlationId))).isNull();
         assertThat(jdbc.queryForObject("SELECT correlation_id FROM outbox_events", String.class))
                 .isEqualTo(correlationId);
@@ -220,16 +220,16 @@ class AppointmentApiIT {
         var response = exchange("/appointments", HttpMethod.POST, request);
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
     }
 
     @Test
     void rejectsMissingAuthentication() {
         // Act
-        var response = http.getForEntity("/appointments", Map.class);
+        var response = exchange("/appointments", HttpMethod.GET, HttpEntity.EMPTY, Map.class);
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
     @Test
@@ -238,19 +238,19 @@ class AppointmentApiIT {
         var request = new HttpEntity<>(bearer("patient-token"));
 
         // Act
-        var response = http.exchange("/appointments", HttpMethod.GET, request, Map.class);
+        var response = exchange("/appointments", HttpMethod.GET, request, Map.class);
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.FORBIDDEN);
     }
 
     private String scheduleAppointment(Instant scheduledAt) {
         var response = exchange("/appointments", HttpMethod.POST, scheduleRequest(scheduledAt));
-        if (response.getStatusCode().value() != HttpStatus.CREATED.value()) {
+        if (response.getStatus().value() != HttpStatus.CREATED.value()) {
             throw new IllegalStateException(
-                    "Arrange step \"schedule appointment\" returned " + response.getStatusCode());
+                    "Arrange step \"schedule appointment\" returned " + response.getStatus());
         }
-        return response.getBody().get("id").toString();
+        return response.getResponseBody().get("id").toString();
     }
 
     private HttpEntity<Map<String, Object>> scheduleRequestWithOversizedCorrelationId() {
@@ -274,8 +274,13 @@ class AppointmentApiIT {
         return jdbc.queryForObject("SELECT count(*) FROM outbox_events", Long.class);
     }
 
-    private ResponseEntity<Map> exchange(String path, HttpMethod method, Object body) {
-        return http.exchange(path, method, new HttpEntity<>(body, bearer("psychologist-token")), Map.class);
+    private EntityExchangeResult<Map> exchange(String path, HttpMethod method, Object body) {
+        return exchange(path, method, new HttpEntity<>(body, bearer("psychologist-token")), Map.class);
+    }
+
+    private <T> EntityExchangeResult<T> exchange(String path, HttpMethod method, HttpEntity<?> request, Class<T> type) {
+        var spec = http.method(method).uri(path).headers(headers -> headers.addAll(request.getHeaders()));
+        return (request.hasBody() ? spec.body(request.getBody()) : spec).exchange().returnResult(type);
     }
 
     private HttpHeaders bearer(String token) {
