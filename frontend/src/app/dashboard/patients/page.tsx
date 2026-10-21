@@ -328,7 +328,7 @@ export default function PatientsPage() {
       )}
 
       <Sheet open={!!editing} onOpenChange={(open) => !open && closeEditor()}>
-        <SheetContent>
+        <SheetContent className="overflow-y-auto">
           <SheetHeader>
             <SheetTitle>Edit patient</SheetTitle>
             <SheetDescription>
