@@ -8,7 +8,8 @@
   },
   "trivy": {
     "version": "0.76.0",
-    "databaseMaxAgeHours": 24
+    "databaseMaxAgeHours": 24,
+    "javaDatabaseMaxAgeHours": 96
   },
   "cycloneDxVersion": "2.9.1",
   "zapImage": "ghcr.io/zaproxy/zaproxy:2.17.0@sha256:17711b689795c5519c512bafee363b3976ce8457358db8405c6961e18c72dc66",

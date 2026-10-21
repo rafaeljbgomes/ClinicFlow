@@ -43,8 +43,10 @@ The committed empty baselines are enrollment placeholders, not an assertion that
 the current dependencies are vulnerability-free.
 
 The Trivy database is restored from a daily cache and refreshed before scans.
-If the refresh fails, a cached database is used only while its upstream update
-timestamp is within 24 hours. Results from `main` and scheduled runs are also
+If the refresh fails, a cached vulnerability database is used only while its
+upstream update timestamp is within 24 hours. The Java database, which holds no
+vulnerability data, follows Trivy's three-day refresh and is accepted for up to
+96 hours. Results from `main` and scheduled runs are also
 uploaded as SARIF to the repository's code scanning view.
 
 ### Reviewed exceptions
