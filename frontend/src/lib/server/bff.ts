@@ -65,11 +65,16 @@ export async function proxyRequest(
     verifiedPrincipal = verification.principal;
   }
 
+  const preconditions = versionPreconditions(request);
+  if (!preconditions) {
+    return jsonError(400, "If-Match must be one version tag, such as \"3\"", { code: "invalid_precondition" });
+  }
+
   try {
     const body = await request.text();
     const response = await fetch(backendUrl(service, path), {
       method: request.method,
-      headers: backendHeaders(request, token),
+      headers: { ...backendHeaders(request, token), ...preconditions },
       body: body.length > 0 ? body : undefined,
       cache: "no-store",
       signal: AbortSignal.timeout(BACKEND_TIMEOUT_MS),
@@ -159,7 +164,7 @@ async function normalizeBackendResponse(response: Response) {
 
 function responseHeaders(response: Response) {
   const forwardedHeaders = new Headers();
-  for (const name of ["retry-after", "x-correlation-id"]) {
+  for (const name of ["retry-after", "x-correlation-id", "etag"]) {
     const value = response.headers.get(name);
     if (value) forwardedHeaders.set(name, value);
   }
@@ -238,6 +243,27 @@ function safeFieldErrors(value: unknown): Record<string, string[]> | undefined {
     if (safeMessages.length > 0) result[field] = safeMessages;
   }
   return Object.keys(result).length > 0 ? result : undefined;
+}
+
+const VERSION_TAG = /^"\d{1,18}"$/;
+
+// Writes name the version they replace (ADR-024): If-Match carries one version tag and If-None-Match: *
+// creates a record that must not exist yet. Only these exact forms reach the services. Reads forward
+// neither header, because browsers add If-None-Match to GET revalidations on their own.
+export function versionPreconditions(request: NextRequest): Record<string, string> | null {
+  if (!isMutating(request.method)) return {};
+  const preconditions: Record<string, string> = {};
+  const ifMatch = request.headers.get("if-match")?.trim();
+  if (ifMatch !== undefined) {
+    if (!VERSION_TAG.test(ifMatch)) return null;
+    preconditions["If-Match"] = ifMatch;
+  }
+  const ifNoneMatch = request.headers.get("if-none-match")?.trim();
+  if (ifNoneMatch !== undefined) {
+    if (ifNoneMatch !== "*") return null;
+    preconditions["If-None-Match"] = "*";
+  }
+  return preconditions;
 }
 
 function isMutating(method: string) {

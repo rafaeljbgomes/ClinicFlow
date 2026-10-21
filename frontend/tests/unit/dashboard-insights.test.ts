@@ -22,6 +22,7 @@ function patient(overrides: Partial<Patient> = {}): Patient {
     status: "ACTIVE",
     createdAt: "2026-09-01T09:00:00.000Z",
     updatedAt: "2026-09-01T09:00:00.000Z",
+    version: 0,
     ...overrides,
   };
 }
@@ -35,6 +36,7 @@ function appointment(overrides: Partial<Appointment> = {}): Appointment {
     status: "SCHEDULED",
     type: "IN_PERSON",
     cancellationReason: null,
+    version: 0,
     ...overrides,
   };
 }
@@ -50,6 +52,7 @@ function clinicalCase(overrides: Partial<ClinicalCase> = {}): ClinicalCase {
     closedAt: null,
     createdAt: "2026-09-01T09:00:00.000Z",
     updatedAt: "2026-09-01T09:00:00.000Z",
+    version: 0,
     ...overrides,
   };
 }

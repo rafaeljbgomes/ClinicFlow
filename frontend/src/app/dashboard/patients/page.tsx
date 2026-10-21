@@ -8,6 +8,7 @@ import { ErrorAlert } from "@/components/error-alert";
 import { LoadingTable } from "@/components/loading-table";
 import { PatientForm, type PatientFormValues } from "@/components/patient-form";
 import { SectionHeader } from "@/components/section-header";
+import { STALE_VERSION_MESSAGE, StaleVersionAlert } from "@/components/stale-version-alert";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,7 +52,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { apiFetch, swrFetcher } from "@/lib/api-client";
+import { apiFetch, isStaleVersion, swrFetcher } from "@/lib/api-client";
 import Link from "next/link";
 import type { Patient, PatientStatus } from "@/lib/types";
 import { formatDateTime, formatEnum } from "@/lib/format";
@@ -64,6 +65,7 @@ export default function PatientsPage() {
   );
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<Patient | null>(null);
+  const [editConflict, setEditConflict] = useState(false);
   const [archiving, setArchiving] = useState<Patient | null>(null);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<PatientStatus | "ALL">("ALL");
@@ -85,22 +87,49 @@ export default function PatientsPage() {
     await mutate();
   }
 
+  // `editing` is the snapshot the form opened with, so its version is the one the edit is based on.
   async function updatePatient(values: PatientFormValues) {
     if (!editing) return;
-    await apiFetch<Patient>(`/api/patients/${editing.id}`, {
-      method: "PUT",
-      body: toPatientPayload(values, false),
-    });
+    try {
+      await apiFetch<Patient>(`/api/patients/${editing.id}`, {
+        method: "PUT",
+        body: toPatientPayload(values, false),
+        expectedVersion: editing.version,
+      });
+    } catch (failure) {
+      if (!isStaleVersion(failure)) throw failure;
+      setEditConflict(true);
+      return;
+    }
     toast.success("Patient updated");
-    setEditing(null);
+    closeEditor();
     await mutate();
   }
 
+  async function reloadEditedPatient() {
+    const latest = (await mutate())?.find((patient) => patient.id === editing?.id);
+    setEditing(latest ?? null);
+    setEditConflict(false);
+  }
+
+  function closeEditor() {
+    setEditing(null);
+    setEditConflict(false);
+  }
+
   async function changeStatus(patient: Patient, status: PatientStatus) {
-    await apiFetch<Patient>(`/api/patients/${patient.id}/status`, {
-      method: "PATCH",
-      body: { status },
-    });
+    try {
+      await apiFetch<Patient>(`/api/patients/${patient.id}/status`, {
+        method: "PATCH",
+        body: { status },
+        expectedVersion: patient.version,
+      });
+    } catch (failure) {
+      if (!isStaleVersion(failure)) throw failure;
+      toast.error(`${STALE_VERSION_MESSAGE} Check the latest details and try again.`);
+      await mutate();
+      return;
+    }
     toast.success("Patient status updated");
     await mutate();
   }
@@ -298,7 +327,7 @@ export default function PatientsPage() {
         </Card>
       )}
 
-      <Sheet open={!!editing} onOpenChange={(open) => !open && setEditing(null)}>
+      <Sheet open={!!editing} onOpenChange={(open) => !open && closeEditor()}>
         <SheetContent>
           <SheetHeader>
             <SheetTitle>Edit patient</SheetTitle>
@@ -308,7 +337,9 @@ export default function PatientsPage() {
           </SheetHeader>
           {editing ? (
             <div className="px-4">
+              {editConflict ? <StaleVersionAlert onReload={reloadEditedPatient} /> : null}
               <PatientForm
+                key={editing.version}
                 patient={editing}
                 submitLabel="Save changes"
                 onSubmit={updatePatient}
