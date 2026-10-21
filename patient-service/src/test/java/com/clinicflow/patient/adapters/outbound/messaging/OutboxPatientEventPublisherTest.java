@@ -4,8 +4,9 @@ import com.clinicflow.patient.domain.EmailAddress;
 import com.clinicflow.patient.domain.PatientId;
 import com.clinicflow.patient.domain.PsychologistId;
 import com.clinicflow.patient.domain.events.PatientCreatedEvent;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mapstruct.factory.Mappers;
@@ -25,7 +26,8 @@ import static org.mockito.Mockito.when;
 
 class OutboxPatientEventPublisherTest {
     private final SpringDataOutboxEventRepository repository = mock(SpringDataOutboxEventRepository.class);
-    private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+    private final ObjectMapper objectMapper = JsonMapper.builder().findAndAddModules()
+            .build();
     private final OutboxPatientEventPublisher publisher = new OutboxPatientEventPublisher(
             repository, objectMapper, Mappers.getMapper(PatientEventMapper.class));
 
@@ -87,7 +89,7 @@ class OutboxPatientEventPublisherTest {
         assertThat(thrown)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("Could not serialize patient event for the outbox")
-                .hasCauseInstanceOf(JsonProcessingException.class);
+                .hasCauseInstanceOf(JacksonException.class);
     }
 
     @Test
@@ -108,9 +110,9 @@ class OutboxPatientEventPublisherTest {
         return captor.getValue();
     }
 
-    private OutboxPatientEventPublisher publisherWithFailingSerializer() throws JsonProcessingException {
+    private OutboxPatientEventPublisher publisherWithFailingSerializer() {
         ObjectMapper failingMapper = mock(ObjectMapper.class);
-        when(failingMapper.writeValueAsString(any())).thenThrow(new JsonProcessingException("broken") { });
+        when(failingMapper.writeValueAsString(any())).thenThrow(new JacksonException("broken") { });
         return new OutboxPatientEventPublisher(
                 repository, failingMapper, Mappers.getMapper(PatientEventMapper.class));
     }

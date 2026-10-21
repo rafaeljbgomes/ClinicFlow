@@ -1,16 +1,18 @@
 package com.clinicflow.clinical.adapters.inbound.messaging;
 
 import com.clinicflow.clinical.application.commands.ProcessAppointmentCompletedCommand;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.Test;
 import org.mapstruct.factory.Mappers;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class AppointmentCompletedEventContractTest {
-    private final ObjectMapper json = new ObjectMapper().findAndRegisterModules()
-            .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+    private final ObjectMapper json = JsonMapper.builder().findAndAddModules()
+            .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+            .build();
     private final AppointmentCompletedEventMapper mapper = Mappers.getMapper(AppointmentCompletedEventMapper.class);
 
     @Test

@@ -2,8 +2,8 @@ package com.clinicflow.patient.adapters.outbound.messaging;
 
 import com.clinicflow.patient.application.ports.PatientEventPublisher;
 import com.clinicflow.patient.domain.events.PatientCreatedEvent;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 
@@ -41,7 +41,7 @@ public class OutboxPatientEventPublisher implements PatientEventPublisher {
     private String serialize(PatientCreatedPayload payload) {
         try {
             return objectMapper.writeValueAsString(payload);
-        } catch (JsonProcessingException exception) {
+        } catch (JacksonException exception) {
             throw new IllegalStateException("Could not serialize patient event for the outbox", exception);
         }
     }

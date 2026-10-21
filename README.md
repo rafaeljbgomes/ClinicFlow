@@ -135,7 +135,8 @@ through RabbitMQ.
 
 ## Technology and engineering practices
 
-- Java 21 and Spring Boot 3.5.16.
+- Java 21 and Spring Boot 4.1 (Spring Framework 7, Spring Security 7, Spring
+  AMQP 4, Hibernate 7, Jackson 3).
 - Maven multi-module monorepo with the Maven Wrapper.
 - Next.js 16.2.11, React 19.2.4, and TypeScript 5 in the frontend.
 - Clean Architecture and explicit inbound/outbound ports per service.

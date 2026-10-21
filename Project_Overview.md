@@ -594,7 +594,7 @@ The project shall provide clear architecture and setup documentation.
 
 ## Testing
 
-- JUnit 5
+- JUnit Jupiter (JUnit 6)
 - Mockito
 - Testcontainers
 - Spring Boot Test

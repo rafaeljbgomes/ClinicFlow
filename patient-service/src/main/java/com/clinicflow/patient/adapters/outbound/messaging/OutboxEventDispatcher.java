@@ -72,8 +72,8 @@ public class OutboxEventDispatcher {
         rabbitTemplate.send(exchange, event.routingKey(), message(event), correlationData);
         CorrelationData.Confirm confirm = correlationData.getFuture().get(
                 properties.confirmTimeout().toMillis(), TimeUnit.MILLISECONDS);
-        if (!confirm.isAck()) {
-            throw new IllegalStateException("RabbitMQ negatively acknowledged the event: " + confirm.getReason());
+        if (!confirm.ack()) {
+            throw new IllegalStateException("RabbitMQ negatively acknowledged the event: " + confirm.reason());
         }
         if (correlationData.getReturned() != null) {
             throw new IllegalStateException("RabbitMQ returned the event as unroutable: "

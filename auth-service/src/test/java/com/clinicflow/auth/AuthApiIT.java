@@ -5,7 +5,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -16,7 +16,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.testcontainers.containers.PostgreSQLContainer;
+import org.springframework.test.web.servlet.client.EntityExchangeResult;
+import org.springframework.test.web.servlet.client.RestTestClient;
+import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
@@ -28,6 +30,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.when;
 
+@AutoConfigureRestTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = "clinicflow.demo.enabled=false")
 @Testcontainers
@@ -37,12 +40,12 @@ class AuthApiIT {
 
     @Container
     @ServiceConnection(name = "postgres")
-    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>(
+    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer(
             org.testcontainers.utility.DockerImageName
                     .parse("postgres:16.14-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777")
                     .asCompatibleSubstituteFor("postgres"));
 
-    @Autowired private TestRestTemplate http;
+    @Autowired private RestTestClient http;
     @Autowired private JdbcTemplate jdbc;
     @MockitoBean private JwtDecoder jwtDecoder;
     @MockitoBean private TokenIssuer tokenIssuer;
@@ -60,11 +63,11 @@ class AuthApiIT {
         Map<String, Object> registration = psychologistRegistration();
 
         // Act
-        var response = http.postForEntity("/auth/register", registration, Map.class);
+        var response = exchange("/auth/register", HttpMethod.POST, new HttpEntity<>(registration), Map.class);
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
-        assertThat(response.getBody()).containsEntry("email", EMAIL);
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.CREATED);
+        assertThat(response.getResponseBody()).containsEntry("email", EMAIL);
     }
 
     @Test
@@ -74,11 +77,11 @@ class AuthApiIT {
         Map<String, Object> credentials = Map.of("email", EMAIL, "password", PASSWORD);
 
         // Act
-        var response = http.postForEntity("/auth/login", credentials, Map.class);
+        var response = exchange("/auth/login", HttpMethod.POST, new HttpEntity<>(credentials), Map.class);
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(response.getBody()).containsEntry("accessToken", "functional-token");
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getResponseBody()).containsEntry("accessToken", "functional-token");
     }
 
     @Test
@@ -89,11 +92,11 @@ class AuthApiIT {
         var request = new HttpEntity<>(bearer("functional-token"));
 
         // Act
-        var response = http.exchange("/users/me", HttpMethod.GET, request, Map.class);
+        var response = exchange("/users/me", HttpMethod.GET, request, Map.class);
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(response.getBody()).containsEntry("id", userId)
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getResponseBody()).containsEntry("id", userId)
                 .containsEntry("email", EMAIL);
     }
 
@@ -104,10 +107,10 @@ class AuthApiIT {
                 "email", "not-an-email", "password", "short", "role", "PATIENT", "fullName", "");
 
         // Act
-        var response = http.postForEntity("/auth/register", invalid, Map.class);
+        var response = exchange("/auth/register", HttpMethod.POST, new HttpEntity<>(invalid), Map.class);
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
     }
 
     @Test
@@ -119,19 +122,19 @@ class AuthApiIT {
         register(registration);
 
         // Act
-        var response = http.postForEntity("/auth/register", registration, Map.class);
+        var response = exchange("/auth/register", HttpMethod.POST, new HttpEntity<>(registration), Map.class);
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.CONFLICT);
     }
 
     @Test
     void currentUserProfileRequiresAuthentication() {
         // Act
-        var response = http.getForEntity("/users/me", Map.class);
+        var response = exchange("/users/me", HttpMethod.GET, HttpEntity.EMPTY, Map.class);
 
         // Assert
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
     private Map<String, Object> psychologistRegistration() {
@@ -143,7 +146,13 @@ class AuthApiIT {
     }
 
     private String register(Map<String, Object> registration) {
-        return http.postForEntity("/auth/register", registration, Map.class).getBody().get("id").toString();
+        return exchange("/auth/register", HttpMethod.POST, new HttpEntity<>(registration), Map.class)
+                .getResponseBody().get("id").toString();
+    }
+
+    private <T> EntityExchangeResult<T> exchange(String path, HttpMethod method, HttpEntity<?> request, Class<T> type) {
+        var spec = http.method(method).uri(path).headers(headers -> headers.addAll(request.getHeaders()));
+        return (request.hasBody() ? spec.body(request.getBody()) : spec).exchange().returnResult(type);
     }
 
     private HttpHeaders bearer(String token) {

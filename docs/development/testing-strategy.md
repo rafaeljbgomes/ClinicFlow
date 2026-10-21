@@ -23,7 +23,8 @@ integration they describe so failures identify a narrow responsibility.
   test boundary.
 - Full-context smoke tests replace only JWT decoding or token issuing while
   retaining real Spring wiring, PostgreSQL and RabbitMQ.
-- `*ApiIT.java` starts the real HTTP server on a random port and exercises the
+- `*ApiIT.java` starts the real HTTP server on a random port and calls it
+  through `RestTestClient` (`@AutoConfigureRestTestClient`), exercising the
   controller, security filter chain, application service, mapper, Flyway and
   PostgreSQL. JWT decoding and outbound event publication are replaced only
   when those systems are outside the boundary of the scenario.

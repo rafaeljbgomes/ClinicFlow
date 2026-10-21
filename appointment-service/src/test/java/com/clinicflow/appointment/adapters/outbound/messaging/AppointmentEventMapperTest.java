@@ -7,7 +7,8 @@ import com.clinicflow.appointment.domain.PatientId;
 import com.clinicflow.appointment.domain.PsychologistId;
 import com.clinicflow.appointment.domain.events.AppointmentCompletedEvent;
 import com.clinicflow.appointment.domain.events.AppointmentScheduledEvent;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.Test;
 import org.mapstruct.factory.Mappers;
 
@@ -18,7 +19,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class AppointmentEventMapperTest {
     private final AppointmentEventMapper mapper = Mappers.getMapper(AppointmentEventMapper.class);
-    private final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
+    private final ObjectMapper json = JsonMapper.builder().findAndAddModules()
+            .build();
 
     @Test
     void serializedScheduledPayloadKeepsTheExistingRabbitFields() throws Exception {

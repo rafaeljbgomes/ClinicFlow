@@ -4,7 +4,8 @@ import com.clinicflow.patient.domain.EmailAddress;
 import com.clinicflow.patient.domain.PatientId;
 import com.clinicflow.patient.domain.PsychologistId;
 import com.clinicflow.patient.domain.events.PatientCreatedEvent;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.Test;
 import org.mapstruct.factory.Mappers;
 
@@ -14,7 +15,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class PatientEventMapperTest {
     private final PatientEventMapper mapper = Mappers.getMapper(PatientEventMapper.class);
-    private final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
+    private final ObjectMapper json = JsonMapper.builder().findAndAddModules()
+            .build();
 
     @Test
     void serializedPayloadKeepsTheExistingRabbitFields() throws Exception {

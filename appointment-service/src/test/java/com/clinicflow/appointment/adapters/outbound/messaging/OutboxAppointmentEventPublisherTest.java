@@ -12,8 +12,9 @@ import com.clinicflow.appointment.domain.events.AppointmentCancelledEvent;
 import com.clinicflow.appointment.domain.events.AppointmentCompletedEvent;
 import com.clinicflow.appointment.domain.events.AppointmentRescheduledEvent;
 import com.clinicflow.appointment.domain.events.AppointmentScheduledEvent;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -38,7 +39,8 @@ import static org.mockito.Mockito.when;
 
 class OutboxAppointmentEventPublisherTest {
     private final SpringDataOutboxEventRepository repository = mock(SpringDataOutboxEventRepository.class);
-    private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+    private final ObjectMapper objectMapper = JsonMapper.builder().findAndAddModules()
+            .build();
     private final OutboxAppointmentEventPublisher publisher = new OutboxAppointmentEventPublisher(
             repository, objectMapper, Mappers.getMapper(AppointmentEventMapper.class));
 
@@ -124,7 +126,7 @@ class OutboxAppointmentEventPublisherTest {
         assertThat(thrown)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("Could not serialize appointment event for the outbox")
-                .hasCauseInstanceOf(JsonProcessingException.class);
+                .hasCauseInstanceOf(JacksonException.class);
     }
 
     @Test
@@ -145,9 +147,9 @@ class OutboxAppointmentEventPublisherTest {
         return captor.getValue();
     }
 
-    private OutboxAppointmentEventPublisher publisherWithFailingSerializer() throws JsonProcessingException {
+    private OutboxAppointmentEventPublisher publisherWithFailingSerializer() {
         ObjectMapper failingMapper = mock(ObjectMapper.class);
-        when(failingMapper.writeValueAsString(any())).thenThrow(new JsonProcessingException("broken") { });
+        when(failingMapper.writeValueAsString(any())).thenThrow(new JacksonException("broken") { });
         return new OutboxAppointmentEventPublisher(
                 repository, failingMapper, Mappers.getMapper(AppointmentEventMapper.class));
     }
