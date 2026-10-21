@@ -315,7 +315,11 @@ test.describe("patients", () => {
     await expect(statusFilter).toContainText("Active");
     await statusFilter.focus();
     await page.keyboard.press("Space");
+    // Wait for the listbox and the Home highlight; pressing keys before the popup opens loses them.
+    const allStatuses = page.getByRole("option", { name: "All statuses", exact: true });
+    await expect(allStatuses).toBeVisible();
     await page.keyboard.press("Home");
+    await expect(allStatuses).toHaveAttribute("data-highlighted", "");
 
     // Act
     await page.keyboard.press("Enter");
