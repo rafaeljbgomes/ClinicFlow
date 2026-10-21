@@ -30,8 +30,11 @@ function Test-TrivyDatabase {
     $Metadata = Get-Content -Raw $MetadataPath | ConvertFrom-Json
     $Updated = if ($Metadata.UpdatedAt -is [datetime]) { [DateTimeOffset]$Metadata.UpdatedAt } else { [DateTimeOffset]::Parse($Metadata.UpdatedAt,[Globalization.CultureInfo]::InvariantCulture) }
     $Age = [DateTimeOffset]::UtcNow - $Updated
-    if ($Metadata.Version -ne $Version -or $Age.TotalHours -gt $SecuritySettings.trivy.databaseMaxAgeHours -or $Age.TotalMinutes -lt -10) {
-        throw "Trivy database is incompatible, stale, or future-dated: $Directory"
+    # Trivy refreshes the Java DB (JAR checksums to Maven coordinates, no vulnerability data) only once its
+    # NextUpdate passes, three days after each build, so it gets a longer limit than the vulnerability DB.
+    $MaxAgeHours = if ($Version -eq 1) { $SecuritySettings.trivy.javaDatabaseMaxAgeHours } else { $SecuritySettings.trivy.databaseMaxAgeHours }
+    if ($Metadata.Version -ne $Version -or $Age.TotalHours -gt $MaxAgeHours -or $Age.TotalMinutes -lt -10) {
+        throw "Trivy database is incompatible, stale, or future-dated: $Directory (schema $($Metadata.Version), updated $($Updated.ToString('u')), limit $MaxAgeHours h)"
     }
 }
 function Initialize-TrivyDatabase {
