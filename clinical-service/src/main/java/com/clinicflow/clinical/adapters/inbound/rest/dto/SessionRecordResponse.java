@@ -12,5 +12,5 @@ public record SessionRecordResponse(UUID id, UUID clinicalCaseId, UUID psycholog
                                     int durationMinutes, AttendanceStatus attendanceStatus, NoteStatus noteStatus,
                                     String summary, String focusAreas, String interventions, String homework,
                                     String nextSteps, Instant createdAt, Instant updatedAt,
-                                    Instant signedAt, UUID signedBy) {
+                                    Instant signedAt, UUID signedBy, long version) {
 }

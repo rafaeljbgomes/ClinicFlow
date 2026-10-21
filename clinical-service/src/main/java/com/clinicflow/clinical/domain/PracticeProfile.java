@@ -3,6 +3,7 @@ package com.clinicflow.clinical.domain;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.Objects;
+import java.util.Optional;
 
 public final class PracticeProfile {
     private final PsychologistId psychologistId;
@@ -13,10 +14,12 @@ public final class PracticeProfile {
     private boolean telehealthEnabled;
     private final Instant createdAt;
     private Instant updatedAt;
+    // Assigned and incremented by persistence; null until the profile is first saved.
+    private final Long version;
 
     private PracticeProfile(PsychologistId psychologistId, String professionalRegistration, ZoneId timezone,
                             int defaultSessionDurationMinutes, String primaryLocation, boolean telehealthEnabled,
-                            Instant createdAt, Instant updatedAt) {
+                            Instant createdAt, Instant updatedAt, Long version) {
         if (psychologistId == null || timezone == null || createdAt == null || updatedAt == null) {
             throw new IllegalArgumentException("Practice profile required fields are missing");
         }
@@ -30,21 +33,22 @@ public final class PracticeProfile {
         this.telehealthEnabled = telehealthEnabled;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
+        this.version = version;
     }
 
     public static PracticeProfile create(PsychologistId psychologistId, String professionalRegistration,
                                          ZoneId timezone, int defaultSessionDurationMinutes,
                                          String primaryLocation, boolean telehealthEnabled, Instant now) {
         return new PracticeProfile(psychologistId, professionalRegistration, timezone,
-                defaultSessionDurationMinutes, primaryLocation, telehealthEnabled, now, now);
+                defaultSessionDurationMinutes, primaryLocation, telehealthEnabled, now, now, null);
     }
 
     public static PracticeProfile rehydrate(PsychologistId psychologistId, String professionalRegistration,
                                             ZoneId timezone, int defaultSessionDurationMinutes,
                                             String primaryLocation, boolean telehealthEnabled,
-                                            Instant createdAt, Instant updatedAt) {
+                                            Instant createdAt, Instant updatedAt, Long version) {
         return new PracticeProfile(psychologistId, professionalRegistration, timezone,
-                defaultSessionDurationMinutes, primaryLocation, telehealthEnabled, createdAt, updatedAt);
+                defaultSessionDurationMinutes, primaryLocation, telehealthEnabled, createdAt, updatedAt, version);
     }
 
     public PracticeProfile update(String professionalRegistration, ZoneId timezone, int defaultSessionDurationMinutes,
@@ -77,6 +81,7 @@ public final class PracticeProfile {
     public boolean telehealthEnabled() { return telehealthEnabled; }
     public Instant createdAt() { return createdAt; }
     public Instant updatedAt() { return updatedAt; }
+    public Optional<Long> version() { return Optional.ofNullable(version); }
 
     @Override
     public boolean equals(Object other) {

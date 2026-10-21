@@ -7,5 +7,5 @@ import java.util.UUID;
 
 public record ClinicalCaseResult(UUID id, UUID psychologistId, UUID patientId, String presentingConcern,
                                  ClinicalCaseStatus status, Instant openedAt, Instant closedAt,
-                                 Instant createdAt, Instant updatedAt) {
+                                 Instant createdAt, Instant updatedAt, long version) {
 }

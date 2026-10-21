@@ -9,6 +9,7 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -35,6 +36,8 @@ class JpaSessionRecordEntity {
     @Column(name = "updated_at", nullable = false) private Instant updatedAt;
     @Column(name = "signed_at") private Instant signedAt;
     @Column(name = "signed_by") private UUID signedBy;
+    // A wrapper type, so Spring Data persists a null version and merges anything else.
+    @Version @Column(nullable = false) private Long version;
 
     protected JpaSessionRecordEntity() {}
 
@@ -42,14 +45,15 @@ class JpaSessionRecordEntity {
                            UUID appointmentId, Instant sessionDate, SessionModality modality, int durationMinutes,
                            AttendanceStatus attendanceStatus, NoteStatus noteStatus, String summary,
                            String focusAreas, String interventions, String homework, String nextSteps,
-                           Instant createdAt, Instant updatedAt, Instant signedAt, UUID signedBy) {
+                           Instant createdAt, Instant updatedAt, Instant signedAt, UUID signedBy,
+                           Long version) {
         this.id = id; this.clinicalCaseId = clinicalCaseId; this.psychologistId = psychologistId;
         this.patientId = patientId; this.appointmentId = appointmentId; this.sessionDate = sessionDate;
         this.modality = modality; this.durationMinutes = durationMinutes;
         this.attendanceStatus = attendanceStatus; this.noteStatus = noteStatus; this.summary = summary;
         this.focusAreas = focusAreas; this.interventions = interventions; this.homework = homework;
         this.nextSteps = nextSteps; this.createdAt = createdAt; this.updatedAt = updatedAt;
-        this.signedAt = signedAt; this.signedBy = signedBy;
+        this.signedAt = signedAt; this.signedBy = signedBy; this.version = version;
     }
 
     UUID id() { return id; }
@@ -71,4 +75,5 @@ class JpaSessionRecordEntity {
     Instant updatedAt() { return updatedAt; }
     Instant signedAt() { return signedAt; }
     UUID signedBy() { return signedBy; }
+    Long version() { return version; }
 }

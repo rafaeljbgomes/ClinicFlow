@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -139,6 +140,24 @@ class DemoDataBootstrapTest {
     }
 
     @Test
+    void rerunUpdatesTheStoredAggregatesInPlace() {
+        // Arrange
+        DemoDataBootstrap bootstrap = bootstrap(FIRST_START);
+        bootstrap.run(null);
+
+        // Act
+        bootstrap.run(null);
+
+        // Assert
+        assertThat(practiceProfiles.records().values()).extracting(profile -> profile.version().orElseThrow())
+                .containsOnly(1L);
+        assertThat(clinicalCases.records().values()).extracting(clinicalCase -> clinicalCase.version().orElseThrow())
+                .containsOnly(1L);
+        assertThat(carePlans.records().values()).extracting(carePlan -> carePlan.version().orElseThrow())
+                .containsOnly(1L);
+    }
+
+    @Test
     void restartKeepsExistingSessionRecordsSoEditedNotesSurvive() {
         // Arrange
         bootstrap(FIRST_START).run(null);
@@ -182,6 +201,19 @@ class DemoDataBootstrapTest {
         draft.sign(draft.psychologistId(), Instant.parse("2026-07-06T10:00:00Z"));
     }
 
+    // Like persistence: a save must name the stored version, or none for a record that is not stored yet.
+    private static <T> void requireStoredVersion(T stored, Function<T, Optional<Long>> version,
+                                                 Optional<Long> saving) {
+        Optional<Long> current = stored == null ? Optional.empty() : version.apply(stored);
+        if (!current.equals(saving)) {
+            throw new IllegalStateException("Stale or duplicate demo record");
+        }
+    }
+
+    private static long nextVersion(Optional<Long> version) {
+        return version.map(current -> current + 1).orElse(0L);
+    }
+
     private static MapPropertySource demoBootstrapProperty() {
         return new MapPropertySource("test", Map.of("clinicflow.demo.bootstrap.enabled", "true"));
     }
@@ -195,8 +227,14 @@ class DemoDataBootstrapTest {
         }
 
         @Override
-        public void save(PracticeProfile profile) {
-            records.put(profile.psychologistId(), profile);
+        public PracticeProfile save(PracticeProfile profile) {
+            requireStoredVersion(records.get(profile.psychologistId()), PracticeProfile::version, profile.version());
+            PracticeProfile saved = PracticeProfile.rehydrate(profile.psychologistId(),
+                    profile.professionalRegistration(), profile.timezone(), profile.defaultSessionDurationMinutes(),
+                    profile.primaryLocation(), profile.telehealthEnabled(), profile.createdAt(), profile.updatedAt(),
+                    nextVersion(profile.version()));
+            records.put(saved.psychologistId(), saved);
+            return saved;
         }
 
         Map<PsychologistId, PracticeProfile> records() {
@@ -252,8 +290,14 @@ class DemoDataBootstrapTest {
         }
 
         @Override
-        public void save(ClinicalCase clinicalCase) {
-            records.put(clinicalCase.id(), clinicalCase);
+        public ClinicalCase save(ClinicalCase clinicalCase) {
+            requireStoredVersion(records.get(clinicalCase.id()), ClinicalCase::version, clinicalCase.version());
+            ClinicalCase saved = ClinicalCase.rehydrate(clinicalCase.id(), clinicalCase.psychologistId(),
+                    clinicalCase.patientId(), clinicalCase.presentingConcern(), clinicalCase.status(),
+                    clinicalCase.openedAt(), clinicalCase.closedAt(), clinicalCase.createdAt(),
+                    clinicalCase.updatedAt(), nextVersion(clinicalCase.version()));
+            records.put(saved.id(), saved);
+            return saved;
         }
 
         Map<ClinicalCaseId, ClinicalCase> records() {
@@ -270,8 +314,14 @@ class DemoDataBootstrapTest {
         }
 
         @Override
-        public void save(CarePlan carePlan) {
-            records.put(carePlan.clinicalCaseId(), carePlan);
+        public CarePlan save(CarePlan carePlan) {
+            requireStoredVersion(records.get(carePlan.clinicalCaseId()), CarePlan::version, carePlan.version());
+            CarePlan saved = CarePlan.rehydrate(carePlan.id(), carePlan.clinicalCaseId(), carePlan.psychologistId(),
+                    carePlan.patientId(), carePlan.therapeuticFocus(), carePlan.plannedFrequency(),
+                    carePlan.reviewDate(), carePlan.goals(), carePlan.createdAt(), carePlan.updatedAt(),
+                    nextVersion(carePlan.version()));
+            records.put(saved.clinicalCaseId(), saved);
+            return saved;
         }
 
         Map<ClinicalCaseId, CarePlan> records() {
@@ -312,9 +362,10 @@ class DemoDataBootstrapTest {
         }
 
         @Override
-        public void save(SessionRecord sessionRecord) {
+        public SessionRecord save(SessionRecord sessionRecord) {
             saves++;
             records.put(sessionRecord.id(), sessionRecord);
+            return sessionRecord;
         }
 
         Map<SessionRecordId, SessionRecord> records() {

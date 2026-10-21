@@ -7,5 +7,6 @@ import java.util.Optional;
 
 public interface PracticeProfileRepository {
     Optional<PracticeProfile> findByPsychologistId(PsychologistId psychologistId);
-    void save(PracticeProfile profile);
+    // Returns the stored profile, including the version persistence assigned.
+    PracticeProfile save(PracticeProfile profile);
 }

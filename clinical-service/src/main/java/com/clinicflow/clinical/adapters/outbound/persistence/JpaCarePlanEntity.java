@@ -6,6 +6,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -27,16 +28,18 @@ class JpaCarePlanEntity {
     private List<JpaCareGoalEntity> goals = new ArrayList<>();
     @Column(name = "created_at", nullable = false) private Instant createdAt;
     @Column(name = "updated_at", nullable = false) private Instant updatedAt;
+    // Versions the plan and its goals: every change to the plan rewrites the root row.
+    @Version @Column(nullable = false) private Long version;
 
     protected JpaCarePlanEntity() {}
 
     JpaCarePlanEntity(UUID id, UUID clinicalCaseId, UUID psychologistId, UUID patientId,
                       String therapeuticFocus, String plannedFrequency, LocalDate reviewDate,
-                      List<JpaCareGoalEntity> goals, Instant createdAt, Instant updatedAt) {
+                      List<JpaCareGoalEntity> goals, Instant createdAt, Instant updatedAt, Long version) {
         this.id = id; this.clinicalCaseId = clinicalCaseId; this.psychologistId = psychologistId;
         this.patientId = patientId; this.therapeuticFocus = therapeuticFocus;
         this.plannedFrequency = plannedFrequency; this.reviewDate = reviewDate;
-        this.createdAt = createdAt; this.updatedAt = updatedAt;
+        this.createdAt = createdAt; this.updatedAt = updatedAt; this.version = version;
         goals.forEach(this::addGoal);
     }
 
@@ -55,4 +58,5 @@ class JpaCarePlanEntity {
     List<JpaCareGoalEntity> goals() { return List.copyOf(goals); }
     Instant createdAt() { return createdAt; }
     Instant updatedAt() { return updatedAt; }
+    Long version() { return version; }
 }

@@ -7,5 +7,6 @@ import java.util.UUID;
 
 public record CarePlanResponse(UUID id, UUID clinicalCaseId, UUID psychologistId, UUID patientId,
                                String therapeuticFocus, String plannedFrequency, LocalDate reviewDate,
-                               List<CareGoalResponse> goals, Instant createdAt, Instant updatedAt) {
+                               List<CareGoalResponse> goals, Instant createdAt, Instant updatedAt,
+                               long version) {
 }
