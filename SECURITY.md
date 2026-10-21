@@ -70,6 +70,9 @@ The following properties must hold for supported behavior:
   to another psychologist's patient or appointment. The owning service confirms
   every such reference with the caller's token, and the check fails closed when
   it cannot answer (ADR-021).
+- Responses do not reveal whether another psychologist's identifier exists: a
+  foreign patient, appointment, clinical case, or session record gets the same
+  `404` problem as an identifier that was never issued (ADR-021).
 - JWT signing keys and infrastructure credentials are not committed, exposed in
   logs, or returned in API responses.
 - Browser access tokens remain in HttpOnly cookies; mutating same-origin BFF

@@ -336,6 +336,18 @@ the local duplicate check, so a foreign appointment id reveals nothing. Clients 
 one-second connect and two-second read timeouts, never follow redirects, and
 forward the correlation id.
 
+Identifier probing: every endpoint that addresses a patient, appointment, clinical
+case, or session record by id answers another psychologist's resource exactly like
+a missing one. The status, problem code, title, and detail match, for example
+`404 patient_not_found` or `404 clinical_resource_not_found`. The denial is
+written to the service log (`patient_access_denied`, `appointment_access_denied`,
+`clinical_case_access_denied`, `session_record_access_denied`) with the resource
+and caller ids, so it stays auditable without reaching the caller. `403
+access_denied` remains only for role checks and for rules inside the caller's own
+records, such as a care-goal id outside the plan, whose answer does not depend on
+whether the id exists. Response timing is not normalised. Notifications already
+followed this rule (ADR-016).
+
 Consequences: scheduling and case creation now depend on patient-service at
 request time, and linking a session record depends on appointment-service. Reads
 and the other lifecycle operations do not. The check runs inside the write
