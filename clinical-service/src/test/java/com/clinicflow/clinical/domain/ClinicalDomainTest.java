@@ -24,6 +24,10 @@ class ClinicalDomainTest {
             new PsychologistId(UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"));
     private static final PatientId PATIENT_ID =
             new PatientId(UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"));
+    private static final PsychologistId OTHER_PSYCHOLOGIST_ID =
+            new PsychologistId(UUID.fromString("dddddddd-dddd-dddd-dddd-dddddddddddd"));
+    private static final PatientId OTHER_PATIENT_ID =
+            new PatientId(UUID.fromString("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"));
     private static final Instant NOW = Instant.parse("2026-06-01T10:00:00Z");
     private static final ZoneId UTC = ZoneId.of("UTC");
 
@@ -176,7 +180,38 @@ class ClinicalDomainTest {
                 Arguments.of("DomainEventId", (ThrowingCallable) () -> new DomainEventId(null)),
                 Arguments.of("PatientId", (ThrowingCallable) () -> new PatientId(null)),
                 Arguments.of("PsychologistId", (ThrowingCallable) () -> new PsychologistId(null)),
-                Arguments.of("SessionRecordId", (ThrowingCallable) () -> new SessionRecordId(null)));
+                Arguments.of("SessionRecordId", (ThrowingCallable) () -> new SessionRecordId(null)),
+                Arguments.of("SessionRecordLinkConflictId",
+                        (ThrowingCallable) () -> new SessionRecordLinkConflictId(null)));
+    }
+
+    static Stream<Arguments> appointmentOwnersOtherThanTheRecord() {
+        return Stream.of(
+                Arguments.of("another psychologist", OTHER_PSYCHOLOGIST_ID, PATIENT_ID),
+                Arguments.of("another patient", PSYCHOLOGIST_ID, OTHER_PATIENT_ID),
+                Arguments.of("another psychologist and patient", OTHER_PSYCHOLOGIST_ID, OTHER_PATIENT_ID));
+    }
+
+    static Stream<Arguments> invalidLinkConflicts() {
+        SessionRecordLinkConflictId id = new SessionRecordLinkConflictId(UUID.randomUUID());
+        SessionRecordId sessionId = new SessionRecordId(UUID.randomUUID());
+        AppointmentId appointmentId = new AppointmentId(UUID.randomUUID());
+        LinkConflictSource source = LinkConflictSource.MANUAL_LINK;
+        return Stream.of(
+                Arguments.of("missing id", null, sessionId, appointmentId, OTHER_PSYCHOLOGIST_ID, PATIENT_ID, source,
+                        NOW),
+                Arguments.of("missing session record", id, null, appointmentId, OTHER_PSYCHOLOGIST_ID, PATIENT_ID,
+                        source, NOW),
+                Arguments.of("missing appointment", id, sessionId, null, OTHER_PSYCHOLOGIST_ID, PATIENT_ID, source,
+                        NOW),
+                Arguments.of("missing appointment psychologist", id, sessionId, appointmentId, null, PATIENT_ID,
+                        source, NOW),
+                Arguments.of("missing appointment patient", id, sessionId, appointmentId, OTHER_PSYCHOLOGIST_ID,
+                        null, source, NOW),
+                Arguments.of("missing source", id, sessionId, appointmentId, OTHER_PSYCHOLOGIST_ID, PATIENT_ID, null,
+                        NOW),
+                Arguments.of("missing detectedAt", id, sessionId, appointmentId, OTHER_PSYCHOLOGIST_ID, PATIENT_ID,
+                        source, null));
     }
 
     static Stream<Arguments> sameIdentityPairs() {
@@ -680,6 +715,155 @@ class ClinicalDomainTest {
         Throwable thrown = catchThrowable(() -> SessionRecord.rehydrate(id, null, psychologistId, patientId, null,
                 sessionDate, modality, 50, attendance, noteStatus, null, null, null, null, null, createdAt,
                 updatedAt, null, null));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void recordOfTheAppointmentsPsychologistAndPatientBelongsToTheAppointment() {
+        // Arrange
+        SessionRecord session = pendingSession(null);
+
+        // Act
+        boolean recordOfOwner = session.isRecordOf(PSYCHOLOGIST_ID, PATIENT_ID);
+
+        // Assert
+        assertThat(recordOfOwner).isTrue();
+    }
+
+    @ParameterizedTest(name = "appointment of {0}")
+    @MethodSource("appointmentOwnersOtherThanTheRecord")
+    void recordOfAnotherPsychologistOrPatientDoesNotBelongToTheAppointment(String owner,
+                                                                          PsychologistId appointmentPsychologist,
+                                                                          PatientId appointmentPatient) {
+        // Arrange
+        SessionRecord session = pendingSession(null);
+
+        // Act
+        boolean recordOfOwner = session.isRecordOf(appointmentPsychologist, appointmentPatient);
+
+        // Assert
+        assertThat(recordOfOwner).isFalse();
+    }
+
+    @ParameterizedTest(name = "appointment of {0}")
+    @MethodSource("appointmentOwnersOtherThanTheRecord")
+    void releasingAConflictingLinkClearsTheAppointment(String owner, PsychologistId appointmentPsychologist,
+                                                       PatientId appointmentPatient) {
+        // Arrange
+        SessionRecord session = pendingSession(null);
+
+        // Act
+        session.releaseAppointmentLink(new SessionRecordLinkConflictId(UUID.randomUUID()), appointmentPsychologist,
+                appointmentPatient, LinkConflictSource.APPOINTMENT_COMPLETED, NOW.plusSeconds(60));
+
+        // Assert
+        assertThat(session.appointmentId()).isEmpty();
+    }
+
+    @Test
+    void releasingAConflictingLinkDescribesTheConflict() {
+        // Arrange
+        SessionRecord session = pendingSession(null);
+        AppointmentId appointmentId = session.appointmentId().orElseThrow();
+        SessionRecordLinkConflictId conflictId = new SessionRecordLinkConflictId(UUID.randomUUID());
+
+        // Act
+        SessionRecordLinkConflict conflict = session.releaseAppointmentLink(conflictId, OTHER_PSYCHOLOGIST_ID,
+                OTHER_PATIENT_ID, LinkConflictSource.MANUAL_LINK, NOW.plusSeconds(60));
+
+        // Assert
+        assertThat(conflict).isEqualTo(new SessionRecordLinkConflict(conflictId, session.id(), appointmentId,
+                OTHER_PSYCHOLOGIST_ID, OTHER_PATIENT_ID, LinkConflictSource.MANUAL_LINK, NOW.plusSeconds(60)));
+    }
+
+    @Test
+    void releasingAConflictingLinkKeepsASignedNoteAsSigned() {
+        // Arrange
+        SessionRecord session = SessionRecord.rehydrate(new SessionRecordId(UUID.randomUUID()), null,
+                PSYCHOLOGIST_ID, PATIENT_ID, new AppointmentId(UUID.randomUUID()), NOW, SessionModality.ONLINE, 50,
+                AttendanceStatus.ATTENDED, NoteStatus.SIGNED, "Summary", "Focus", null, null, null, NOW,
+                NOW.plusSeconds(60), NOW.plusSeconds(60), PSYCHOLOGIST_ID);
+
+        // Act
+        session.releaseAppointmentLink(new SessionRecordLinkConflictId(UUID.randomUUID()), OTHER_PSYCHOLOGIST_ID,
+                OTHER_PATIENT_ID, LinkConflictSource.APPOINTMENT_COMPLETED, NOW.plusSeconds(120));
+
+        // Assert
+        assertThat(session.noteStatus()).isEqualTo(NoteStatus.SIGNED);
+        assertThat(session.summary()).isEqualTo("Summary");
+        assertThat(session.signedAt()).contains(NOW.plusSeconds(60));
+        assertThat(session.signedBy()).contains(PSYCHOLOGIST_ID);
+        assertThat(session.updatedAt()).isEqualTo(NOW.plusSeconds(60));
+    }
+
+    @Test
+    void rejectsReleasingTheLinkOfTheAppointmentOwnersRecord() {
+        // Arrange
+        SessionRecord session = pendingSession(null);
+
+        // Act
+        Throwable thrown = catchThrowable(() -> session.releaseAppointmentLink(
+                new SessionRecordLinkConflictId(UUID.randomUUID()), PSYCHOLOGIST_ID, PATIENT_ID,
+                LinkConflictSource.APPOINTMENT_COMPLETED, NOW));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void rejectedReleaseKeepsTheOwnersLink() {
+        // Arrange
+        SessionRecord session = pendingSession(null);
+        AppointmentId appointmentId = session.appointmentId().orElseThrow();
+
+        // Act
+        catchThrowable(() -> session.releaseAppointmentLink(new SessionRecordLinkConflictId(UUID.randomUUID()),
+                PSYCHOLOGIST_ID, PATIENT_ID, LinkConflictSource.APPOINTMENT_COMPLETED, NOW));
+
+        // Assert
+        assertThat(session.appointmentId()).contains(appointmentId);
+    }
+
+    @Test
+    void rejectsReleasingALinkFromARecordWithoutAppointment() {
+        // Arrange
+        SessionRecord session = session(NoteStatus.DRAFT, "Summary");
+
+        // Act
+        Throwable thrown = catchThrowable(() -> session.releaseAppointmentLink(
+                new SessionRecordLinkConflictId(UUID.randomUUID()), OTHER_PSYCHOLOGIST_ID, OTHER_PATIENT_ID,
+                LinkConflictSource.MANUAL_LINK, NOW));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void rejectedReleaseWithIncompleteAuditKeepsTheLink() {
+        // Arrange
+        SessionRecord session = pendingSession(null);
+        AppointmentId appointmentId = session.appointmentId().orElseThrow();
+
+        // Act
+        Throwable thrown = catchThrowable(() -> session.releaseAppointmentLink(null, OTHER_PSYCHOLOGIST_ID,
+                OTHER_PATIENT_ID, LinkConflictSource.MANUAL_LINK, NOW));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(IllegalArgumentException.class);
+        assertThat(session.appointmentId()).contains(appointmentId);
+    }
+
+    @ParameterizedTest(name = "rejects {0}")
+    @MethodSource("invalidLinkConflicts")
+    void rejectsLinkConflictWithMissingField(String invalid, SessionRecordLinkConflictId id,
+                                             SessionRecordId sessionRecordId, AppointmentId appointmentId,
+                                             PsychologistId appointmentPsychologist, PatientId appointmentPatient,
+                                             LinkConflictSource source, Instant detectedAt) {
+        // Act
+        Throwable thrown = catchThrowable(() -> new SessionRecordLinkConflict(id, sessionRecordId, appointmentId,
+                appointmentPsychologist, appointmentPatient, source, detectedAt));
 
         // Assert
         assertThat(thrown).isInstanceOf(IllegalArgumentException.class);

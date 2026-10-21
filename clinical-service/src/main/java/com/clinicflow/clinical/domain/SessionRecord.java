@@ -9,7 +9,7 @@ public final class SessionRecord {
     private ClinicalCaseId clinicalCaseId;
     private final PsychologistId psychologistId;
     private final PatientId patientId;
-    private final AppointmentId appointmentId;
+    private AppointmentId appointmentId;
     private Instant sessionDate;
     private SessionModality modality;
     private int durationMinutes;
@@ -138,6 +138,29 @@ public final class SessionRecord {
         this.signedBy = signer;
         this.updatedAt = now;
         return this;
+    }
+
+    // Only the appointment's own psychologist and patient may hold its id on a session record (ADR-025).
+    public boolean isRecordOf(PsychologistId appointmentPsychologistId, PatientId appointmentPatientId) {
+        return psychologistId.equals(appointmentPsychologistId) && patientId.equals(appointmentPatientId);
+    }
+
+    // Releasing a link that was never valid is not a note edit: content, signature and updatedAt stay as they are,
+    // so it is allowed on signed notes. The returned audit entry must be stored before the record is saved.
+    public SessionRecordLinkConflict releaseAppointmentLink(SessionRecordLinkConflictId conflictId,
+                                                            PsychologistId appointmentPsychologistId,
+                                                            PatientId appointmentPatientId,
+                                                            LinkConflictSource source, Instant now) {
+        if (appointmentId == null) {
+            throw new IllegalStateException("Session record has no appointment link to release");
+        }
+        if (isRecordOf(appointmentPsychologistId, appointmentPatientId)) {
+            throw new IllegalStateException("Session record belongs to the appointment's owner");
+        }
+        SessionRecordLinkConflict conflict = new SessionRecordLinkConflict(conflictId, id, appointmentId,
+                appointmentPsychologistId, appointmentPatientId, source, now);
+        this.appointmentId = null;
+        return conflict;
     }
 
     private void requireUnsigned() {

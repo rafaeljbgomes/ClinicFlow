@@ -13,6 +13,7 @@ import com.clinicflow.clinical.domain.PracticeProfile;
 import com.clinicflow.clinical.domain.PsychologistId;
 import com.clinicflow.clinical.domain.SessionRecord;
 import com.clinicflow.clinical.domain.SessionRecordId;
+import com.clinicflow.clinical.domain.SessionRecordLinkConflict;
 import org.mapstruct.Mapper;
 
 import java.time.ZoneId;
@@ -78,6 +79,12 @@ public abstract class ClinicalPersistenceMapper {
                 session.summary(), session.focusAreas(), session.interventions(), session.homework(),
                 session.nextSteps(), session.createdAt(), session.updatedAt(), session.signedAt().orElse(null),
                 session.signedBy().map(PsychologistId::value).orElse(null));
+    }
+
+    public JpaSessionRecordLinkConflictEntity toJpa(SessionRecordLinkConflict conflict) {
+        return new JpaSessionRecordLinkConflictEntity(conflict.id().value(), conflict.sessionRecordId().value(),
+                conflict.appointmentId().value(), conflict.appointmentPsychologistId().value(),
+                conflict.appointmentPatientId().value(), conflict.source(), conflict.detectedAt());
     }
 
     public SessionRecord toDomain(JpaSessionRecordEntity entity) {

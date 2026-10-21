@@ -64,7 +64,7 @@ class SignedSessionRecordLockIT {
     @AfterEach
     void removeLockedRows() {
         // TRUNCATE does not fire row-level triggers, so it can clear signed rows between tests.
-        jdbc.execute("TRUNCATE TABLE session_records");
+        jdbc.execute("TRUNCATE TABLE session_record_link_conflicts, session_records");
     }
 
     static Stream<Arguments> statementsAgainstSignedRows() {
