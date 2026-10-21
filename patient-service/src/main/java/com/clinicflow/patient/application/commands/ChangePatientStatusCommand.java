@@ -4,5 +4,6 @@ import com.clinicflow.patient.domain.PatientId;
 import com.clinicflow.patient.domain.PatientStatus;
 import com.clinicflow.patient.domain.PsychologistId;
 
-public record ChangePatientStatusCommand(PsychologistId psychologistId, PatientId patientId, PatientStatus status) {
+public record ChangePatientStatusCommand(PsychologistId psychologistId, PatientId patientId, PatientStatus status,
+                                         long expectedVersion) {
 }

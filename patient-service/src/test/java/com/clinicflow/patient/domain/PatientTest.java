@@ -188,7 +188,7 @@ class PatientTest {
                 patient.preferredName().orElseThrow(), patient.birthDate().orElseThrow(),
                 patient.phone().orElseThrow(), patient.emergencyContact().orElseThrow(),
                 patient.contactPreference(), patient.consentStatus(), patient.consentUpdatedAt(),
-                patient.status(), patient.createdAt(), patient.updatedAt());
+                patient.status(), patient.createdAt(), patient.updatedAt(), 5L);
 
         // Act
         boolean equal = patient.equals(rehydrated);
@@ -232,6 +232,51 @@ class PatientTest {
 
         // Assert
         assertThat(patient.phone()).isEmpty();
+    }
+
+    @Test
+    void newPatientHasNoVersion() {
+        // Act
+        Patient patient = patient();
+
+        // Assert
+        assertThat(patient.version()).isEmpty();
+    }
+
+    @Test
+    void newPatientIsAtNoVersion() {
+        // Arrange
+        Patient patient = patient();
+
+        // Act
+        boolean atVersion = patient.isAtVersion(0);
+
+        // Assert
+        assertThat(atVersion).isFalse();
+    }
+
+    @Test
+    void storedPatientIsAtItsVersion() {
+        // Arrange
+        Patient patient = rehydrate(validRehydrationFields());
+
+        // Act
+        boolean atVersion = patient.isAtVersion(5);
+
+        // Assert
+        assertThat(atVersion).isTrue();
+    }
+
+    @Test
+    void storedPatientIsNotAtAnotherVersion() {
+        // Arrange
+        Patient patient = rehydrate(validRehydrationFields());
+
+        // Act
+        boolean atVersion = patient.isAtVersion(4);
+
+        // Assert
+        assertThat(atVersion).isFalse();
     }
 
     static Stream<Arguments> requiredRehydrationFields() {
@@ -307,6 +352,7 @@ class PatientTest {
                 (Instant) fields[10],
                 (PatientStatus) fields[11],
                 (Instant) fields[12],
-                (Instant) fields[13]);
+                (Instant) fields[13],
+                5L);
     }
 }

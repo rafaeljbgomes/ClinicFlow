@@ -42,7 +42,8 @@ public abstract class PatientRestMapper {
         );
     }
 
-    public UpdatePatientCommand toCommand(UUID psychologistId, UUID patientId, UpdatePatientRequest request) {
+    public UpdatePatientCommand toCommand(UUID psychologistId, UUID patientId, UpdatePatientRequest request,
+                                          long expectedVersion) {
         return new UpdatePatientCommand(
                 new PsychologistId(psychologistId),
                 new PatientId(patientId),
@@ -53,14 +54,15 @@ public abstract class PatientRestMapper {
                 emergencyContact(request.emergencyContactName(), request.emergencyContactPhone(),
                         request.emergencyContactRelationship()),
                 contactPreference(request.contactPreference()),
-                request.consentStatus()
+                request.consentStatus(),
+                expectedVersion
         );
     }
 
     public ChangePatientStatusCommand toCommand(UUID psychologistId, UUID patientId,
-                                                ChangePatientStatusRequest request) {
+                                                ChangePatientStatusRequest request, long expectedVersion) {
         return new ChangePatientStatusCommand(
-                new PsychologistId(psychologistId), new PatientId(patientId), request.status());
+                new PsychologistId(psychologistId), new PatientId(patientId), request.status(), expectedVersion);
     }
 
     public GetPatientQuery toGetQuery(UUID psychologistId, UUID patientId) {

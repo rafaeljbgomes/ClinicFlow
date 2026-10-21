@@ -19,12 +19,14 @@ public final class Patient {
     private PatientStatus status;
     private final Instant createdAt;
     private Instant updatedAt;
+    // Assigned and incremented by persistence; null until the patient is first saved.
+    private final Long version;
 
     private Patient(PatientId id, PsychologistId psychologistId, EmailAddress email, FullName fullName,
                     PreferredName preferredName, BirthDate birthDate, PhoneNumber phone,
                     EmergencyContact emergencyContact, ContactPreference contactPreference,
                     ConsentStatus consentStatus, Instant consentUpdatedAt, PatientStatus status,
-                    Instant createdAt, Instant updatedAt) {
+                    Instant createdAt, Instant updatedAt, Long version) {
         if (id == null || psychologistId == null || email == null || fullName == null
                 || contactPreference == null || consentStatus == null || consentUpdatedAt == null
                 || status == null || createdAt == null || updatedAt == null) {
@@ -44,6 +46,7 @@ public final class Patient {
         this.status = status;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
+        this.version = version;
     }
 
     public static Patient create(PatientId id, PsychologistId psychologistId, EmailAddress email,
@@ -51,7 +54,7 @@ public final class Patient {
                                  PhoneNumber phone, EmergencyContact emergencyContact,
                                  ContactPreference contactPreference, ConsentStatus consentStatus, Instant now) {
         return new Patient(id, psychologistId, email, fullName, preferredName, birthDate, phone,
-                emergencyContact, contactPreference, consentStatus, now, PatientStatus.ACTIVE, now, now);
+                emergencyContact, contactPreference, consentStatus, now, PatientStatus.ACTIVE, now, now, null);
     }
 
     public static Patient rehydrate(PatientId id, PsychologistId psychologistId, EmailAddress email,
@@ -59,9 +62,10 @@ public final class Patient {
                                     PhoneNumber phone, EmergencyContact emergencyContact,
                                     ContactPreference contactPreference, ConsentStatus consentStatus,
                                     Instant consentUpdatedAt, PatientStatus status, Instant createdAt,
-                                    Instant updatedAt) {
+                                    Instant updatedAt, Long version) {
         return new Patient(id, psychologistId, email, fullName, preferredName, birthDate, phone,
-                emergencyContact, contactPreference, consentStatus, consentUpdatedAt, status, createdAt, updatedAt);
+                emergencyContact, contactPreference, consentStatus, consentUpdatedAt, status, createdAt, updatedAt,
+                version);
     }
 
     public Patient update(FullName newFullName, PreferredName newPreferredName, BirthDate newBirthDate,
@@ -124,6 +128,11 @@ public final class Patient {
     public PatientStatus status() { return status; }
     public Instant createdAt() { return createdAt; }
     public Instant updatedAt() { return updatedAt; }
+    public Optional<Long> version() { return Optional.ofNullable(version); }
+
+    public boolean isAtVersion(long expectedVersion) {
+        return version != null && version == expectedVersion;
+    }
 
     @Override
     public boolean equals(Object other) {

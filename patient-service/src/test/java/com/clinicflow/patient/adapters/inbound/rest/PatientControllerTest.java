@@ -1,13 +1,18 @@
 package com.clinicflow.patient.adapters.inbound.rest;
 
 import com.clinicflow.patient.application.PatientService;
+import com.clinicflow.patient.application.commands.UpdatePatientCommand;
 import com.clinicflow.patient.application.exceptions.PatientNotFoundException;
+import com.clinicflow.patient.application.exceptions.StaleResourceVersionException;
 import com.clinicflow.patient.application.results.PatientResult;
 import com.clinicflow.patient.domain.ConsentStatus;
 import com.clinicflow.patient.domain.ContactPreference;
 import com.clinicflow.patient.domain.PatientStatus;
 import com.clinicflow.patient.infrastructure.security.SecurityConfig;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -23,13 +28,17 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -40,6 +49,20 @@ class PatientControllerTest {
             UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     private static final UUID PATIENT_ID =
             UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    private static final long VERSION = 7;
+    private static final String UPDATE_BODY = """
+            {
+              "fullName": "Updated Name",
+              "preferredName": null,
+              "birthDate": null,
+              "phone": null,
+              "emergencyContactName": null,
+              "emergencyContactPhone": null,
+              "emergencyContactRelationship": null,
+              "contactPreference": "PHONE",
+              "consentStatus": "REVOKED"
+            }
+            """;
 
     @Autowired
     private MockMvc mvc;
@@ -103,6 +126,25 @@ class PatientControllerTest {
     }
 
     @Test
+    void createReturnsTheVersionAsEntityTag() throws Exception {
+        // Arrange
+        when(patientService.create(any())).thenReturn(result());
+        var request = post("/patients")
+                .with(jwtFor("ROLE_PSYCHOLOGIST"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"email": "patient@example.com", "fullName": "Patient Name", "consentStatus": "GRANTED"}
+                        """);
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(header().string("ETag", "\"7\""))
+                .andExpect(jsonPath("$.version").value(VERSION));
+    }
+
+    @Test
     void listReturnsPsychologistPatients() throws Exception {
         // Arrange
         when(patientService.list(any())).thenReturn(List.of(result()));
@@ -113,7 +155,8 @@ class PatientControllerTest {
 
         // Assert
         response.andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value(PATIENT_ID.toString()));
+                .andExpect(jsonPath("$[0].id").value(PATIENT_ID.toString()))
+                .andExpect(jsonPath("$[0].version").value(VERSION));
     }
 
     @Test
@@ -126,29 +169,101 @@ class PatientControllerTest {
         ResultActions response = mvc.perform(request);
 
         // Assert
-        response.andExpect(status().isOk());
+        response.andExpect(status().isOk())
+                .andExpect(header().string("ETag", "\"7\""));
     }
 
     @Test
     void updateReturnsUpdatedPatient() throws Exception {
         // Arrange
         when(patientService.update(any())).thenReturn(result());
-        var request = put("/patients/{id}", PATIENT_ID)
+        var request = update("\"6\"");
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isOk())
+                .andExpect(header().string("ETag", "\"7\""));
+    }
+
+    @Test
+    void updatePassesTheIfMatchVersionToTheService() throws Exception {
+        // Arrange
+        when(patientService.update(any())).thenReturn(result());
+        var request = update("\"6\"");
+
+        // Act
+        mvc.perform(request);
+
+        // Assert
+        ArgumentCaptor<UpdatePatientCommand> command = ArgumentCaptor.forClass(UpdatePatientCommand.class);
+        verify(patientService).update(command.capture());
+        assertThat(command.getValue().expectedVersion()).isEqualTo(6);
+    }
+
+    @Test
+    void updateWithoutIfMatchIsPreconditionRequired() throws Exception {
+        // Arrange
+        var request = update(null);
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isPreconditionRequired())
+                .andExpect(jsonPath("$.code").value("precondition_required"));
+    }
+
+    @Test
+    void updateWithoutIfMatchNeverReachesTheService() throws Exception {
+        // Arrange
+        var request = update(null);
+
+        // Act
+        mvc.perform(request);
+
+        // Assert
+        verifyNoInteractions(patientService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"*", "6", "W/\"6\"", "\"6\", \"7\"", "\"-1\"", "\"abc\"", "\"1234567890123456789\""})
+    void updateRejectsAnIfMatchThatIsNotOneVersionTag(String ifMatch) throws Exception {
+        // Arrange
+        var request = update(ifMatch);
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("invalid_precondition"));
+    }
+
+    @Test
+    void mapsAStaleVersionToPreconditionFailed() throws Exception {
+        // Arrange
+        when(patientService.update(any())).thenThrow(new StaleResourceVersionException());
+        var request = update("\"6\"");
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isPreconditionFailed())
+                .andExpect(jsonPath("$.code").value("stale_resource_version"));
+    }
+
+    @Test
+    void changeStatusReturnsUpdatedPatient() throws Exception {
+        // Arrange
+        when(patientService.changeStatus(any())).thenReturn(result());
+        var request = patch("/patients/{id}/status", PATIENT_ID)
                 .with(jwtFor("ROLE_PSYCHOLOGIST"))
+                .header("If-Match", "\"6\"")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("""
-                        {
-                          "fullName": "Updated Name",
-                          "preferredName": null,
-                          "birthDate": null,
-                          "phone": null,
-                          "emergencyContactName": null,
-                          "emergencyContactPhone": null,
-                          "emergencyContactRelationship": null,
-                          "contactPreference": "PHONE",
-                          "consentStatus": "REVOKED"
-                        }
-                        """);
+                .content("{\"status\":\"INACTIVE\"}");
 
         // Act
         ResultActions response = mvc.perform(request);
@@ -158,9 +273,8 @@ class PatientControllerTest {
     }
 
     @Test
-    void changeStatusReturnsUpdatedPatient() throws Exception {
+    void changeStatusWithoutIfMatchIsPreconditionRequired() throws Exception {
         // Arrange
-        when(patientService.changeStatus(any())).thenReturn(result());
         var request = patch("/patients/{id}/status", PATIENT_ID)
                 .with(jwtFor("ROLE_PSYCHOLOGIST"))
                 .contentType(MediaType.APPLICATION_JSON)
@@ -170,7 +284,7 @@ class PatientControllerTest {
         ResultActions response = mvc.perform(request);
 
         // Assert
-        response.andExpect(status().isOk());
+        response.andExpect(status().isPreconditionRequired());
     }
 
     @Test
@@ -212,6 +326,14 @@ class PatientControllerTest {
                 .andExpect(jsonPath("$.code").value("patient_not_found"));
     }
 
+    private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder update(String ifMatch) {
+        var request = put("/patients/{id}", PATIENT_ID)
+                .with(jwtFor("ROLE_PSYCHOLOGIST"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(UPDATE_BODY);
+        return ifMatch == null ? request : request.header("If-Match", ifMatch);
+    }
+
     private org.springframework.test.web.servlet.request.RequestPostProcessor jwtFor(String authority) {
         return jwt()
                 .jwt(token -> token.claim("userId", PSYCHOLOGIST_ID.toString()))
@@ -223,6 +345,6 @@ class PatientControllerTest {
         return new PatientResult(PATIENT_ID, PSYCHOLOGIST_ID, "patient@example.com", "Patient Name",
                 "+351912345678", "Pat", LocalDate.of(1990, 1, 1), "Emergency One",
                 "+351923456789", "Partner", ContactPreference.EMAIL, ConsentStatus.GRANTED,
-                now, PatientStatus.ACTIVE, now, now);
+                now, PatientStatus.ACTIVE, now, now, VERSION);
     }
 }
