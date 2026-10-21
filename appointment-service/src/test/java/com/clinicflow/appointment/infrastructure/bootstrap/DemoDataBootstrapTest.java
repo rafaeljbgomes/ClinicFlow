@@ -17,6 +17,7 @@ import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -68,6 +69,21 @@ class DemoDataBootstrapTest {
     }
 
     @Test
+    void repeatedRunUpdatesTheStoredDemoAppointments() throws Exception {
+        // Arrange
+        InMemoryAppointmentRepository appointments = new InMemoryAppointmentRepository();
+        DemoDataBootstrap bootstrap = bootstrap(appointments);
+        bootstrap.run(null);
+
+        // Act
+        bootstrap.run(null);
+
+        // Assert
+        assertThat(appointments.records().values()).extracting(appointment -> appointment.version().orElseThrow())
+                .containsOnly(1L);
+    }
+
+    @Test
     void repeatedRunDoesNotDuplicateDemoAppointments() throws Exception {
         // Arrange
         InMemoryAppointmentRepository appointments = new InMemoryAppointmentRepository();
@@ -96,8 +112,17 @@ class DemoDataBootstrapTest {
         private final Map<AppointmentId, Appointment> records = new LinkedHashMap<>();
 
         @Override
-        public void save(Appointment appointment) {
-            records.put(appointment.id(), appointment);
+        public Appointment save(Appointment appointment) {
+            Long stored = Optional.ofNullable(records.get(appointment.id())).flatMap(Appointment::version).orElse(null);
+            if (!Objects.equals(stored, appointment.version().orElse(null))) {
+                throw new IllegalStateException("Stale or duplicate appointment " + appointment.id().value());
+            }
+            Appointment saved = Appointment.rehydrate(appointment.id(), appointment.psychologistId(),
+                    appointment.patientId(), appointment.scheduledAt(), appointment.status(), appointment.type(),
+                    appointment.cancellationReason().orElse(null), appointment.createdAt(), appointment.updatedAt(),
+                    stored == null ? 0 : stored + 1);
+            records.put(saved.id(), saved);
+            return saved;
         }
 
         @Override

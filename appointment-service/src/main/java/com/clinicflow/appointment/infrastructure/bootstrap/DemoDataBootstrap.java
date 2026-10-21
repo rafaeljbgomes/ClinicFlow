@@ -46,8 +46,9 @@ public class DemoDataBootstrap implements ApplicationRunner {
     public void run(ApplicationArguments args) {
         Instant now = Instant.now(clock).truncatedTo(ChronoUnit.SECONDS);
         for (DemoAppointment appointment : demoAppointments(now)) {
+            AppointmentId id = new AppointmentId(appointment.id());
             appointments.save(Appointment.rehydrate(
-                    new AppointmentId(appointment.id()),
+                    id,
                     new PsychologistId(appointment.psychologistId()),
                     new PatientId(appointment.patientId()),
                     new AppointmentDate(appointment.scheduledAt()),
@@ -55,9 +56,15 @@ public class DemoDataBootstrap implements ApplicationRunner {
                     appointment.type(),
                     appointment.cancellationReason() == null ? null : new CancellationReason(appointment.cancellationReason()),
                     now.minus(30, ChronoUnit.DAYS),
-                    now
+                    now,
+                    storedVersion(id)
             ));
         }
+    }
+
+    // Each start moves the demo rows relative to now; carrying the stored version updates them in place.
+    private Long storedVersion(AppointmentId id) {
+        return appointments.findById(id).flatMap(Appointment::version).orElse(null);
     }
 
     private static List<DemoAppointment> demoAppointments(Instant now) {

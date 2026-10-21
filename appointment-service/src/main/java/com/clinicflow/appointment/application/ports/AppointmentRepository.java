@@ -9,7 +9,8 @@ import java.util.List;
 import java.util.Optional;
 
 public interface AppointmentRepository {
-    void save(Appointment appointment);
+    // Returns the stored appointment, including the version persistence assigned.
+    Appointment save(Appointment appointment);
     Optional<Appointment> findById(AppointmentId id);
     List<Appointment> findByPsychologistId(PsychologistId psychologistId);
     List<Appointment> findByPatientId(PatientId patientId);

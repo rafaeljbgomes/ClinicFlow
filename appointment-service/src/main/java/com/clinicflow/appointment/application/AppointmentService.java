@@ -6,6 +6,7 @@ import com.clinicflow.appointment.application.commands.RescheduleAppointmentComm
 import com.clinicflow.appointment.application.commands.ScheduleAppointmentCommand;
 import com.clinicflow.appointment.application.exceptions.AppointmentNotFoundException;
 import com.clinicflow.appointment.application.exceptions.PatientNotFoundException;
+import com.clinicflow.appointment.application.exceptions.StaleResourceVersionException;
 import com.clinicflow.appointment.application.mapping.AppointmentApplicationMapper;
 import com.clinicflow.appointment.application.ports.AppointmentEventPublisher;
 import com.clinicflow.appointment.application.ports.AppointmentRepository;
@@ -56,10 +57,10 @@ public class AppointmentService {
         Instant now = Instant.now();
         Appointment appointment = Appointment.create(new AppointmentId(UUID.randomUUID()), command.psychologistId(),
                 command.patientId(), command.scheduledAt(), command.type(), now);
-        appointmentRepository.save(appointment);
-        eventPublisher.publish(AppointmentScheduledEvent.of(appointment.id(), appointment.patientId(),
-                appointment.psychologistId(), appointment.scheduledAt()));
-        return mapper.toResult(appointment);
+        Appointment saved = appointmentRepository.save(appointment);
+        eventPublisher.publish(AppointmentScheduledEvent.of(saved.id(), saved.patientId(),
+                saved.psychologistId(), saved.scheduledAt()));
+        return mapper.toResult(saved);
     }
 
     @Transactional(readOnly = true)
@@ -76,32 +77,36 @@ public class AppointmentService {
     @Transactional
     public AppointmentResult reschedule(RescheduleAppointmentCommand command) {
         Appointment appointment = requireOwnedAppointment(command.psychologistId(), command.appointmentId());
+        requireVersion(appointment, command.expectedVersion());
         AppointmentDate previousDate = appointment.scheduledAt();
         appointment.reschedule(command.newDate(), Instant.now());
-        appointmentRepository.save(appointment);
-        eventPublisher.publish(AppointmentRescheduledEvent.of(appointment.id(), appointment.patientId(),
-                appointment.psychologistId(), previousDate, appointment.scheduledAt()));
-        return mapper.toResult(appointment);
+        // Saved before the event is recorded, so a lost race never leaves an event for a rejected change.
+        Appointment saved = appointmentRepository.save(appointment);
+        eventPublisher.publish(AppointmentRescheduledEvent.of(saved.id(), saved.patientId(),
+                saved.psychologistId(), previousDate, saved.scheduledAt()));
+        return mapper.toResult(saved);
     }
 
     @Transactional
     public AppointmentResult cancel(CancelAppointmentCommand command) {
         Appointment appointment = requireOwnedAppointment(command.psychologistId(), command.appointmentId());
+        requireVersion(appointment, command.expectedVersion());
         appointment.cancel(command.reason(), Instant.now());
-        appointmentRepository.save(appointment);
-        eventPublisher.publish(AppointmentCancelledEvent.of(appointment.id(), appointment.patientId(),
-                appointment.psychologistId(), new CancellationActor("psychologist"), command.reason()));
-        return mapper.toResult(appointment);
+        Appointment saved = appointmentRepository.save(appointment);
+        eventPublisher.publish(AppointmentCancelledEvent.of(saved.id(), saved.patientId(),
+                saved.psychologistId(), new CancellationActor("psychologist"), command.reason()));
+        return mapper.toResult(saved);
     }
 
     @Transactional
     public AppointmentResult complete(CompleteAppointmentCommand command) {
         Appointment appointment = requireOwnedAppointment(command.psychologistId(), command.appointmentId());
+        requireVersion(appointment, command.expectedVersion());
         appointment.complete(Instant.now());
-        appointmentRepository.save(appointment);
-        eventPublisher.publish(AppointmentCompletedEvent.of(appointment.id(), appointment.patientId(),
-                appointment.psychologistId(), appointment.scheduledAt(), appointment.type()));
-        return mapper.toResult(appointment);
+        Appointment saved = appointmentRepository.save(appointment);
+        eventPublisher.publish(AppointmentCompletedEvent.of(saved.id(), saved.patientId(),
+                saved.psychologistId(), saved.scheduledAt(), saved.type()));
+        return mapper.toResult(saved);
     }
 
     // Another psychologist's appointment answers exactly like a missing one, so ids cannot be probed.
@@ -114,5 +119,12 @@ public class AppointmentService {
             throw new AppointmentNotFoundException();
         }
         return appointment;
+    }
+
+    // Runs after the ownership check, so another psychologist's appointment still looks missing, never stale.
+    private static void requireVersion(Appointment appointment, long expectedVersion) {
+        if (!appointment.isAtVersion(expectedVersion)) {
+            throw new StaleResourceVersionException();
+        }
     }
 }

@@ -7,6 +7,7 @@ import com.clinicflow.appointment.application.commands.ScheduleAppointmentComman
 import com.clinicflow.appointment.application.exceptions.AppointmentNotFoundException;
 import com.clinicflow.appointment.application.exceptions.OwnershipCheckUnavailableException;
 import com.clinicflow.appointment.application.exceptions.PatientNotFoundException;
+import com.clinicflow.appointment.application.exceptions.StaleResourceVersionException;
 import com.clinicflow.appointment.application.mapping.AppointmentApplicationMapper;
 import com.clinicflow.appointment.application.ports.AppointmentEventPublisher;
 import com.clinicflow.appointment.application.ports.AppointmentRepository;
@@ -43,6 +44,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -60,6 +62,7 @@ class AppointmentServiceTest {
             new PatientId(UUID.fromString("dddddddd-dddd-dddd-dddd-dddddddddddd"));
     private static final Instant CREATED_AT = Instant.parse("2026-06-01T10:00:00Z");
     private static final CancellationReason REASON = new CancellationReason("Patient requested cancellation");
+    private static final long CURRENT_VERSION = 2;
 
     @Mock
     private AppointmentRepository repository;
@@ -74,6 +77,11 @@ class AppointmentServiceTest {
     void setUp() {
         service = new AppointmentService(repository, publisher, patientDirectory,
                 Mappers.getMapper(AppointmentApplicationMapper.class));
+        // Like persistence: a new appointment gets version 0, every save of a stored one increments it.
+        lenient().when(repository.save(any(Appointment.class))).thenAnswer(call -> {
+            Appointment saved = call.getArgument(0);
+            return withVersion(saved, saved.version().map(version -> version + 1).orElse(0L));
+        });
     }
 
     @Test
@@ -203,7 +211,7 @@ class AppointmentServiceTest {
         when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment));
 
         // Act
-        service.reschedule(new RescheduleAppointmentCommand(OWNER, APPOINTMENT_ID, laterDate()));
+        service.reschedule(new RescheduleAppointmentCommand(OWNER, APPOINTMENT_ID, laterDate(), CURRENT_VERSION));
 
         // Assert
         verify(repository).save(appointment);
@@ -218,7 +226,7 @@ class AppointmentServiceTest {
         when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment));
 
         // Act
-        service.reschedule(new RescheduleAppointmentCommand(OWNER, APPOINTMENT_ID, newDate));
+        service.reschedule(new RescheduleAppointmentCommand(OWNER, APPOINTMENT_ID, newDate, CURRENT_VERSION));
 
         // Assert
         AppointmentRescheduledEvent event = publishedRescheduledEvent();
@@ -232,7 +240,8 @@ class AppointmentServiceTest {
         when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment()));
 
         // Act
-        var result = service.reschedule(new RescheduleAppointmentCommand(OWNER, APPOINTMENT_ID, laterDate()));
+        var result = service.reschedule(
+                new RescheduleAppointmentCommand(OWNER, APPOINTMENT_ID, laterDate(), CURRENT_VERSION));
 
         // Assert
         assertThat(result.status()).isEqualTo(AppointmentStatus.RESCHEDULED);
@@ -245,7 +254,7 @@ class AppointmentServiceTest {
         when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment));
 
         // Act
-        service.cancel(new CancelAppointmentCommand(OWNER, APPOINTMENT_ID, REASON));
+        service.cancel(new CancelAppointmentCommand(OWNER, APPOINTMENT_ID, REASON, CURRENT_VERSION));
 
         // Assert
         verify(repository).save(appointment);
@@ -257,7 +266,7 @@ class AppointmentServiceTest {
         when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment()));
 
         // Act
-        service.cancel(new CancelAppointmentCommand(OWNER, APPOINTMENT_ID, REASON));
+        service.cancel(new CancelAppointmentCommand(OWNER, APPOINTMENT_ID, REASON, CURRENT_VERSION));
 
         // Assert
         AppointmentCancelledEvent event = publishedCancelledEvent();
@@ -271,7 +280,7 @@ class AppointmentServiceTest {
         when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment()));
 
         // Act
-        var result = service.cancel(new CancelAppointmentCommand(OWNER, APPOINTMENT_ID, REASON));
+        var result = service.cancel(new CancelAppointmentCommand(OWNER, APPOINTMENT_ID, REASON, CURRENT_VERSION));
 
         // Assert
         assertThat(result.status()).isEqualTo(AppointmentStatus.CANCELLED);
@@ -284,7 +293,7 @@ class AppointmentServiceTest {
         when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment));
 
         // Act
-        service.complete(new CompleteAppointmentCommand(OWNER, APPOINTMENT_ID));
+        service.complete(new CompleteAppointmentCommand(OWNER, APPOINTMENT_ID, CURRENT_VERSION));
 
         // Assert
         verify(repository).save(appointment);
@@ -296,7 +305,7 @@ class AppointmentServiceTest {
         when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment()));
 
         // Act
-        service.complete(new CompleteAppointmentCommand(OWNER, APPOINTMENT_ID));
+        service.complete(new CompleteAppointmentCommand(OWNER, APPOINTMENT_ID, CURRENT_VERSION));
 
         // Assert
         AppointmentCompletedEvent event = publishedCompletedEvent();
@@ -312,10 +321,100 @@ class AppointmentServiceTest {
         when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment()));
 
         // Act
-        var result = service.complete(new CompleteAppointmentCommand(OWNER, APPOINTMENT_ID));
+        var result = service.complete(new CompleteAppointmentCommand(OWNER, APPOINTMENT_ID, CURRENT_VERSION));
 
         // Assert
         assertThat(result.status()).isEqualTo(AppointmentStatus.COMPLETED);
+    }
+
+    @Test
+    void completeReturnsTheVersionAssignedOnSave() {
+        // Arrange
+        when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment()));
+
+        // Act
+        var result = service.complete(new CompleteAppointmentCommand(OWNER, APPOINTMENT_ID, CURRENT_VERSION));
+
+        // Assert
+        assertThat(result.version()).isEqualTo(CURRENT_VERSION + 1);
+    }
+
+    @Test
+    void completeRejectsAStaleVersion() {
+        // Arrange
+        when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment()));
+
+        // Act
+        Throwable thrown = catchThrowable(() -> service.complete(
+                new CompleteAppointmentCommand(OWNER, APPOINTMENT_ID, CURRENT_VERSION - 1)));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(StaleResourceVersionException.class);
+    }
+
+    @Test
+    void staleCompletionPublishesNoEvent() {
+        // Arrange
+        when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment()));
+
+        // Act
+        catchThrowable(() -> service.complete(
+                new CompleteAppointmentCommand(OWNER, APPOINTMENT_ID, CURRENT_VERSION - 1)));
+
+        // Assert
+        verifyNoInteractions(publisher);
+    }
+
+    @Test
+    void completionLostToAConcurrentWritePublishesNoEvent() {
+        // Arrange
+        when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment()));
+        when(repository.save(any(Appointment.class))).thenThrow(new StaleResourceVersionException());
+
+        // Act
+        catchThrowable(() -> service.complete(new CompleteAppointmentCommand(OWNER, APPOINTMENT_ID, CURRENT_VERSION)));
+
+        // Assert
+        verifyNoInteractions(publisher);
+    }
+
+    @Test
+    void rescheduleRejectsAStaleVersion() {
+        // Arrange
+        when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment()));
+
+        // Act
+        Throwable thrown = catchThrowable(() -> service.reschedule(
+                new RescheduleAppointmentCommand(OWNER, APPOINTMENT_ID, laterDate(), CURRENT_VERSION + 1)));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(StaleResourceVersionException.class);
+    }
+
+    @Test
+    void cancelRejectsAStaleVersion() {
+        // Arrange
+        when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment()));
+
+        // Act
+        Throwable thrown = catchThrowable(() -> service.cancel(
+                new CancelAppointmentCommand(OWNER, APPOINTMENT_ID, REASON, CURRENT_VERSION - 1)));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(StaleResourceVersionException.class);
+    }
+
+    @Test
+    void foreignAppointmentLooksMissingEvenWithAStaleVersion() {
+        // Arrange
+        when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment()));
+
+        // Act
+        Throwable thrown = catchThrowable(() -> service.cancel(
+                new CancelAppointmentCommand(OTHER, APPOINTMENT_ID, REASON, CURRENT_VERSION - 1)));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(AppointmentNotFoundException.class);
     }
 
     @Test
@@ -336,7 +435,8 @@ class AppointmentServiceTest {
         when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment()));
 
         // Act
-        Throwable thrown = catchThrowable(() -> service.complete(new CompleteAppointmentCommand(OTHER, APPOINTMENT_ID)));
+        Throwable thrown = catchThrowable(() -> service.complete(
+                new CompleteAppointmentCommand(OTHER, APPOINTMENT_ID, CURRENT_VERSION)));
 
         // Assert
         assertThat(thrown).isInstanceOf(AppointmentNotFoundException.class);
@@ -348,7 +448,7 @@ class AppointmentServiceTest {
         when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment()));
 
         // Act
-        catchThrowable(() -> service.complete(new CompleteAppointmentCommand(OTHER, APPOINTMENT_ID)));
+        catchThrowable(() -> service.complete(new CompleteAppointmentCommand(OTHER, APPOINTMENT_ID, CURRENT_VERSION)));
 
         // Assert
         verify(repository, never()).save(any());
@@ -361,7 +461,7 @@ class AppointmentServiceTest {
         when(repository.findById(APPOINTMENT_ID)).thenReturn(Optional.of(appointment));
 
         // Act
-        catchThrowable(() -> service.complete(new CompleteAppointmentCommand(OTHER, APPOINTMENT_ID)));
+        catchThrowable(() -> service.complete(new CompleteAppointmentCommand(OTHER, APPOINTMENT_ID, CURRENT_VERSION)));
 
         // Assert
         assertThat(appointment.status()).isEqualTo(AppointmentStatus.SCHEDULED);
@@ -407,8 +507,15 @@ class AppointmentServiceTest {
     }
 
     private Appointment appointment() {
-        return Appointment.create(APPOINTMENT_ID, OWNER, PATIENT_ID,
+        return withVersion(Appointment.create(APPOINTMENT_ID, OWNER, PATIENT_ID,
                 new AppointmentDate(Instant.now().plusSeconds(3600)),
-                AppointmentType.IN_PERSON, CREATED_AT);
+                AppointmentType.IN_PERSON, CREATED_AT), CURRENT_VERSION);
+    }
+
+    private static Appointment withVersion(Appointment appointment, Long version) {
+        return Appointment.rehydrate(appointment.id(), appointment.psychologistId(), appointment.patientId(),
+                appointment.scheduledAt(), appointment.status(), appointment.type(),
+                appointment.cancellationReason().orElse(null), appointment.createdAt(), appointment.updatedAt(),
+                version);
     }
 }

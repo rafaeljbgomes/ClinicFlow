@@ -4,6 +4,7 @@ import com.clinicflow.appointment.application.AppointmentService;
 import com.clinicflow.appointment.application.exceptions.AppointmentNotFoundException;
 import com.clinicflow.appointment.application.exceptions.OwnershipCheckUnavailableException;
 import com.clinicflow.appointment.application.exceptions.PatientNotFoundException;
+import com.clinicflow.appointment.application.exceptions.StaleResourceVersionException;
 import com.clinicflow.appointment.application.results.AppointmentResult;
 import com.clinicflow.appointment.domain.AppointmentStatus;
 import com.clinicflow.appointment.domain.AppointmentType;
@@ -24,11 +25,13 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -149,7 +152,9 @@ class AppointmentControllerTest {
         ResultActions response = mvc.perform(request);
 
         // Assert
-        response.andExpect(status().isOk());
+        response.andExpect(status().isOk())
+                .andExpect(header().string("ETag", "\"5\""))
+                .andExpect(jsonPath("$.version").value(5));
     }
 
     @Test
@@ -159,6 +164,7 @@ class AppointmentControllerTest {
         var request = patch("/appointments/{id}/reschedule", APPOINTMENT_ID)
                 .with(jwtFor("ROLE_PSYCHOLOGIST"))
                 .contentType(MediaType.APPLICATION_JSON)
+                .header("If-Match", "\"4\"")
                 .content("{\"newDate\":\"2099-06-13T10:00:00Z\"}");
 
         // Act
@@ -175,6 +181,7 @@ class AppointmentControllerTest {
         var request = patch("/appointments/{id}/cancel", APPOINTMENT_ID)
                 .with(jwtFor("ROLE_PSYCHOLOGIST"))
                 .contentType(MediaType.APPLICATION_JSON)
+                .header("If-Match", "\"4\"")
                 .content("{\"reason\":\"Patient requested cancellation\"}");
 
         // Act
@@ -189,13 +196,88 @@ class AppointmentControllerTest {
         // Arrange
         when(appointmentService.complete(any())).thenReturn(result());
         var request = patch("/appointments/{id}/complete", APPOINTMENT_ID)
-                .with(jwtFor("ROLE_PSYCHOLOGIST"));
+                .with(jwtFor("ROLE_PSYCHOLOGIST"))
+                .header("If-Match", "\"4\"");
 
         // Act
         ResultActions response = mvc.perform(request);
 
         // Assert
-        response.andExpect(status().isOk());
+        response.andExpect(status().isOk())
+                .andExpect(header().string("ETag", "\"5\""));
+    }
+
+    @Test
+    void completeWithoutIfMatchIsPreconditionRequired() throws Exception {
+        // Arrange
+        var request = patch("/appointments/{id}/complete", APPOINTMENT_ID).with(jwtFor("ROLE_PSYCHOLOGIST"));
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isPreconditionRequired())
+                .andExpect(jsonPath("$.code").value("precondition_required"));
+    }
+
+    @Test
+    void completeWithoutIfMatchNeverReachesTheService() throws Exception {
+        // Arrange
+        var request = patch("/appointments/{id}/complete", APPOINTMENT_ID).with(jwtFor("ROLE_PSYCHOLOGIST"));
+
+        // Act
+        mvc.perform(request);
+
+        // Assert
+        verifyNoInteractions(appointmentService);
+    }
+
+    @Test
+    void cancelWithAWildcardIfMatchIsRejected() throws Exception {
+        // Arrange
+        var request = patch("/appointments/{id}/cancel", APPOINTMENT_ID)
+                .with(jwtFor("ROLE_PSYCHOLOGIST"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .header("If-Match", "*")
+                .content("{\"reason\":\"Patient requested cancellation\"}");
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("invalid_precondition"));
+    }
+
+    @Test
+    void rescheduleWithoutIfMatchIsPreconditionRequired() throws Exception {
+        // Arrange
+        var request = patch("/appointments/{id}/reschedule", APPOINTMENT_ID)
+                .with(jwtFor("ROLE_PSYCHOLOGIST"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"newDate\":\"2099-06-13T10:00:00Z\"}");
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isPreconditionRequired());
+    }
+
+    @Test
+    void mapsAStaleVersionToPreconditionFailed() throws Exception {
+        // Arrange
+        when(appointmentService.complete(any())).thenThrow(new StaleResourceVersionException());
+        var request = patch("/appointments/{id}/complete", APPOINTMENT_ID)
+                .with(jwtFor("ROLE_PSYCHOLOGIST"))
+                .header("If-Match", "\"4\"");
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isPreconditionFailed())
+                .andExpect(jsonPath("$.code").value("stale_resource_version"));
     }
 
     @Test
@@ -257,6 +339,6 @@ class AppointmentControllerTest {
 
     private AppointmentResult result() {
         return new AppointmentResult(APPOINTMENT_ID, PSYCHOLOGIST_ID, PATIENT_ID, APPOINTMENT_DATE,
-                AppointmentStatus.SCHEDULED, AppointmentType.ONLINE, null);
+                AppointmentStatus.SCHEDULED, AppointmentType.ONLINE, null, 5);
     }
 }
