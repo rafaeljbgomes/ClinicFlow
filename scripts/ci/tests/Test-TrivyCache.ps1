@@ -22,4 +22,12 @@ Write-Metadata 3 ([DateTimeOffset]::UtcNow.AddHours(-1))
 Expect-Failure { Test-TrivyDatabase $Directory 2 }
 Write-Metadata 2 ([DateTimeOffset]::UtcNow.AddMinutes(11))
 Expect-Failure { Test-TrivyDatabase $Directory 2 }
-Write-Host 'Trivy cache missing, fresh, stale, incompatible and future-date tests passed.'
+# The Java DB is accepted between Trivy's three-day refreshes but not past the Java limit.
+[IO.File]::WriteAllBytes((Join-Path $Directory 'trivy-java.db'),[byte[]]@(1))
+Write-Metadata 1 ([DateTimeOffset]::UtcNow.AddHours(-71))
+Test-TrivyDatabase $Directory 1
+Write-Metadata 1 ([DateTimeOffset]::UtcNow.AddHours(-97))
+Expect-Failure { Test-TrivyDatabase $Directory 1 }
+Write-Metadata 2 ([DateTimeOffset]::UtcNow.AddHours(-1))
+Expect-Failure { Test-TrivyDatabase $Directory 1 }
+Write-Host 'Trivy cache missing, fresh, stale, incompatible, future-date and Java DB age tests passed.'

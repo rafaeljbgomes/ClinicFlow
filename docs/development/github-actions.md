@@ -75,8 +75,11 @@ and nightly. Run it locally before merging behaviour-heavy domain changes:
   read-only token and no secrets; Sonar reports a notice and runs after merge.
 - PR-controlled values such as branch names reach scripts only through
   environment variables, never through `${{ }}` interpolation inside `run:`.
-- The daily Trivy database is cached. The policy refuses databases older than
-  24 hours, so a feed outage fails closed rather than scanning stale data.
+- The daily Trivy database is cached. The policy refuses a vulnerability
+  database older than 24 hours, so a feed outage fails closed rather than
+  scanning stale data. The Java database only maps JAR checksums to Maven
+  coordinates, and Trivy refreshes it three days after each build, so its limit
+  is 96 hours.
 
 ## Evidence
 
