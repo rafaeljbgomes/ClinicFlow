@@ -43,6 +43,7 @@
         <argLine></argLine>
         <!-- Security patches ahead of the Spring Boot 4.1.1 managed versions. Remove each override once Boot manages a fixed version. -->
         <tomcat.version>11.0.27</tomcat.version>
+        <jackson-bom.version>3.1.8</jackson-bom.version>
         <rabbit-amqp-client.version>5.34.0</rabbit-amqp-client.version>
     </properties>
 
