@@ -22,6 +22,26 @@ service containers run as UID 10001, so on a Linux host the key files must be
 readable by that user (for example `chmod 644 secrets/jwt-*.pem`); Docker
 Desktop bind mounts on Windows and macOS already are.
 
+## Generate Development Credentials
+
+Each service has its own PostgreSQL and RabbitMQ logins, and the platform
+administrator logins are never given to a service (ADR-026). Generate the
+local-only passwords before running Docker Compose:
+
+```powershell
+.\scripts\generate-dev-credentials.ps1
+```
+
+The script writes `secrets/platform/*.env` (administrators) and
+`secrets/services/<service>.env` (per service). Both are ignored by Git. It
+keeps existing files, so it is safe to rerun. To rotate every password, run it
+with `-Rotate` and then `docker compose up -d`. The bootstrap services apply the
+new service passwords, and PostgreSQL and RabbitMQ re-apply their administrator
+password when they start, so existing volumes keep their data.
+
+To run a service from an IDE against the Compose infrastructure, load the
+variables from its `secrets/services/<service>.env`.
+
 ## Run Tests
 
 Run the fast unit and Spring MVC slice suites:
@@ -47,14 +67,20 @@ rules, coverage thresholds, and report locations.
 
 ```powershell
 ./scripts/generate-dev-jwt-keys.ps1
+./scripts/generate-dev-credentials.ps1
 ./scripts/gateway/New-DevelopmentCertificate.ps1
 docker compose up --build
 ```
 
-Docker Compose includes a one-shot `postgres-bootstrap` service that runs before
-the Spring Boot services. It creates any missing service databases in existing
-PostgreSQL volumes and clears incompatible legacy `patients.phone` values so the
-strict E.164 Flyway migration can be applied locally.
+Docker Compose includes two one-shot bootstrap services that run before the
+Spring Boot services. `postgres-bootstrap` creates any missing service databases
+in existing PostgreSQL volumes and clears incompatible legacy `patients.phone`
+values, so the strict E.164 Flyway migration can be applied locally. It then
+creates or updates each service's owner role (used by Flyway) and runtime role
+(data access only), and hands objects created under the old shared login to the
+owner role. `rabbitmq-bootstrap` creates or updates each messaging service's
+RabbitMQ user and its permissions. A bootstrap fails with a pointer to the
+generator when credentials are missing.
 
 Docker Compose also enables the demo-data bootstrap through
 `CLINICFLOW_DEMO_BOOTSTRAP_ENABLED=true`. On service startup, each backend seeds
@@ -172,9 +198,15 @@ Run the complete local deployment from the repository root:
 ```
 
 The script derives a commit/timestamp image tag, builds the local images,
-generates missing development JWT keys, creates or updates the Kubernetes
-Secret, installs observability and the shared platform, upgrades six independent
-application releases, and waits for the workloads to become ready.
+generates missing development JWT keys and credentials, and creates or updates
+the JWT Secret. It also creates or updates `clinicflow-postgres-admin`,
+`clinicflow-rabbitmq-admin` and one `<service>-credentials` Secret per service.
+It then installs observability and the shared platform, upgrades six
+independent application releases, and waits for the workloads to become ready.
+After every platform install or upgrade, the platform release runs the
+`clinicflow-platform-bootstrap` hook Job, which creates or rotates the per-service
+database roles and RabbitMQ users. Each credential file's checksum is set on its
+pods, so a rotated password rolls only the affected workloads.
 
 Upgrade only one application when working on it:
 
@@ -211,6 +243,21 @@ kubectl create secret generic clinicflow-jwt `
   --from-file=jwt-private.pem=secrets/jwt-private.pem `
   --from-file=jwt-public.pem=secrets/jwt-public.pem `
   -n clinicflow
+```
+
+Create the platform administrator and per-service credential Secrets from the
+generated files:
+
+```powershell
+.\scripts\generate-dev-credentials.ps1
+kubectl create secret generic clinicflow-postgres-admin `
+  --from-env-file=secrets/platform/postgres.env -n clinicflow
+kubectl create secret generic clinicflow-rabbitmq-admin `
+  --from-env-file=secrets/platform/rabbitmq.env -n clinicflow
+Get-ChildItem secrets/services -Filter *.env | ForEach-Object {
+  kubectl create secret generic "$($_.BaseName)-credentials" `
+    "--from-env-file=$($_.FullName)" -n clinicflow
+}
 ```
 
 Install observability, the platform, and the independent application releases:

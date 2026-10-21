@@ -381,3 +381,16 @@ listener retry (four deliveries before dead-lettering, unchanged), and
 `RestTestClient` for API integration tests. See
 [ADR-023](decisions/ADR-023-spring-boot-4.md) for the migration details and
 consequences.
+
+## ADR-026: Per-Service Database and Broker Credentials
+
+Decision: each service has its own PostgreSQL owner role (used only by Flyway), a
+runtime role with data-only privileges on its own database, and, for messaging
+services, its own RabbitMQ user whose permissions name exactly the exchanges and
+queues it uses. `CONNECT` is revoked from `PUBLIC`, so no service reaches
+another service's database. The administrator logins stay with the platform.
+Passwords are generated into Git-ignored files. An idempotent bootstrap
+(Compose services, Helm hook Job) creates or rotates the identities, and
+post-start hooks re-apply the administrator passwords to existing volumes. See
+[ADR-026](decisions/ADR-026-per-service-credentials.md) for the privilege table,
+rotation and residual risks.
