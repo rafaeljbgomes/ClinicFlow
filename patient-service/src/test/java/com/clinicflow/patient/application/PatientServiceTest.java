@@ -3,7 +3,6 @@ package com.clinicflow.patient.application;
 import com.clinicflow.patient.application.commands.ChangePatientStatusCommand;
 import com.clinicflow.patient.application.commands.CreatePatientCommand;
 import com.clinicflow.patient.application.commands.UpdatePatientCommand;
-import com.clinicflow.patient.application.exceptions.PatientAccessDeniedException;
 import com.clinicflow.patient.application.exceptions.PatientNotFoundException;
 import com.clinicflow.patient.application.mapping.PatientApplicationMapper;
 import com.clinicflow.patient.application.ports.PatientEventPublisher;
@@ -268,7 +267,7 @@ class PatientServiceTest {
                 new ChangePatientStatusCommand(OTHER, PATIENT_ID, PatientStatus.INACTIVE)));
 
         // Assert
-        assertThat(thrown).isInstanceOf(PatientAccessDeniedException.class);
+        assertThat(thrown).isInstanceOf(PatientNotFoundException.class);
     }
 
     @Test

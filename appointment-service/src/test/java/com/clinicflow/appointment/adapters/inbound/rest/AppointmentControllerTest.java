@@ -1,7 +1,7 @@
 package com.clinicflow.appointment.adapters.inbound.rest;
 
 import com.clinicflow.appointment.application.AppointmentService;
-import com.clinicflow.appointment.application.exceptions.AppointmentAccessDeniedException;
+import com.clinicflow.appointment.application.exceptions.AppointmentNotFoundException;
 import com.clinicflow.appointment.application.exceptions.OwnershipCheckUnavailableException;
 import com.clinicflow.appointment.application.exceptions.PatientNotFoundException;
 import com.clinicflow.appointment.application.results.AppointmentResult;
@@ -223,17 +223,17 @@ class AppointmentControllerTest {
     }
 
     @Test
-    void mapsOwnershipFailureToForbiddenProblemDetail() throws Exception {
+    void mapsUnknownOrForeignAppointmentToNotFoundProblemDetail() throws Exception {
         // Arrange
-        when(appointmentService.get(any())).thenThrow(new AppointmentAccessDeniedException());
+        when(appointmentService.get(any())).thenThrow(new AppointmentNotFoundException());
         var request = get("/appointments/{id}", APPOINTMENT_ID).with(jwtFor("ROLE_PSYCHOLOGIST"));
 
         // Act
         ResultActions response = mvc.perform(request);
 
         // Assert
-        response.andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.title").value("Access denied"));
+        response.andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("appointment_not_found"));
     }
 
     private org.springframework.test.web.servlet.request.RequestPostProcessor jwtFor(String authority) {

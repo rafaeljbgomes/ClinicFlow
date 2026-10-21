@@ -1,7 +1,7 @@
 package com.clinicflow.patient.adapters.inbound.rest;
 
 import com.clinicflow.patient.application.PatientService;
-import com.clinicflow.patient.application.exceptions.PatientAccessDeniedException;
+import com.clinicflow.patient.application.exceptions.PatientNotFoundException;
 import com.clinicflow.patient.application.results.PatientResult;
 import com.clinicflow.patient.domain.ConsentStatus;
 import com.clinicflow.patient.domain.ContactPreference;
@@ -199,17 +199,17 @@ class PatientControllerTest {
     }
 
     @Test
-    void mapsOwnershipFailureToForbiddenProblemDetail() throws Exception {
+    void mapsUnknownOrForeignPatientToNotFoundProblemDetail() throws Exception {
         // Arrange
-        when(patientService.get(any())).thenThrow(new PatientAccessDeniedException());
+        when(patientService.get(any())).thenThrow(new PatientNotFoundException());
         var request = get("/patients/{id}", PATIENT_ID).with(jwtFor("ROLE_PSYCHOLOGIST"));
 
         // Act
         ResultActions response = mvc.perform(request);
 
         // Assert
-        response.andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.title").value("Access denied"));
+        response.andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("patient_not_found"));
     }
 
     private org.springframework.test.web.servlet.request.RequestPostProcessor jwtFor(String authority) {

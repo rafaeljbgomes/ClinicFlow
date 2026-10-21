@@ -3,7 +3,6 @@ package com.clinicflow.patient.application;
 import com.clinicflow.patient.application.commands.ChangePatientStatusCommand;
 import com.clinicflow.patient.application.commands.CreatePatientCommand;
 import com.clinicflow.patient.application.commands.UpdatePatientCommand;
-import com.clinicflow.patient.application.exceptions.PatientAccessDeniedException;
 import com.clinicflow.patient.application.exceptions.PatientNotFoundException;
 import com.clinicflow.patient.application.mapping.PatientApplicationMapper;
 import com.clinicflow.patient.application.ports.PatientEventPublisher;
@@ -16,6 +15,8 @@ import com.clinicflow.patient.domain.PatientId;
 import com.clinicflow.patient.domain.PsychologistId;
 import com.clinicflow.patient.domain.ContactPreference;
 import com.clinicflow.patient.domain.events.PatientCreatedEvent;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,6 +26,7 @@ import java.util.UUID;
 
 @Service
 public class PatientService {
+    private static final Logger log = LoggerFactory.getLogger(PatientService.class);
     private final PatientRepository patientRepository;
     private final PatientEventPublisher eventPublisher;
     private final PatientApplicationMapper mapper;
@@ -79,10 +81,12 @@ public class PatientService {
         return mapper.toResult(patient);
     }
 
+    // Another psychologist's patient answers exactly like a missing one, so ids cannot be probed.
     private Patient requireOwnedPatient(PsychologistId psychologistId, PatientId patientId) {
         Patient patient = patientRepository.findById(patientId).orElseThrow(PatientNotFoundException::new);
         if (!patient.psychologistId().equals(psychologistId)) {
-            throw new PatientAccessDeniedException();
+            log.warn("patient_access_denied patientId={} psychologistId={}", patientId.value(), psychologistId.value());
+            throw new PatientNotFoundException();
         }
         return patient;
     }

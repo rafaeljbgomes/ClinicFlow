@@ -54,6 +54,7 @@ import static org.mockito.Mockito.when;
 class AppointmentApiIT {
     private static final UUID PSYCHOLOGIST_ID = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     private static final UUID PATIENT_ID = UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    private static final UUID OTHER_PSYCHOLOGIST_ID = UUID.fromString("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee");
     private static final UUID FOREIGN_PATIENT_ID = UUID.fromString("cccccccc-cccc-cccc-cccc-cccccccccccc");
     private static final UUID UNVERIFIABLE_PATIENT_ID = UUID.fromString("dddddddd-dddd-dddd-dddd-dddddddddddd");
     // A real HTTP stand-in for patient-service, so the outbound adapter and token forwarding run for real.
@@ -88,6 +89,8 @@ class AppointmentApiIT {
         reset(jwtDecoder);
         when(jwtDecoder.decode("psychologist-token")).thenReturn(jwt("PSYCHOLOGIST"));
         when(jwtDecoder.decode("patient-token")).thenReturn(jwt("PATIENT"));
+        when(jwtDecoder.decode("other-psychologist-token"))
+                .thenReturn(jwt("other-psychologist-token", "PSYCHOLOGIST", OTHER_PSYCHOLOGIST_ID));
         PATIENT_SERVICE.reset();
         PATIENT_SERVICE.reply("HEAD", "/patients/" + PATIENT_ID, 200);
         PATIENT_SERVICE.reply("HEAD", "/patients/" + FOREIGN_PATIENT_ID, 404);
@@ -165,6 +168,37 @@ class AppointmentApiIT {
         // Assert
         assertThat(response.getStatus()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
         assertThat(response.getResponseBody()).containsEntry("code", "ownership_check_unavailable");
+    }
+
+    @Test
+    void anotherPsychologistsAppointmentLooksExactlyLikeAMissingOne() {
+        // Arrange
+        String id = scheduleAppointment(inThreeDays());
+        var other = new HttpEntity<>(bearer("other-psychologist-token"));
+        var missing = exchange("/appointments/" + UUID.randomUUID(), HttpMethod.GET, other, Map.class);
+
+        // Act
+        var foreign = exchange("/appointments/" + id, HttpMethod.GET, other, Map.class);
+
+        // Assert
+        assertThat(foreign.getStatus()).isEqualTo(HttpStatus.NOT_FOUND).isEqualTo(missing.getStatus());
+        assertThat(withoutRequestFields(foreign.getResponseBody()))
+                .isEqualTo(withoutRequestFields(missing.getResponseBody()));
+    }
+
+    @Test
+    void anotherPsychologistCannotCancelTheAppointment() {
+        // Arrange
+        String id = scheduleAppointment(inThreeDays());
+        var request = new HttpEntity<>(Map.of("reason", "Probe"), bearer("other-psychologist-token"));
+
+        // Act
+        var response = exchange("/appointments/" + id + "/cancel", HttpMethod.PATCH, request, Map.class);
+
+        // Assert
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(jdbc.queryForObject("SELECT status FROM appointments WHERE id = ?::uuid", String.class, id))
+                .isEqualTo("SCHEDULED");
     }
 
     @Test
@@ -373,6 +407,14 @@ class AppointmentApiIT {
         return (request.hasBody() ? spec.body(request.getBody()) : spec).exchange().returnResult(type);
     }
 
+    // Everything except the per-request instance and correlation id must match.
+    private static Map<?, ?> withoutRequestFields(Map<?, ?> problem) {
+        Map<Object, Object> copy = new java.util.HashMap<>(problem);
+        copy.remove("instance");
+        copy.remove("correlationId");
+        return copy;
+    }
+
     private HttpHeaders bearer(String token) {
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(token);
@@ -380,11 +422,15 @@ class AppointmentApiIT {
     }
 
     private Jwt jwt(String role) {
+        return jwt(role.toLowerCase() + "-token", role, PSYCHOLOGIST_ID);
+    }
+
+    private Jwt jwt(String token, String role, UUID userId) {
         Instant now = Instant.now();
-        return Jwt.withTokenValue(role.toLowerCase() + "-token")
+        return Jwt.withTokenValue(token)
                 .header("alg", "none")
                 .issuedAt(now).expiresAt(now.plusSeconds(3600))
-                .claim("userId", PSYCHOLOGIST_ID.toString())
+                .claim("userId", userId.toString())
                 .claim("role", role)
                 .build();
     }

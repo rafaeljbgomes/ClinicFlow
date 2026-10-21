@@ -444,7 +444,37 @@ class ClinicalApiIT {
         var response = signAs("other-psychologist-token", sessionId);
 
         // Assert
-        assertThat(response.getStatus()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertProblem(response, HttpStatus.NOT_FOUND, "clinical_resource_not_found");
+    }
+
+    @Test
+    void anotherPsychologistsCaseLooksExactlyLikeAMissingOne() {
+        // Arrange
+        String caseId = createCase("psychologist-token", PATIENT_ID);
+        var other = new HttpEntity<>(bearer("other-psychologist-token"));
+        var missing = exchange("/clinical-cases/" + UUID.randomUUID(), HttpMethod.GET, other, Map.class);
+
+        // Act
+        var foreign = exchange("/clinical-cases/" + caseId, HttpMethod.GET, other, Map.class);
+
+        // Assert
+        assertThat(foreign.getStatus()).isEqualTo(HttpStatus.NOT_FOUND).isEqualTo(missing.getStatus());
+        assertThat(withoutRequestFields(foreign.getResponseBody()))
+                .isEqualTo(withoutRequestFields(missing.getResponseBody()));
+    }
+
+    @Test
+    void anotherPsychologistsNoteLooksExactlyLikeAMissingOne() {
+        // Arrange
+        String sessionId = createSession(createCase("psychologist-token", PATIENT_ID), "Initial formulation");
+        var missing = signAs("other-psychologist-token", UUID.randomUUID().toString());
+
+        // Act
+        var foreign = signAs("other-psychologist-token", sessionId);
+
+        // Assert
+        assertThat(withoutRequestFields(foreign.getResponseBody()))
+                .isEqualTo(withoutRequestFields(missing.getResponseBody()));
     }
 
     @Test
@@ -719,6 +749,14 @@ class ClinicalApiIT {
     private <T> EntityExchangeResult<T> exchange(String path, HttpMethod method, HttpEntity<?> request, Class<T> type) {
         var spec = http.method(method).uri(path).headers(headers -> headers.addAll(request.getHeaders()));
         return (request.hasBody() ? spec.body(request.getBody()) : spec).exchange().returnResult(type);
+    }
+
+    // Everything except the per-request instance and correlation id must match.
+    private static Map<?, ?> withoutRequestFields(Map<?, ?> problem) {
+        Map<Object, Object> copy = new java.util.HashMap<>(problem);
+        copy.remove("instance");
+        copy.remove("correlationId");
+        return copy;
     }
 
     private HttpHeaders bearer(String token) {

@@ -1,6 +1,5 @@
 package com.clinicflow.appointment.adapters.inbound.rest;
 
-import com.clinicflow.appointment.application.exceptions.AppointmentAccessDeniedException;
 import com.clinicflow.appointment.application.exceptions.AppointmentNotFoundException;
 import com.clinicflow.appointment.application.exceptions.OwnershipCheckUnavailableException;
 import com.clinicflow.appointment.application.exceptions.PatientNotFoundException;
@@ -61,10 +60,6 @@ class ApiExceptionHandlerTest {
                         (Function<ApiExceptionHandler, ProblemDetail>) handler ->
                                 handler.ownershipCheckUnavailable(new OwnershipCheckUnavailableException("down")),
                         HttpStatus.SERVICE_UNAVAILABLE),
-                Arguments.of("appointment ownership denial",
-                        (Function<ApiExceptionHandler, ProblemDetail>) handler ->
-                                handler.denied(new AppointmentAccessDeniedException()),
-                        HttpStatus.FORBIDDEN),
                 Arguments.of("security access denial",
                         (Function<ApiExceptionHandler, ProblemDetail>) handler ->
                                 handler.denied(new AccessDeniedException("denied")),

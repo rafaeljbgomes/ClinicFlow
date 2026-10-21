@@ -4,7 +4,6 @@ import com.clinicflow.appointment.application.commands.CancelAppointmentCommand;
 import com.clinicflow.appointment.application.commands.CompleteAppointmentCommand;
 import com.clinicflow.appointment.application.commands.RescheduleAppointmentCommand;
 import com.clinicflow.appointment.application.commands.ScheduleAppointmentCommand;
-import com.clinicflow.appointment.application.exceptions.AppointmentAccessDeniedException;
 import com.clinicflow.appointment.application.exceptions.AppointmentNotFoundException;
 import com.clinicflow.appointment.application.exceptions.OwnershipCheckUnavailableException;
 import com.clinicflow.appointment.application.exceptions.PatientNotFoundException;
@@ -340,7 +339,7 @@ class AppointmentServiceTest {
         Throwable thrown = catchThrowable(() -> service.complete(new CompleteAppointmentCommand(OTHER, APPOINTMENT_ID)));
 
         // Assert
-        assertThat(thrown).isInstanceOf(AppointmentAccessDeniedException.class);
+        assertThat(thrown).isInstanceOf(AppointmentNotFoundException.class);
     }
 
     @Test

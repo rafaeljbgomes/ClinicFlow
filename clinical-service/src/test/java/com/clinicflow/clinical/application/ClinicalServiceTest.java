@@ -431,7 +431,7 @@ class ClinicalServiceTest {
     }
 
     @Test
-    void deniesAccessToAnotherPsychologistsCase() {
+    void answersAnotherPsychologistsCaseAsNotFound() {
         // Arrange
         when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(clinicalCase()));
         var query = new GetClinicalCaseQuery(OTHER_PSYCHOLOGIST, CASE_ID);
@@ -440,7 +440,7 @@ class ClinicalServiceTest {
         Throwable thrown = catchThrowable(() -> service.getClinicalCase(query));
 
         // Assert
-        assertThat(thrown).isInstanceOf(ClinicalAccessDeniedException.class);
+        assertThat(thrown).isInstanceOf(ClinicalCaseNotFoundException.class);
     }
 
     @Test
@@ -710,7 +710,7 @@ class ClinicalServiceTest {
                 service.signSessionRecord(new SignSessionRecordCommand(PSYCHOLOGIST_ID, foreign.id())));
 
         // Assert
-        assertThat(thrown).isInstanceOf(ClinicalAccessDeniedException.class);
+        assertThat(thrown).isInstanceOf(SessionRecordNotFoundException.class);
         assertThat(foreign.noteStatus()).isEqualTo(NoteStatus.DRAFT);
         verify(sessionRecords, never()).save(any());
     }
@@ -758,7 +758,7 @@ class ClinicalServiceTest {
         Throwable thrown = catchThrowable(() -> service.updateSessionRecord(command));
 
         // Assert
-        assertThat(thrown).isInstanceOf(ClinicalAccessDeniedException.class);
+        assertThat(thrown).isInstanceOf(SessionRecordNotFoundException.class);
         assertThat(foreign.summary()).isEqualTo("Summary");
         verify(sessionRecords, never()).save(any());
     }

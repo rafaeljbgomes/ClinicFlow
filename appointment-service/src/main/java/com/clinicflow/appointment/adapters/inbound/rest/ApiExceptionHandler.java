@@ -1,6 +1,5 @@
 package com.clinicflow.appointment.adapters.inbound.rest;
 
-import com.clinicflow.appointment.application.exceptions.AppointmentAccessDeniedException;
 import com.clinicflow.appointment.application.exceptions.AppointmentNotFoundException;
 import com.clinicflow.appointment.application.exceptions.OwnershipCheckUnavailableException;
 import com.clinicflow.appointment.application.exceptions.PatientNotFoundException;
@@ -41,8 +40,8 @@ public class ApiExceptionHandler {
                 "Service unavailable", "Patient ownership could not be verified; try again later");
     }
 
-    @ExceptionHandler({AppointmentAccessDeniedException.class, AccessDeniedException.class})
-    ProblemDetail denied(Exception ex) {
+    @ExceptionHandler(AccessDeniedException.class)
+    ProblemDetail denied(AccessDeniedException ex) {
         return ApiProblems.create(HttpStatus.FORBIDDEN, "access_denied", "Access denied",
                 "You are not allowed to access this resource");
     }

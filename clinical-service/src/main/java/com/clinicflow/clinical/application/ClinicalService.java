@@ -200,9 +200,7 @@ public class ClinicalService {
 
     @Transactional
     public SessionRecordResult updateSessionRecord(UpdateSessionRecordCommand command) {
-        SessionRecord session = sessionRecords.findById(command.sessionRecordId())
-                .orElseThrow(SessionRecordNotFoundException::new);
-        ensureOwned(command.psychologistId(), session.psychologistId());
+        SessionRecord session = requireOwnedSession(command.psychologistId(), command.sessionRecordId());
         if (command.clinicalCaseId() != null) {
             ClinicalCase clinicalCase = requireOwnedCase(command.psychologistId(), command.clinicalCaseId());
             if (!clinicalCase.patientId().equals(session.patientId())) {
@@ -218,9 +216,7 @@ public class ClinicalService {
 
     @Transactional
     public SessionRecordResult signSessionRecord(SignSessionRecordCommand command) {
-        SessionRecord session = sessionRecords.findById(command.sessionRecordId())
-                .orElseThrow(SessionRecordNotFoundException::new);
-        ensureOwned(command.psychologistId(), session.psychologistId());
+        SessionRecord session = requireOwnedSession(command.psychologistId(), command.sessionRecordId());
         session.sign(command.psychologistId(), Instant.now());
         sessionRecords.save(session);
         return mapper.toResult(session);
@@ -263,11 +259,27 @@ public class ClinicalService {
                 cases.stream().map(mapper::toResult).toList(), plans, sessions);
     }
 
+    // Another psychologist's case or note answers exactly like a missing one, so ids cannot be probed.
     private ClinicalCase requireOwnedCase(PsychologistId psychologistId, ClinicalCaseId clinicalCaseId) {
         ClinicalCase clinicalCase = clinicalCases.findById(clinicalCaseId)
                 .orElseThrow(ClinicalCaseNotFoundException::new);
-        ensureOwned(psychologistId, clinicalCase.psychologistId());
+        if (!clinicalCase.psychologistId().equals(psychologistId)) {
+            log.warn("clinical_case_access_denied clinicalCaseId={} psychologistId={}", clinicalCaseId.value(),
+                    psychologistId.value());
+            throw new ClinicalCaseNotFoundException();
+        }
         return clinicalCase;
+    }
+
+    private SessionRecord requireOwnedSession(PsychologistId psychologistId, SessionRecordId sessionRecordId) {
+        SessionRecord session = sessionRecords.findById(sessionRecordId)
+                .orElseThrow(SessionRecordNotFoundException::new);
+        if (!session.psychologistId().equals(psychologistId)) {
+            log.warn("session_record_access_denied sessionRecordId={} psychologistId={}", sessionRecordId.value(),
+                    psychologistId.value());
+            throw new SessionRecordNotFoundException();
+        }
+        return session;
     }
 
     // Ownership is checked before the local uniqueness check so a foreign appointment id reveals nothing.
@@ -280,12 +292,6 @@ public class ClinicalService {
         }
         if (sessionRecords.findByAppointmentId(appointmentId).isPresent()) {
             throw new AppointmentAlreadyRecordedException();
-        }
-    }
-
-    private void ensureOwned(PsychologistId expected, PsychologistId actual) {
-        if (!expected.equals(actual)) {
-            throw new ClinicalAccessDeniedException();
         }
     }
 

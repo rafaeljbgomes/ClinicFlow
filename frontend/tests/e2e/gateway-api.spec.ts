@@ -148,7 +148,9 @@ test.describe("direct bearer APIs enforce backend roles and clinical/notificatio
     const response = await request.get(casePath, { headers: signed(demoTokens.psychologist) });
 
     // Assert
-    expect(response.status()).toBe(403);
+    // A foreign case answers like a missing one so case ids cannot be probed (ADR-021).
+    expect(response.status()).toBe(404);
+    expect((await response.json()).code).toBe("clinical_resource_not_found");
   });
 
   test("the owner reads the patient's clinical history", async ({ request, ownedRecords }) => {

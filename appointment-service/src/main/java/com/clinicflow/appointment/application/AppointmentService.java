@@ -4,7 +4,6 @@ import com.clinicflow.appointment.application.commands.CancelAppointmentCommand;
 import com.clinicflow.appointment.application.commands.CompleteAppointmentCommand;
 import com.clinicflow.appointment.application.commands.RescheduleAppointmentCommand;
 import com.clinicflow.appointment.application.commands.ScheduleAppointmentCommand;
-import com.clinicflow.appointment.application.exceptions.AppointmentAccessDeniedException;
 import com.clinicflow.appointment.application.exceptions.AppointmentNotFoundException;
 import com.clinicflow.appointment.application.exceptions.PatientNotFoundException;
 import com.clinicflow.appointment.application.mapping.AppointmentApplicationMapper;
@@ -23,6 +22,8 @@ import com.clinicflow.appointment.domain.events.AppointmentCancelledEvent;
 import com.clinicflow.appointment.domain.events.AppointmentCompletedEvent;
 import com.clinicflow.appointment.domain.events.AppointmentRescheduledEvent;
 import com.clinicflow.appointment.domain.events.AppointmentScheduledEvent;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,6 +33,7 @@ import java.util.UUID;
 
 @Service
 public class AppointmentService {
+    private static final Logger log = LoggerFactory.getLogger(AppointmentService.class);
     private final AppointmentRepository appointmentRepository;
     private final AppointmentEventPublisher eventPublisher;
     private final PatientDirectory patientDirectory;
@@ -102,11 +104,14 @@ public class AppointmentService {
         return mapper.toResult(appointment);
     }
 
+    // Another psychologist's appointment answers exactly like a missing one, so ids cannot be probed.
     private Appointment requireOwnedAppointment(PsychologistId psychologistId, AppointmentId appointmentId) {
         Appointment appointment = appointmentRepository.findById(appointmentId)
                 .orElseThrow(AppointmentNotFoundException::new);
         if (!appointment.psychologistId().equals(psychologistId)) {
-            throw new AppointmentAccessDeniedException();
+            log.warn("appointment_access_denied appointmentId={} psychologistId={}", appointmentId.value(),
+                    psychologistId.value());
+            throw new AppointmentNotFoundException();
         }
         return appointment;
     }
