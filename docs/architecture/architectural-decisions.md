@@ -356,8 +356,8 @@ timeout. Helm declares the new service-to-service NetworkPolicy flows per releas
 (`networkPolicy.serviceIngress` and `serviceEgress`), and Compose sets the base URLs.
 The `appointment.completed` consumer still trusts its producer, because
 appointment-service now verifies patients at scheduling time. Session records that
-were linked to foreign appointments before this decision are not rewritten; the
-consumer logs `session_record_appointment_conflict` when it meets one. Patient
+were linked to foreign appointments before this decision release that link to the
+appointment's owner (ADR-025). Patient
 status (for example `ARCHIVED`) is not part of the check.
 
 ## ADR-022: GitHub Actions as the PR Gate of Record
@@ -381,6 +381,57 @@ listener retry (four deliveries before dead-lettering, unchanged), and
 `RestTestClient` for API integration tests. See
 [ADR-023](decisions/ADR-023-spring-boot-4.md) for the migration details and
 consequences.
+
+## ADR-025: Appointment Owners Reclaim Conflicting Session-Record Links
+
+Decision: a session record may hold an appointment id only when it belongs to that
+appointment's psychologist and patient. Records linked before ADR-021 can break
+this rule. Because `session_records.appointment_id` is unique, they block the real
+owner's completion record. clinical-service releases such a link when
+appointment-service names the owner: either an `appointment.completed` event
+arrives, or the owner links the appointment to a manual record and
+`GET /appointments/{id}` verifies it. In both cases the service writes a row to
+`session_record_link_conflicts` with the record id, the released appointment id, the
+appointment's owner, the source (`APPOINTMENT_COMPLETED` or `MANUAL_LINK`) and the
+time. Then it sets the old record's `appointment_id` to null and stores the
+owner's record in the same transaction. The service logs
+`session_record_appointment_conflict ... resolution=link_released`. A record that
+already belongs to the owner still answers `409 appointment_already_recorded`, and
+a duplicate event is still ignored.
+
+Signed notes: ADR-019 keeps signed rows final, and the conflicting record is often
+signed. The `V3` migration narrows the trigger rather than bypassing it. A signed
+row accepts one change: an `UPDATE` that only clears `appointment_id`, when a
+conflict row for that record and appointment already exists. Note content,
+signature and `updated_at` cannot change in the same statement, and deletes are
+still rejected. The domain models this as
+`SessionRecord.releaseAppointmentLink`, which returns the audit entry and is the
+only change allowed on a signed note.
+
+Rationale: appointment-service is the only authority on appointment ownership
+(ADR-004, ADR-021), so the owner's claim wins once that service has confirmed it.
+The other record keeps everything its author wrote and signed. It loses only an id
+that was never valid, and the audit row keeps that id. Two alternatives were
+rejected. Keeping both links would need a non-unique `appointment_id`, which
+weakens duplicate protection for every record. Deleting or editing the other
+record would break ADR-019.
+
+Existing data: clinical-service cannot find conflicts ahead of time, because
+ownership lives in another database. `scripts/maintenance/Find-SessionRecordLinkConflicts.ps1`
+reads both databases and lists unresolved, missing and released links. With
+`-Replay`, it republishes `appointment.completed` to the clinical queue for
+completed appointments whose event was skipped before this decision. See the
+[runbook](../infrastructure/session-record-link-conflicts.md).
+
+Consequences: the author of the other record is not notified. Their record keeps
+its note but no longer shows an appointment link. The `appointment.completed`
+consumer still trusts its producer (ADR-021), so a forged event on the broker could
+release a link. Since ADR-026 only appointment-service's broker user and the
+administrator may publish `appointment.completed`, and the replay script uses the
+administrator login.
+A database superuser can still bypass the trigger, as ADR-019 notes. Optimistic
+locking (ADR-024) adds a `version` column. When it lands, the trigger exception
+must also allow `version` to change during a release.
 
 ## ADR-026: Per-Service Database and Broker Credentials
 
