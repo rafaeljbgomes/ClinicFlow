@@ -1,6 +1,5 @@
 package com.clinicflow.patient.adapters.inbound.rest;
 
-import com.clinicflow.patient.application.exceptions.PatientAccessDeniedException;
 import com.clinicflow.patient.application.exceptions.PatientNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
@@ -28,8 +27,8 @@ public class ApiExceptionHandler {
         return ApiProblems.create(HttpStatus.NOT_FOUND, "patient_not_found", "Resource not found", "Patient not found");
     }
 
-    @ExceptionHandler({PatientAccessDeniedException.class, AccessDeniedException.class})
-    ProblemDetail denied(Exception ex) {
+    @ExceptionHandler(AccessDeniedException.class)
+    ProblemDetail denied(AccessDeniedException ex) {
         return ApiProblems.create(HttpStatus.FORBIDDEN, "access_denied", "Access denied",
                 "You are not allowed to access this resource");
     }

@@ -1,7 +1,8 @@
 package com.clinicflow.appointment.adapters.inbound.rest;
 
-import com.clinicflow.appointment.application.exceptions.AppointmentAccessDeniedException;
 import com.clinicflow.appointment.application.exceptions.AppointmentNotFoundException;
+import com.clinicflow.appointment.application.exceptions.OwnershipCheckUnavailableException;
+import com.clinicflow.appointment.application.exceptions.PatientNotFoundException;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
@@ -51,10 +52,14 @@ class ApiExceptionHandlerTest {
                         (Function<ApiExceptionHandler, ProblemDetail>) handler ->
                                 handler.notFound(new AppointmentNotFoundException()),
                         HttpStatus.NOT_FOUND),
-                Arguments.of("appointment ownership denial",
+                Arguments.of("unknown or foreign patient",
                         (Function<ApiExceptionHandler, ProblemDetail>) handler ->
-                                handler.denied(new AppointmentAccessDeniedException()),
-                        HttpStatus.FORBIDDEN),
+                                handler.patientNotFound(new PatientNotFoundException()),
+                        HttpStatus.NOT_FOUND),
+                Arguments.of("unavailable ownership check",
+                        (Function<ApiExceptionHandler, ProblemDetail>) handler ->
+                                handler.ownershipCheckUnavailable(new OwnershipCheckUnavailableException("down")),
+                        HttpStatus.SERVICE_UNAVAILABLE),
                 Arguments.of("security access denial",
                         (Function<ApiExceptionHandler, ProblemDetail>) handler ->
                                 handler.denied(new AccessDeniedException("denied")),
@@ -86,6 +91,18 @@ class ApiExceptionHandlerTest {
 
         // Assert
         assertThat(problem.getDetail()).isEqualTo("Request validation failed");
+    }
+
+    @Test
+    void unavailableOwnershipCheckHidesTheCause() {
+        // Arrange
+        var failure = new OwnershipCheckUnavailableException("connect timed out to patient-service:8082");
+
+        // Act
+        ProblemDetail problem = handler.ownershipCheckUnavailable(failure);
+
+        // Assert
+        assertThat(problem.getDetail()).isEqualTo("Patient ownership could not be verified; try again later");
     }
 
     @Test

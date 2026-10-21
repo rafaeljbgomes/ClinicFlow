@@ -1,9 +1,14 @@
 package com.clinicflow.clinical.adapters.inbound.rest;
 
 import com.clinicflow.clinical.application.exceptions.ActiveClinicalCaseExistsException;
+import com.clinicflow.clinical.application.exceptions.AppointmentAlreadyRecordedException;
+import com.clinicflow.clinical.application.exceptions.AppointmentNotFoundException;
+import com.clinicflow.clinical.application.exceptions.AppointmentPatientMismatchException;
 import com.clinicflow.clinical.application.exceptions.CarePlanNotFoundException;
 import com.clinicflow.clinical.application.exceptions.ClinicalAccessDeniedException;
 import com.clinicflow.clinical.application.exceptions.ClinicalCaseNotFoundException;
+import com.clinicflow.clinical.application.exceptions.OwnershipCheckUnavailableException;
+import com.clinicflow.clinical.application.exceptions.PatientNotFoundException;
 import com.clinicflow.clinical.application.exceptions.SessionRecordNotFoundException;
 import com.clinicflow.clinical.domain.InvalidNoteTransitionException;
 import com.clinicflow.clinical.domain.SessionRecordNotSignableException;
@@ -34,6 +39,35 @@ public class ApiExceptionHandler {
     ProblemDetail notFound(RuntimeException ex) {
         return ApiProblems.create(HttpStatus.NOT_FOUND, "clinical_resource_not_found",
                 "Clinical resource not found", "Clinical resource not found");
+    }
+
+    @ExceptionHandler(PatientNotFoundException.class)
+    ProblemDetail patientNotFound(PatientNotFoundException ex) {
+        return ApiProblems.create(HttpStatus.NOT_FOUND, "patient_not_found", "Resource not found", "Patient not found");
+    }
+
+    @ExceptionHandler(AppointmentNotFoundException.class)
+    ProblemDetail appointmentNotFound(AppointmentNotFoundException ex) {
+        return ApiProblems.create(HttpStatus.NOT_FOUND, "appointment_not_found", "Resource not found",
+                "Appointment not found");
+    }
+
+    @ExceptionHandler(AppointmentPatientMismatchException.class)
+    ProblemDetail appointmentPatientMismatch(AppointmentPatientMismatchException ex) {
+        return ApiProblems.create(HttpStatus.BAD_REQUEST, "appointment_patient_mismatch", "Invalid appointment",
+                "The appointment belongs to a different patient than the clinical case");
+    }
+
+    @ExceptionHandler(AppointmentAlreadyRecordedException.class)
+    ProblemDetail appointmentAlreadyRecorded(AppointmentAlreadyRecordedException ex) {
+        return ApiProblems.create(HttpStatus.CONFLICT, "appointment_already_recorded",
+                "Appointment already recorded", "The appointment already has a session record");
+    }
+
+    @ExceptionHandler(OwnershipCheckUnavailableException.class)
+    ProblemDetail ownershipCheckUnavailable(OwnershipCheckUnavailableException ex) {
+        return ApiProblems.create(HttpStatus.SERVICE_UNAVAILABLE, "ownership_check_unavailable",
+                "Service unavailable", "Ownership could not be verified; try again later");
     }
 
     @ExceptionHandler(ActiveClinicalCaseExistsException.class)

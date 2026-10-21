@@ -41,6 +41,27 @@
     "jwt": {
       "type": "object",
       "required": ["issuer", "secretName", "publicKeyKey", "privateKeyKey", "privateKeyEnabled"]
+    },
+    "networkPolicy": {
+      "type": "object",
+      "properties": {
+        "serviceIngress": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" }
+        },
+        "serviceEgress": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["component", "port"],
+            "additionalProperties": false,
+            "properties": {
+              "component": { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" },
+              "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+            }
+          }
+        }
+      }
     }
   }
 }

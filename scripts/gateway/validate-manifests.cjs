@@ -94,13 +94,27 @@ if(frontend) {
   assert(policy);
   assert.deepEqual(policy.spec.egress.flatMap(r=>r.ports.map(p=>p.port)).sort((a,b)=>a-b),[53,53,8080,9000]);
   for(const peer of policy.spec.ingress.flatMap(r=>r.from)) { assert(peer.namespaceSelector);assert.equal(peer.podSelector.matchLabels['clinicflow.io/edge'],'gateway'); }
+  // ADR-021: ownership checks are the only service-to-service application flows (callee -> callers).
+  const ownershipCallers={'patient-service':['appointment-service','clinical-service'],'appointment-service':['clinical-service']};
+  const backendPort=name=>contract.find(r=>r.backend===name)?.port;
   for(const backend of docs.filter(d=>d.kind==='Deployment'&&contract.some(r=>r.backend===d.metadata.name))) {
     const backendPolicy=policies.find(p=>selects(p,backend));assert(backendPolicy);
-    const port=contract.find(r=>r.backend===backend.metadata.name).port;
+    const port=backendPort(backend.metadata.name);
     for(const rule of backendPolicy.spec.ingress) {
       assert(rule.from?.length,'Backend ingress must have explicit peers');
       for(const peer of rule.from) {assert(peer.namespaceSelector);assert(peer.podSelector);}
-      if(rule.ports.some(p=>p.port===port)) for(const peer of rule.from) assert.equal(peer.podSelector.matchLabels['clinicflow.io/edge'],'gateway');
+      if(rule.ports.some(p=>p.port===port)) for(const peer of rule.from) {
+        if(peer.podSelector.matchLabels['clinicflow.io/edge']==='gateway') continue;
+        const caller=peer.podSelector.matchLabels['app.kubernetes.io/component'];
+        assert((ownershipCallers[backend.metadata.name]||[]).includes(caller),`${backend.metadata.name} must not accept application traffic from ${caller}`);
+        assert.equal(peer.namespaceSelector.matchLabels['kubernetes.io/metadata.name'],'clinicflow');
+      }
+    }
+    for(const rule of backendPolicy.spec.egress) for(const peer of rule.to||[]) {
+      const callee=peer.podSelector?.matchLabels?.['app.kubernetes.io/component'];
+      if(!backendPort(callee)) continue;
+      assert((ownershipCallers[callee]||[]).includes(backend.metadata.name),`${backend.metadata.name} must not call ${callee}`);
+      assert.deepEqual(rule.ports.map(p=>p.port),[backendPort(callee)]);
     }
   }
   console.log('Validated BFF gateway-only configuration/checksum and frontend/backend application-management policy boundaries.');

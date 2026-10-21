@@ -72,7 +72,9 @@ and troubleshooting.
   `/actuator/health/readiness` on management port `9000`.
 - `NetworkPolicy`: declares default-deny traffic and then allows only the
   frontend, backend, database, RabbitMQ, DNS, and monitoring flows required by
-  the prototype.
+  the prototype. Service-to-service ownership checks (ADR-021) are declared per
+  release with `networkPolicy.serviceEgress` on the caller and
+  `networkPolicy.serviceIngress` on the callee.
 - `SecurityContext`: application, PostgreSQL, and RabbitMQ pods run as fixed
   non-root UIDs (10001 for ClinicFlow images, the images' own `postgres` and
   `rabbitmq` users otherwise) with RuntimeDefault seccomp, no privilege

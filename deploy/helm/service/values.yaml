@@ -64,3 +64,7 @@ networkPolicy:
   gatewayNamespace: ingress-system
   frontendComponent: frontend
   monitoringNamespace: monitoring
+  # Same-namespace service components allowed to call this service's application port.
+  serviceIngress: []
+  # Same-namespace service components this service calls: [{component: patient-service, port: 8082}].
+  serviceEgress: []

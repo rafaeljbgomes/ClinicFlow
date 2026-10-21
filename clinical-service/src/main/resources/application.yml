@@ -42,6 +42,13 @@ clinicflow:
       issuer: ${CLINICFLOW_SECURITY_JWT_ISSUER:clinicflow-auth}
       public-key: ${CLINICFLOW_SECURITY_JWT_PUBLIC_KEY:}
       public-key-path: ${CLINICFLOW_SECURITY_JWT_PUBLIC_KEY_PATH:}
+  services:
+    connect-timeout: ${CLINICFLOW_SERVICES_CONNECT_TIMEOUT:1s}
+    read-timeout: ${CLINICFLOW_SERVICES_READ_TIMEOUT:2s}
+    patient:
+      base-url: ${CLINICFLOW_SERVICES_PATIENT_BASE_URL:http://localhost:8082}
+    appointment:
+      base-url: ${CLINICFLOW_SERVICES_APPOINTMENT_BASE_URL:http://localhost:8083}
   messaging:
     exchange: therapy.events.exchange
     dead-letter-exchange: therapy.events.dlx

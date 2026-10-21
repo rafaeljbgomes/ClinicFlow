@@ -12,3 +12,9 @@ environment:
   CLINICFLOW_MESSAGING_DEAD_LETTER_EXCHANGE: therapy.events.dlx
   CLINICFLOW_MESSAGING_CLINICAL_QUEUE: clinical.appointment-events.queue
   CLINICFLOW_MESSAGING_CLINICAL_DLQ: clinical.appointment-events.dlq
+  CLINICFLOW_SERVICES_PATIENT_BASE_URL: http://patient-service:8082
+  CLINICFLOW_SERVICES_APPOINTMENT_BASE_URL: http://appointment-service:8083
+networkPolicy:
+  serviceEgress:
+    - {component: patient-service, port: 8082}
+    - {component: appointment-service, port: 8083}

@@ -10,13 +10,19 @@ import com.clinicflow.clinical.application.commands.SignSessionRecordCommand;
 import com.clinicflow.clinical.application.commands.UpdatePracticeProfileCommand;
 import com.clinicflow.clinical.application.commands.UpdateSessionRecordCommand;
 import com.clinicflow.clinical.application.exceptions.ActiveClinicalCaseExistsException;
+import com.clinicflow.clinical.application.exceptions.AppointmentAlreadyRecordedException;
+import com.clinicflow.clinical.application.exceptions.AppointmentNotFoundException;
+import com.clinicflow.clinical.application.exceptions.AppointmentPatientMismatchException;
 import com.clinicflow.clinical.application.exceptions.CarePlanNotFoundException;
 import com.clinicflow.clinical.application.exceptions.ClinicalAccessDeniedException;
 import com.clinicflow.clinical.application.exceptions.ClinicalCaseNotFoundException;
+import com.clinicflow.clinical.application.exceptions.PatientNotFoundException;
 import com.clinicflow.clinical.application.exceptions.SessionRecordNotFoundException;
 import com.clinicflow.clinical.application.mapping.ClinicalApplicationMapper;
+import com.clinicflow.clinical.application.ports.AppointmentDirectory;
 import com.clinicflow.clinical.application.ports.CarePlanRepository;
 import com.clinicflow.clinical.application.ports.ClinicalCaseRepository;
+import com.clinicflow.clinical.application.ports.PatientDirectory;
 import com.clinicflow.clinical.application.ports.PracticeProfileRepository;
 import com.clinicflow.clinical.application.ports.SessionRecordRepository;
 import com.clinicflow.clinical.application.queries.GetCarePlanQuery;
@@ -30,6 +36,7 @@ import com.clinicflow.clinical.application.results.ClinicalCaseResult;
 import com.clinicflow.clinical.application.results.PatientClinicalHistoryResult;
 import com.clinicflow.clinical.application.results.PracticeProfileResult;
 import com.clinicflow.clinical.application.results.SessionRecordResult;
+import com.clinicflow.clinical.domain.AppointmentId;
 import com.clinicflow.clinical.domain.CareGoal;
 import com.clinicflow.clinical.domain.CareGoalId;
 import com.clinicflow.clinical.domain.CarePlan;
@@ -37,10 +44,13 @@ import com.clinicflow.clinical.domain.CarePlanId;
 import com.clinicflow.clinical.domain.ClinicalCase;
 import com.clinicflow.clinical.domain.ClinicalCaseId;
 import com.clinicflow.clinical.domain.GoalStatus;
+import com.clinicflow.clinical.domain.PatientId;
 import com.clinicflow.clinical.domain.PracticeProfile;
 import com.clinicflow.clinical.domain.PsychologistId;
 import com.clinicflow.clinical.domain.SessionRecord;
 import com.clinicflow.clinical.domain.SessionRecordId;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -54,21 +64,27 @@ import java.util.stream.Collectors;
 
 @Service
 public class ClinicalService {
+    private static final Logger log = LoggerFactory.getLogger(ClinicalService.class);
     private static final int FALLBACK_SESSION_DURATION_MINUTES = 50;
 
     private final PracticeProfileRepository practiceProfiles;
     private final ClinicalCaseRepository clinicalCases;
     private final CarePlanRepository carePlans;
     private final SessionRecordRepository sessionRecords;
+    private final PatientDirectory patientDirectory;
+    private final AppointmentDirectory appointmentDirectory;
     private final ClinicalApplicationMapper mapper;
 
     public ClinicalService(PracticeProfileRepository practiceProfiles, ClinicalCaseRepository clinicalCases,
                            CarePlanRepository carePlans, SessionRecordRepository sessionRecords,
+                           PatientDirectory patientDirectory, AppointmentDirectory appointmentDirectory,
                            ClinicalApplicationMapper mapper) {
         this.practiceProfiles = practiceProfiles;
         this.clinicalCases = clinicalCases;
         this.carePlans = carePlans;
         this.sessionRecords = sessionRecords;
+        this.patientDirectory = patientDirectory;
+        this.appointmentDirectory = appointmentDirectory;
         this.mapper = mapper;
     }
 
@@ -95,6 +111,10 @@ public class ClinicalService {
 
     @Transactional
     public ClinicalCaseResult createClinicalCase(CreateClinicalCaseCommand command) {
+        // Unknown and foreign patients get the same answer so the endpoint is not an existence oracle.
+        if (!patientDirectory.isOwnedBy(command.patientId(), command.psychologistId())) {
+            throw new PatientNotFoundException();
+        }
         if (clinicalCases.existsOpenByPsychologistIdAndPatientId(command.psychologistId(), command.patientId())) {
             throw new ActiveClinicalCaseExistsException();
         }
@@ -161,6 +181,9 @@ public class ClinicalService {
     @Transactional
     public SessionRecordResult createSessionRecord(CreateSessionRecordCommand command) {
         ClinicalCase clinicalCase = requireOwnedCase(command.psychologistId(), command.clinicalCaseId());
+        if (command.appointmentId() != null) {
+            requireLinkableAppointment(command.psychologistId(), command.appointmentId(), clinicalCase);
+        }
         SessionRecord session = SessionRecord.manual(new SessionRecordId(UUID.randomUUID()), clinicalCase,
                 command.appointmentId(), command.sessionDate(), command.modality(), command.durationMinutes(),
                 command.attendanceStatus(), command.summary(), command.focusAreas(), command.interventions(),
@@ -177,9 +200,7 @@ public class ClinicalService {
 
     @Transactional
     public SessionRecordResult updateSessionRecord(UpdateSessionRecordCommand command) {
-        SessionRecord session = sessionRecords.findById(command.sessionRecordId())
-                .orElseThrow(SessionRecordNotFoundException::new);
-        ensureOwned(command.psychologistId(), session.psychologistId());
+        SessionRecord session = requireOwnedSession(command.psychologistId(), command.sessionRecordId());
         if (command.clinicalCaseId() != null) {
             ClinicalCase clinicalCase = requireOwnedCase(command.psychologistId(), command.clinicalCaseId());
             if (!clinicalCase.patientId().equals(session.patientId())) {
@@ -195,9 +216,7 @@ public class ClinicalService {
 
     @Transactional
     public SessionRecordResult signSessionRecord(SignSessionRecordCommand command) {
-        SessionRecord session = sessionRecords.findById(command.sessionRecordId())
-                .orElseThrow(SessionRecordNotFoundException::new);
-        ensureOwned(command.psychologistId(), session.psychologistId());
+        SessionRecord session = requireOwnedSession(command.psychologistId(), command.sessionRecordId());
         session.sign(command.psychologistId(), Instant.now());
         sessionRecords.save(session);
         return mapper.toResult(session);
@@ -205,7 +224,14 @@ public class ClinicalService {
 
     @Transactional
     public void processAppointmentCompleted(ProcessAppointmentCompletedCommand command) {
-        if (sessionRecords.findByAppointmentId(command.appointmentId()).isPresent()) {
+        Optional<SessionRecord> existing = sessionRecords.findByAppointmentId(command.appointmentId());
+        if (existing.isPresent()) {
+            // Records linked before appointment links were verified may belong to someone else; surface them.
+            if (!existing.get().psychologistId().equals(command.psychologistId())
+                    || !existing.get().patientId().equals(command.patientId())) {
+                log.warn("session_record_appointment_conflict appointmentId={} sessionRecordId={}",
+                        command.appointmentId().value(), existing.get().id().value());
+            }
             return;
         }
         ClinicalCaseId caseId = clinicalCases.findOpenByPsychologistIdAndPatientId(
@@ -233,16 +259,39 @@ public class ClinicalService {
                 cases.stream().map(mapper::toResult).toList(), plans, sessions);
     }
 
+    // Another psychologist's case or note answers exactly like a missing one, so ids cannot be probed.
     private ClinicalCase requireOwnedCase(PsychologistId psychologistId, ClinicalCaseId clinicalCaseId) {
         ClinicalCase clinicalCase = clinicalCases.findById(clinicalCaseId)
                 .orElseThrow(ClinicalCaseNotFoundException::new);
-        ensureOwned(psychologistId, clinicalCase.psychologistId());
+        if (!clinicalCase.psychologistId().equals(psychologistId)) {
+            log.warn("clinical_case_access_denied clinicalCaseId={} psychologistId={}", clinicalCaseId.value(),
+                    psychologistId.value());
+            throw new ClinicalCaseNotFoundException();
+        }
         return clinicalCase;
     }
 
-    private void ensureOwned(PsychologistId expected, PsychologistId actual) {
-        if (!expected.equals(actual)) {
-            throw new ClinicalAccessDeniedException();
+    private SessionRecord requireOwnedSession(PsychologistId psychologistId, SessionRecordId sessionRecordId) {
+        SessionRecord session = sessionRecords.findById(sessionRecordId)
+                .orElseThrow(SessionRecordNotFoundException::new);
+        if (!session.psychologistId().equals(psychologistId)) {
+            log.warn("session_record_access_denied sessionRecordId={} psychologistId={}", sessionRecordId.value(),
+                    psychologistId.value());
+            throw new SessionRecordNotFoundException();
+        }
+        return session;
+    }
+
+    // Ownership is checked before the local uniqueness check so a foreign appointment id reveals nothing.
+    private void requireLinkableAppointment(PsychologistId psychologistId, AppointmentId appointmentId,
+                                            ClinicalCase clinicalCase) {
+        PatientId appointmentPatient = appointmentDirectory.findPatientOfOwnedAppointment(appointmentId, psychologistId)
+                .orElseThrow(AppointmentNotFoundException::new);
+        if (!appointmentPatient.equals(clinicalCase.patientId())) {
+            throw new AppointmentPatientMismatchException();
+        }
+        if (sessionRecords.findByAppointmentId(appointmentId).isPresent()) {
+            throw new AppointmentAlreadyRecordedException();
         }
     }
 

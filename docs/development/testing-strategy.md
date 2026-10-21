@@ -42,6 +42,10 @@ integration they describe so failures identify a narrow responsibility.
 - Spring slices use `@MockitoBean` only for collaborators outside the slice.
 - Repository, functional and messaging tests use real persistence mappings and
   infrastructure inside their declared boundary.
+- Outbound HTTP adapters are unit-tested with `MockRestServiceServer`. In
+  `*ApiIT.java`, neighbouring services are replaced by a real loopback HTTP
+  stand-in (`support/StubHttpServer`) that answers per caller token, so token
+  forwarding, status mapping and fail-closed behaviour run over real HTTP.
 - Do not mock domain entities or value objects, use deep stubs, or verify
   implementation calls that are not observable behaviour. Dummies are limited
   to mandatory values that a scenario intentionally does not inspect.

@@ -66,6 +66,69 @@ class PatientApiIT {
         reset(jwtDecoder);
         when(jwtDecoder.decode("psychologist-token")).thenReturn(jwt(PSYCHOLOGIST_ID, "PSYCHOLOGIST"));
         when(jwtDecoder.decode("patient-token")).thenReturn(jwt(UUID.randomUUID(), "PATIENT"));
+        when(jwtDecoder.decode("other-psychologist-token")).thenReturn(jwt(UUID.randomUUID(), "PSYCHOLOGIST"));
+    }
+
+    // appointment-service and clinical-service rely on HEAD /patients/{id} as their ownership check.
+    @Test
+    void ownershipCheckConfirmsTheOwnersPatient() {
+        // Arrange
+        String patientId = createPatient();
+
+        // Act
+        var response = ownershipCheck("psychologist-token", patientId);
+
+        // Assert
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.OK);
+    }
+
+    @Test
+    void ownershipCheckReturnsNoPatientDetails() {
+        // Arrange
+        String patientId = createPatient();
+
+        // Act
+        var response = ownershipCheck("psychologist-token", patientId);
+
+        // Assert
+        assertThat(response.getResponseBody()).isNull();
+    }
+
+    @Test
+    void ownershipCheckAnswersAnotherPsychologistLikeAnUnknownPatient() {
+        // Arrange
+        String patientId = createPatient();
+
+        // Act
+        var response = ownershipCheck("other-psychologist-token", patientId);
+
+        // Assert
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    void anotherPsychologistsPatientLooksExactlyLikeAMissingOne() {
+        // Arrange
+        String patientId = createPatient();
+        var other = new HttpEntity<>(bearer("other-psychologist-token"));
+        var missing = exchange("/patients/" + UUID.randomUUID(), HttpMethod.GET, other, Map.class);
+
+        // Act
+        var foreign = exchange("/patients/" + patientId, HttpMethod.GET, other, Map.class);
+
+        // Assert
+        assertThat(foreign.getStatus()).isEqualTo(HttpStatus.NOT_FOUND).isEqualTo(missing.getStatus());
+        assertThat(withoutRequestFields(foreign.getResponseBody()))
+                .isEqualTo(withoutRequestFields(missing.getResponseBody()));
+    }
+
+    @Test
+    void ownershipCheckReportsUnknownPatient() {
+        // Act
+        var response = ownershipCheck("psychologist-token", UUID.randomUUID().toString());
+
+        // Assert
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.NOT_FOUND);
     }
 
     @Test
@@ -233,6 +296,18 @@ class PatientApiIT {
         var response = exchange("/patients", HttpMethod.POST, createRequest("patient@example.com"));
         arrangeStep("create patient", response, HttpStatus.CREATED);
         return response.getResponseBody().get("id").toString();
+    }
+
+    // Everything except the per-request instance and correlation id must match.
+    private static Map<?, ?> withoutRequestFields(Map<?, ?> problem) {
+        Map<Object, Object> copy = new java.util.HashMap<>(problem);
+        copy.remove("instance");
+        copy.remove("correlationId");
+        return copy;
+    }
+
+    private EntityExchangeResult<String> ownershipCheck(String token, String patientId) {
+        return exchange("/patients/" + patientId, HttpMethod.HEAD, new HttpEntity<>(bearer(token)), String.class);
     }
 
     private static void arrangeStep(String step, ExchangeResult response, HttpStatus expected) {

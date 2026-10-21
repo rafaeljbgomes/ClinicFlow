@@ -1,6 +1,5 @@
 package com.clinicflow.patient.adapters.inbound.rest;
 
-import com.clinicflow.patient.application.exceptions.PatientAccessDeniedException;
 import com.clinicflow.patient.application.exceptions.PatientNotFoundException;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -52,10 +51,6 @@ class ApiExceptionHandlerTest {
                         (Function<ApiExceptionHandler, ProblemDetail>) handler ->
                                 handler.notFound(new PatientNotFoundException()),
                         HttpStatus.NOT_FOUND),
-                Arguments.of("patient ownership denial",
-                        (Function<ApiExceptionHandler, ProblemDetail>) handler ->
-                                handler.denied(new PatientAccessDeniedException()),
-                        HttpStatus.FORBIDDEN),
                 Arguments.of("security access denial",
                         (Function<ApiExceptionHandler, ProblemDetail>) handler ->
                                 handler.denied(new AccessDeniedException("denied")),

@@ -166,7 +166,9 @@ compliance or certification claim.
 - The Next.js BFF keeps the access token in an HttpOnly cookie and requires a
   double-submit CSRF token for mutating same-origin requests.
 - Role checks are applied at HTTP boundaries, while ownership and business
-  authorization remain in application services.
+  authorization remain in application services. Appointments, clinical cases,
+  and linked session records are accepted only after the owning service
+  confirms that the caller owns the referenced patient or appointment.
 - Notification history is scoped to the owning psychologist where appropriate.
 - Request validation and sanitized problem-style error responses are tested.
 - Development keys and generated artifacts are ignored by Git.

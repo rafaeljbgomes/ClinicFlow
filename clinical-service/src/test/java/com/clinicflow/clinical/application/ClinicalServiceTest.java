@@ -10,13 +10,20 @@ import com.clinicflow.clinical.application.commands.SignSessionRecordCommand;
 import com.clinicflow.clinical.application.commands.UpdatePracticeProfileCommand;
 import com.clinicflow.clinical.application.commands.UpdateSessionRecordCommand;
 import com.clinicflow.clinical.application.exceptions.ActiveClinicalCaseExistsException;
+import com.clinicflow.clinical.application.exceptions.AppointmentAlreadyRecordedException;
+import com.clinicflow.clinical.application.exceptions.AppointmentNotFoundException;
+import com.clinicflow.clinical.application.exceptions.AppointmentPatientMismatchException;
 import com.clinicflow.clinical.application.exceptions.CarePlanNotFoundException;
 import com.clinicflow.clinical.application.exceptions.ClinicalAccessDeniedException;
 import com.clinicflow.clinical.application.exceptions.ClinicalCaseNotFoundException;
+import com.clinicflow.clinical.application.exceptions.OwnershipCheckUnavailableException;
+import com.clinicflow.clinical.application.exceptions.PatientNotFoundException;
 import com.clinicflow.clinical.application.exceptions.SessionRecordNotFoundException;
 import com.clinicflow.clinical.application.mapping.ClinicalApplicationMapper;
+import com.clinicflow.clinical.application.ports.AppointmentDirectory;
 import com.clinicflow.clinical.application.ports.CarePlanRepository;
 import com.clinicflow.clinical.application.ports.ClinicalCaseRepository;
+import com.clinicflow.clinical.application.ports.PatientDirectory;
 import com.clinicflow.clinical.application.ports.PracticeProfileRepository;
 import com.clinicflow.clinical.application.ports.SessionRecordRepository;
 import com.clinicflow.clinical.application.queries.GetPatientClinicalHistoryQuery;
@@ -50,6 +57,9 @@ import com.clinicflow.clinical.domain.SessionRecord;
 import com.clinicflow.clinical.domain.SessionRecordId;
 import com.clinicflow.clinical.domain.SessionRecordNotSignableException;
 import com.clinicflow.clinical.domain.SignedSessionRecordException;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -57,6 +67,7 @@ import org.mapstruct.factory.Mappers;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -70,6 +81,7 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -90,18 +102,21 @@ class ClinicalServiceTest {
     @Mock private ClinicalCaseRepository clinicalCases;
     @Mock private CarePlanRepository carePlans;
     @Mock private SessionRecordRepository sessionRecords;
+    @Mock private PatientDirectory patientDirectory;
+    @Mock private AppointmentDirectory appointmentDirectory;
 
     private ClinicalService service;
 
     @BeforeEach
     void setUp() {
         service = new ClinicalService(practiceProfiles, clinicalCases, carePlans, sessionRecords,
-                Mappers.getMapper(ClinicalApplicationMapper.class));
+                patientDirectory, appointmentDirectory, Mappers.getMapper(ClinicalApplicationMapper.class));
     }
 
     @Test
     void createsCaseWhenNoOpenCaseExists() {
         // Arrange
+        when(patientDirectory.isOwnedBy(PATIENT_ID, PSYCHOLOGIST_ID)).thenReturn(true);
         when(clinicalCases.existsOpenByPsychologistIdAndPatientId(PSYCHOLOGIST_ID, PATIENT_ID)).thenReturn(false);
         var command = new CreateClinicalCaseCommand(PSYCHOLOGIST_ID, PATIENT_ID, "Anxiety symptoms");
 
@@ -118,6 +133,7 @@ class ClinicalServiceTest {
     @Test
     void rejectsCaseWhenAnOpenCaseExists() {
         // Arrange
+        when(patientDirectory.isOwnedBy(PATIENT_ID, PSYCHOLOGIST_ID)).thenReturn(true);
         when(clinicalCases.existsOpenByPsychologistIdAndPatientId(PSYCHOLOGIST_ID, PATIENT_ID)).thenReturn(true);
         var command = new CreateClinicalCaseCommand(PSYCHOLOGIST_ID, PATIENT_ID, "Another concern");
 
@@ -126,6 +142,60 @@ class ClinicalServiceTest {
 
         // Assert
         assertThat(thrown).isInstanceOf(ActiveClinicalCaseExistsException.class);
+    }
+
+    @Test
+    void rejectsCaseForPatientOwnedBySomeoneElse() {
+        // Arrange
+        when(patientDirectory.isOwnedBy(PATIENT_ID, PSYCHOLOGIST_ID)).thenReturn(false);
+        var command = new CreateClinicalCaseCommand(PSYCHOLOGIST_ID, PATIENT_ID, "Anxiety symptoms");
+
+        // Act
+        Throwable thrown = catchThrowable(() -> service.createClinicalCase(command));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(PatientNotFoundException.class);
+    }
+
+    @Test
+    void caseForForeignPatientTouchesNoClinicalRecords() {
+        // Arrange
+        when(patientDirectory.isOwnedBy(PATIENT_ID, PSYCHOLOGIST_ID)).thenReturn(false);
+        var command = new CreateClinicalCaseCommand(PSYCHOLOGIST_ID, PATIENT_ID, "Anxiety symptoms");
+
+        // Act
+        catchThrowable(() -> service.createClinicalCase(command));
+
+        // Assert
+        verifyNoInteractions(clinicalCases);
+    }
+
+    @Test
+    void caseCreationReportsUnavailableOwnershipCheck() {
+        // Arrange
+        when(patientDirectory.isOwnedBy(PATIENT_ID, PSYCHOLOGIST_ID))
+                .thenThrow(new OwnershipCheckUnavailableException("patient-service unavailable"));
+        var command = new CreateClinicalCaseCommand(PSYCHOLOGIST_ID, PATIENT_ID, "Anxiety symptoms");
+
+        // Act
+        Throwable thrown = catchThrowable(() -> service.createClinicalCase(command));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(OwnershipCheckUnavailableException.class);
+    }
+
+    @Test
+    void caseCreationStoresNothingWhenOwnershipCannotBeVerified() {
+        // Arrange
+        when(patientDirectory.isOwnedBy(PATIENT_ID, PSYCHOLOGIST_ID))
+                .thenThrow(new OwnershipCheckUnavailableException("patient-service unavailable"));
+        var command = new CreateClinicalCaseCommand(PSYCHOLOGIST_ID, PATIENT_ID, "Anxiety symptoms");
+
+        // Act
+        catchThrowable(() -> service.createClinicalCase(command));
+
+        // Assert
+        verifyNoInteractions(clinicalCases);
     }
 
     @Test
@@ -192,6 +262,26 @@ class ClinicalServiceTest {
 
         // Assert
         verify(sessionRecords, never()).save(any());
+    }
+
+    @Test
+    void completedAppointmentAlreadyClaimedByAnotherPsychologistIsReported() {
+        // Arrange
+        SessionRecord claimed = SessionRecord.fromCompletedAppointment(new SessionRecordId(UUID.randomUUID()),
+                null, OTHER_PSYCHOLOGIST, PATIENT_ID, APPOINTMENT_ID, NOW, SessionModality.ONLINE, 60, NOW);
+        when(sessionRecords.findByAppointmentId(APPOINTMENT_ID)).thenReturn(Optional.of(claimed));
+        ListAppender<ILoggingEvent> logs = captureServiceLogs();
+
+        // Act
+        try {
+            service.processAppointmentCompleted(appointmentCompleted());
+        } finally {
+            releaseServiceLogs(logs);
+        }
+
+        // Assert
+        assertThat(logs.list).singleElement().satisfies(event -> assertThat(event.getFormattedMessage())
+                .startsWith("session_record_appointment_conflict appointmentId=" + APPOINTMENT_ID.value()));
     }
 
     @Test
@@ -341,7 +431,7 @@ class ClinicalServiceTest {
     }
 
     @Test
-    void deniesAccessToAnotherPsychologistsCase() {
+    void answersAnotherPsychologistsCaseAsNotFound() {
         // Arrange
         when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(clinicalCase()));
         var query = new GetClinicalCaseQuery(OTHER_PSYCHOLOGIST, CASE_ID);
@@ -350,7 +440,7 @@ class ClinicalServiceTest {
         Throwable thrown = catchThrowable(() -> service.getClinicalCase(query));
 
         // Assert
-        assertThat(thrown).isInstanceOf(ClinicalAccessDeniedException.class);
+        assertThat(thrown).isInstanceOf(ClinicalCaseNotFoundException.class);
     }
 
     @Test
@@ -412,6 +502,106 @@ class ClinicalServiceTest {
         // Assert
         assertThat(created.summary()).isEqualTo("Summary");
         verify(sessionRecords).save(any(SessionRecord.class));
+    }
+
+    @Test
+    void sessionRecordWithoutAppointmentNeedsNoAppointmentLookup() {
+        // Arrange
+        when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(clinicalCase()));
+
+        // Act
+        service.createSessionRecord(sessionCommand(null));
+
+        // Assert
+        verifyNoInteractions(appointmentDirectory);
+    }
+
+    @Test
+    void createsSessionRecordLinkedToOwnedAppointmentOfTheCasePatient() {
+        // Arrange
+        when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(clinicalCase()));
+        when(appointmentDirectory.findPatientOfOwnedAppointment(APPOINTMENT_ID, PSYCHOLOGIST_ID))
+                .thenReturn(Optional.of(PATIENT_ID));
+        when(sessionRecords.findByAppointmentId(APPOINTMENT_ID)).thenReturn(Optional.empty());
+
+        // Act
+        SessionRecordResult created = service.createSessionRecord(sessionCommand(APPOINTMENT_ID));
+
+        // Assert
+        assertThat(created.appointmentId()).isEqualTo(APPOINTMENT_ID.value());
+    }
+
+    @Test
+    void rejectsSessionLinkToUnknownOrForeignAppointment() {
+        // Arrange
+        when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(clinicalCase()));
+        when(appointmentDirectory.findPatientOfOwnedAppointment(APPOINTMENT_ID, PSYCHOLOGIST_ID))
+                .thenReturn(Optional.empty());
+
+        // Act
+        Throwable thrown = catchThrowable(() -> service.createSessionRecord(sessionCommand(APPOINTMENT_ID)));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(AppointmentNotFoundException.class);
+    }
+
+    @Test
+    void foreignAppointmentLinkDoesNotRevealWhetherItWasRecorded() {
+        // Arrange
+        when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(clinicalCase()));
+        when(appointmentDirectory.findPatientOfOwnedAppointment(APPOINTMENT_ID, PSYCHOLOGIST_ID))
+                .thenReturn(Optional.empty());
+
+        // Act
+        catchThrowable(() -> service.createSessionRecord(sessionCommand(APPOINTMENT_ID)));
+
+        // Assert
+        verifyNoInteractions(sessionRecords);
+    }
+
+    @Test
+    void rejectsSessionLinkToAppointmentOfAnotherPatient() {
+        // Arrange
+        when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(clinicalCase()));
+        when(appointmentDirectory.findPatientOfOwnedAppointment(APPOINTMENT_ID, PSYCHOLOGIST_ID))
+                .thenReturn(Optional.of(new PatientId(UUID.randomUUID())));
+
+        // Act
+        Throwable thrown = catchThrowable(() -> service.createSessionRecord(sessionCommand(APPOINTMENT_ID)));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(AppointmentPatientMismatchException.class);
+    }
+
+    @Test
+    void rejectsSessionLinkToAppointmentThatAlreadyHasARecord() {
+        // Arrange
+        when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(clinicalCase()));
+        when(appointmentDirectory.findPatientOfOwnedAppointment(APPOINTMENT_ID, PSYCHOLOGIST_ID))
+                .thenReturn(Optional.of(PATIENT_ID));
+        when(sessionRecords.findByAppointmentId(APPOINTMENT_ID)).thenReturn(Optional.of(
+                SessionRecord.fromCompletedAppointment(new SessionRecordId(UUID.randomUUID()), CASE_ID,
+                        PSYCHOLOGIST_ID, PATIENT_ID, APPOINTMENT_ID, NOW, SessionModality.ONLINE, 50, NOW)));
+
+        // Act
+        Throwable thrown = catchThrowable(() -> service.createSessionRecord(sessionCommand(APPOINTMENT_ID)));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(AppointmentAlreadyRecordedException.class);
+    }
+
+    @Test
+    void rejectedAppointmentLinkStoresNoSessionRecord() {
+        // Arrange
+        when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(clinicalCase()));
+        when(appointmentDirectory.findPatientOfOwnedAppointment(APPOINTMENT_ID, PSYCHOLOGIST_ID))
+                .thenReturn(Optional.of(new PatientId(UUID.randomUUID())));
+
+        // Act
+        catchThrowable(() -> service.createSessionRecord(sessionCommand(APPOINTMENT_ID)));
+
+        // Assert
+        verify(sessionRecords, never()).save(any());
     }
 
     @Test
@@ -520,7 +710,7 @@ class ClinicalServiceTest {
                 service.signSessionRecord(new SignSessionRecordCommand(PSYCHOLOGIST_ID, foreign.id())));
 
         // Assert
-        assertThat(thrown).isInstanceOf(ClinicalAccessDeniedException.class);
+        assertThat(thrown).isInstanceOf(SessionRecordNotFoundException.class);
         assertThat(foreign.noteStatus()).isEqualTo(NoteStatus.DRAFT);
         verify(sessionRecords, never()).save(any());
     }
@@ -568,7 +758,7 @@ class ClinicalServiceTest {
         Throwable thrown = catchThrowable(() -> service.updateSessionRecord(command));
 
         // Assert
-        assertThat(thrown).isInstanceOf(ClinicalAccessDeniedException.class);
+        assertThat(thrown).isInstanceOf(SessionRecordNotFoundException.class);
         assertThat(foreign.summary()).isEqualTo("Summary");
         verify(sessionRecords, never()).save(any());
     }
@@ -705,6 +895,23 @@ class ClinicalServiceTest {
     private CarePlan carePlan(ClinicalCase clinicalCase, CareGoalId goalId) {
         return CarePlan.create(new CarePlanId(UUID.randomUUID()), clinicalCase, "Focus", "Weekly", REVIEW_DATE,
                 List.of(new CareGoal(goalId, "Goal", null, GoalStatus.IN_PROGRESS, 10)), NOW);
+    }
+
+    private CreateSessionRecordCommand sessionCommand(AppointmentId appointmentId) {
+        return new CreateSessionRecordCommand(PSYCHOLOGIST_ID, CASE_ID, appointmentId, NOW, SessionModality.ONLINE,
+                50, AttendanceStatus.ATTENDED, "Summary", "Focus", "CBT", "Homework", "Next");
+    }
+
+    private ListAppender<ILoggingEvent> captureServiceLogs() {
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        ((Logger) LoggerFactory.getLogger(ClinicalService.class)).addAppender(appender);
+        return appender;
+    }
+
+    private void releaseServiceLogs(ListAppender<ILoggingEvent> appender) {
+        ((Logger) LoggerFactory.getLogger(ClinicalService.class)).detachAppender(appender);
+        appender.stop();
     }
 
     private ProcessAppointmentCompletedCommand appointmentCompleted() {

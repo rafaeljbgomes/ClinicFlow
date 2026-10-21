@@ -1,5 +1,7 @@
 package com.clinicflow.clinical;
 
+import com.clinicflow.clinical.support.StubHttpServer;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -15,6 +17,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.client.EntityExchangeResult;
 import org.springframework.test.web.servlet.client.RestTestClient;
@@ -44,6 +48,13 @@ class ClinicalApiIT {
     private static final UUID PATIENT_ID = UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
     private static final UUID OTHER_PSYCHOLOGIST_ID = UUID.fromString("dddddddd-dddd-dddd-dddd-dddddddddddd");
     private static final UUID OTHER_PATIENT_ID = UUID.fromString("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee");
+    private static final UUID SECOND_PATIENT_ID = UUID.fromString("ffffffff-ffff-ffff-ffff-ffffffffffff");
+    private static final UUID UNVERIFIABLE_PATIENT_ID = UUID.fromString("99999999-9999-9999-9999-999999999999");
+    private static final UUID APPOINTMENT_ID = UUID.fromString("11111111-1111-1111-1111-111111111111");
+    private static final UUID SECOND_PATIENT_APPOINTMENT_ID = UUID.fromString("22222222-2222-2222-2222-222222222222");
+    // Real HTTP stand-ins for patient-service and appointment-service; each answers per caller token.
+    private static final StubHttpServer PATIENT_SERVICE = StubHttpServer.start();
+    private static final StubHttpServer APPOINTMENT_SERVICE = StubHttpServer.start();
 
     @Container
     @ServiceConnection(name = "postgres")
@@ -51,6 +62,18 @@ class ClinicalApiIT {
             org.testcontainers.utility.DockerImageName
                     .parse("postgres:16.14-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777")
                     .asCompatibleSubstituteFor("postgres"));
+
+    @DynamicPropertySource
+    static void neighbourServices(DynamicPropertyRegistry registry) {
+        registry.add("clinicflow.services.patient.base-url", PATIENT_SERVICE::baseUrl);
+        registry.add("clinicflow.services.appointment.base-url", APPOINTMENT_SERVICE::baseUrl);
+    }
+
+    @AfterAll
+    static void stopNeighbourServices() {
+        PATIENT_SERVICE.close();
+        APPOINTMENT_SERVICE.close();
+    }
 
     @Autowired private RestTestClient http;
     @Autowired private JdbcTemplate jdbc;
@@ -64,6 +87,132 @@ class ClinicalApiIT {
         when(jwtDecoder.decode("patient-token")).thenReturn(jwt("patient-token", "PATIENT", PSYCHOLOGIST_ID));
         when(jwtDecoder.decode("other-psychologist-token"))
                 .thenReturn(jwt("other-psychologist-token", "PSYCHOLOGIST", OTHER_PSYCHOLOGIST_ID));
+        arrangeNeighbourServices();
+    }
+
+    @Test
+    void caseCreationAsksPatientServiceWithTheCallerToken() {
+        // Arrange
+        Map<String, Object> request = Map.of(
+                "patientId", PATIENT_ID.toString(), "presentingConcern", "Anxiety and avoidance");
+
+        // Act
+        exchange("/clinical-cases", HttpMethod.POST, request);
+
+        // Assert
+        assertThat(PATIENT_SERVICE.requests()).singleElement().satisfies(sent -> {
+            assertThat(sent.method()).isEqualTo("HEAD");
+            assertThat(sent.path()).isEqualTo("/patients/" + PATIENT_ID);
+            assertThat(sent.authorization()).isEqualTo("Bearer psychologist-token");
+        });
+    }
+
+    @Test
+    void rejectsClinicalCaseForAnotherPsychologistsPatient() {
+        // Arrange
+        Map<String, Object> request = Map.of(
+                "patientId", OTHER_PATIENT_ID.toString(), "presentingConcern", "Anxiety and avoidance");
+
+        // Act
+        var response = exchange("/clinical-cases", HttpMethod.POST, request);
+
+        // Assert
+        assertProblem(response, HttpStatus.NOT_FOUND, "patient_not_found");
+    }
+
+    @Test
+    void rejectedForeignPatientCaseStoresNothing() {
+        // Arrange
+        Map<String, Object> request = Map.of(
+                "patientId", OTHER_PATIENT_ID.toString(), "presentingConcern", "Anxiety and avoidance");
+
+        // Act
+        exchange("/clinical-cases", HttpMethod.POST, request);
+
+        // Assert
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM clinical_cases", Long.class)).isZero();
+    }
+
+    @Test
+    void caseCreationFailsClosedWhenPatientServiceCannotVerifyOwnership() {
+        // Arrange
+        Map<String, Object> request = Map.of(
+                "patientId", UNVERIFIABLE_PATIENT_ID.toString(), "presentingConcern", "Anxiety and avoidance");
+
+        // Act
+        var response = exchange("/clinical-cases", HttpMethod.POST, request);
+
+        // Assert
+        assertProblem(response, HttpStatus.SERVICE_UNAVAILABLE, "ownership_check_unavailable");
+    }
+
+    @Test
+    void linksSessionRecordToTheCallersAppointmentForTheCasePatient() {
+        // Arrange
+        String caseId = createCase("psychologist-token", PATIENT_ID);
+
+        // Act
+        var response = exchange("/clinical-cases/" + caseId + "/session-records", HttpMethod.POST,
+                linkedSession(APPOINTMENT_ID));
+
+        // Assert
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.CREATED);
+        assertThat(response.getResponseBody()).containsEntry("appointmentId", APPOINTMENT_ID.toString());
+    }
+
+    @Test
+    void rejectsSessionLinkToAnotherPsychologistsAppointment() {
+        // Arrange
+        String attackerCaseId = createCase("other-psychologist-token", OTHER_PATIENT_ID);
+
+        // Act
+        var response = exchange("/clinical-cases/" + attackerCaseId + "/session-records", HttpMethod.POST,
+                new HttpEntity<>(linkedSession(APPOINTMENT_ID), bearer("other-psychologist-token")), Map.class);
+
+        // Assert
+        assertProblem(response, HttpStatus.NOT_FOUND, "appointment_not_found");
+    }
+
+    @Test
+    void foreignAppointmentLinkCannotClaimTheOwnersCompletionRecord() {
+        // Arrange
+        String attackerCaseId = createCase("other-psychologist-token", OTHER_PATIENT_ID);
+
+        // Act
+        exchange("/clinical-cases/" + attackerCaseId + "/session-records", HttpMethod.POST,
+                new HttpEntity<>(linkedSession(APPOINTMENT_ID), bearer("other-psychologist-token")), Map.class);
+
+        // Assert
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM session_records WHERE appointment_id = ?::uuid",
+                Long.class, APPOINTMENT_ID.toString())).isZero();
+    }
+
+    @Test
+    void rejectsSessionLinkToAppointmentOfAnotherPatient() {
+        // Arrange
+        String caseId = createCase("psychologist-token", PATIENT_ID);
+
+        // Act
+        var response = exchange("/clinical-cases/" + caseId + "/session-records", HttpMethod.POST,
+                linkedSession(SECOND_PATIENT_APPOINTMENT_ID));
+
+        // Assert
+        assertProblem(response, HttpStatus.BAD_REQUEST, "appointment_patient_mismatch");
+    }
+
+    @Test
+    void rejectsSecondSessionRecordForTheSameAppointment() {
+        // Arrange
+        String caseId = createCase("psychologist-token", PATIENT_ID);
+        arrangeStep("link first session record", exchange("/clinical-cases/" + caseId + "/session-records",
+                HttpMethod.POST, linkedSession(APPOINTMENT_ID)), HttpStatus.CREATED);
+
+        // Act
+        var response = exchange("/clinical-cases/" + caseId + "/session-records", HttpMethod.POST,
+                linkedSession(APPOINTMENT_ID));
+
+        // Assert
+        assertProblem(response, HttpStatus.CONFLICT, "appointment_already_recorded");
     }
 
     @Test
@@ -295,7 +444,37 @@ class ClinicalApiIT {
         var response = signAs("other-psychologist-token", sessionId);
 
         // Assert
-        assertThat(response.getStatus()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertProblem(response, HttpStatus.NOT_FOUND, "clinical_resource_not_found");
+    }
+
+    @Test
+    void anotherPsychologistsCaseLooksExactlyLikeAMissingOne() {
+        // Arrange
+        String caseId = createCase("psychologist-token", PATIENT_ID);
+        var other = new HttpEntity<>(bearer("other-psychologist-token"));
+        var missing = exchange("/clinical-cases/" + UUID.randomUUID(), HttpMethod.GET, other, Map.class);
+
+        // Act
+        var foreign = exchange("/clinical-cases/" + caseId, HttpMethod.GET, other, Map.class);
+
+        // Assert
+        assertThat(foreign.getStatus()).isEqualTo(HttpStatus.NOT_FOUND).isEqualTo(missing.getStatus());
+        assertThat(withoutRequestFields(foreign.getResponseBody()))
+                .isEqualTo(withoutRequestFields(missing.getResponseBody()));
+    }
+
+    @Test
+    void anotherPsychologistsNoteLooksExactlyLikeAMissingOne() {
+        // Arrange
+        String sessionId = createSession(createCase("psychologist-token", PATIENT_ID), "Initial formulation");
+        var missing = signAs("other-psychologist-token", UUID.randomUUID().toString());
+
+        // Act
+        var foreign = signAs("other-psychologist-token", sessionId);
+
+        // Assert
+        assertThat(withoutRequestFields(foreign.getResponseBody()))
+                .isEqualTo(withoutRequestFields(missing.getResponseBody()));
     }
 
     @Test
@@ -483,6 +662,32 @@ class ClinicalApiIT {
         return body;
     }
 
+    private Map<String, Object> linkedSession(UUID appointmentId) {
+        Map<String, Object> body = newSession("Linked session");
+        body.put("appointmentId", appointmentId.toString());
+        return body;
+    }
+
+    private static void arrangeNeighbourServices() {
+        PATIENT_SERVICE.reset();
+        APPOINTMENT_SERVICE.reset();
+        PATIENT_SERVICE.replyTo("psychologist-token", "HEAD", "/patients/" + PATIENT_ID, 200, "");
+        PATIENT_SERVICE.replyTo("psychologist-token", "HEAD", "/patients/" + SECOND_PATIENT_ID, 200, "");
+        PATIENT_SERVICE.replyTo("other-psychologist-token", "HEAD", "/patients/" + OTHER_PATIENT_ID, 200, "");
+        PATIENT_SERVICE.reply("HEAD", "/patients/" + UNVERIFIABLE_PATIENT_ID, 500);
+        APPOINTMENT_SERVICE.replyTo("psychologist-token", "GET", "/appointments/" + APPOINTMENT_ID, 200,
+                appointmentJson(APPOINTMENT_ID, PATIENT_ID));
+        APPOINTMENT_SERVICE.replyTo("psychologist-token", "GET", "/appointments/" + SECOND_PATIENT_APPOINTMENT_ID,
+                200, appointmentJson(SECOND_PATIENT_APPOINTMENT_ID, SECOND_PATIENT_ID));
+    }
+
+    private static String appointmentJson(UUID appointmentId, UUID patientId) {
+        return """
+                {"id":"%s","psychologistId":"%s","patientId":"%s","scheduledAt":"2099-06-12T10:00:00Z",
+                 "status":"COMPLETED","type":"ONLINE","cancellationReason":null}
+                """.formatted(appointmentId, PSYCHOLOGIST_ID, patientId);
+    }
+
     private static EntityExchangeResult<Map> arrangeStep(String step, EntityExchangeResult<Map> response,
                                                          HttpStatus expected) {
         if (response.getStatus().value() != expected.value()) {
@@ -544,6 +749,14 @@ class ClinicalApiIT {
     private <T> EntityExchangeResult<T> exchange(String path, HttpMethod method, HttpEntity<?> request, Class<T> type) {
         var spec = http.method(method).uri(path).headers(headers -> headers.addAll(request.getHeaders()));
         return (request.hasBody() ? spec.body(request.getBody()) : spec).exchange().returnResult(type);
+    }
+
+    // Everything except the per-request instance and correlation id must match.
+    private static Map<?, ?> withoutRequestFields(Map<?, ?> problem) {
+        Map<Object, Object> copy = new java.util.HashMap<>(problem);
+        copy.remove("instance");
+        copy.remove("correlationId");
+        return copy;
     }
 
     private HttpHeaders bearer(String token) {

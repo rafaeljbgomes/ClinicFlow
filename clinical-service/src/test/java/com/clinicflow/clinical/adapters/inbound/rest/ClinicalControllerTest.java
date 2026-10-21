@@ -2,6 +2,11 @@ package com.clinicflow.clinical.adapters.inbound.rest;
 
 import com.clinicflow.clinical.application.ClinicalService;
 import com.clinicflow.clinical.application.exceptions.ActiveClinicalCaseExistsException;
+import com.clinicflow.clinical.application.exceptions.AppointmentAlreadyRecordedException;
+import com.clinicflow.clinical.application.exceptions.AppointmentNotFoundException;
+import com.clinicflow.clinical.application.exceptions.AppointmentPatientMismatchException;
+import com.clinicflow.clinical.application.exceptions.OwnershipCheckUnavailableException;
+import com.clinicflow.clinical.application.exceptions.PatientNotFoundException;
 import com.clinicflow.clinical.application.results.CareGoalResult;
 import com.clinicflow.clinical.application.results.CarePlanResult;
 import com.clinicflow.clinical.application.results.ClinicalCaseResult;
@@ -78,6 +83,24 @@ class ClinicalControllerTest {
         return Stream.of(
                 Arguments.of(new SignedSessionRecordException(), HttpStatus.CONFLICT, "session_record_signed"),
                 Arguments.of(new InvalidNoteTransitionException(), HttpStatus.BAD_REQUEST, "invalid_note_transition"));
+    }
+
+    static Stream<Arguments> caseCreationOwnershipFailures() {
+        return Stream.of(
+                Arguments.of(new PatientNotFoundException(), HttpStatus.NOT_FOUND, "patient_not_found"),
+                Arguments.of(new OwnershipCheckUnavailableException("down"), HttpStatus.SERVICE_UNAVAILABLE,
+                        "ownership_check_unavailable"));
+    }
+
+    static Stream<Arguments> sessionAppointmentLinkFailures() {
+        return Stream.of(
+                Arguments.of(new AppointmentNotFoundException(), HttpStatus.NOT_FOUND, "appointment_not_found"),
+                Arguments.of(new AppointmentPatientMismatchException(), HttpStatus.BAD_REQUEST,
+                        "appointment_patient_mismatch"),
+                Arguments.of(new AppointmentAlreadyRecordedException(), HttpStatus.CONFLICT,
+                        "appointment_already_recorded"),
+                Arguments.of(new OwnershipCheckUnavailableException("down"), HttpStatus.SERVICE_UNAVAILABLE,
+                        "ownership_check_unavailable"));
     }
 
     static Stream<Arguments> sessionSignLockFailures() {
@@ -339,6 +362,46 @@ class ClinicalControllerTest {
         // Assert
         response.andExpect(status().isConflict())
                 .andExpect(jsonPath("$.title").value("Active clinical case exists"));
+    }
+
+    @ParameterizedTest(name = "case creation failure {0} maps to {2}")
+    @MethodSource("caseCreationOwnershipFailures")
+    void mapsCaseCreationOwnershipFailureToStableProblemCode(RuntimeException failure, HttpStatus expectedStatus,
+                                                             String expectedCode) throws Exception {
+        // Arrange
+        when(clinicalService.createClinicalCase(any())).thenThrow(failure);
+        var request = post("/clinical-cases").with(psychologist())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(NEW_CASE);
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().is(expectedStatus.value()))
+                .andExpect(jsonPath("$.code").value(expectedCode));
+    }
+
+    @ParameterizedTest(name = "appointment link failure {0} maps to {2}")
+    @MethodSource("sessionAppointmentLinkFailures")
+    void mapsSessionAppointmentLinkFailureToStableProblemCode(RuntimeException failure, HttpStatus expectedStatus,
+                                                              String expectedCode) throws Exception {
+        // Arrange
+        when(clinicalService.createSessionRecord(any())).thenThrow(failure);
+        var request = post("/clinical-cases/{id}/session-records", CASE_ID).with(psychologist())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"appointmentId":"dddddddd-dddd-dddd-dddd-dddddddddddd",
+                         "sessionDate":"2026-06-01T10:00:00Z","modality":"ONLINE",
+                         "durationMinutes":50,"attendanceStatus":"ATTENDED"}
+                        """);
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().is(expectedStatus.value()))
+                .andExpect(jsonPath("$.code").value(expectedCode));
     }
 
     @ParameterizedTest(name = "update failure {0} maps to {2}")
