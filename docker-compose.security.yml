@@ -1,5 +1,6 @@
 # Last override after docker-compose.yml and docker-compose.ci.yml.
-# No security target publishes host ports or uses workstation secrets.
+# No security target publishes host ports or uses workstation TLS or JWT material; database and
+# broker logins come from the generated, Git-ignored credential files (ADR-026).
 services:
   certificate-bootstrap:
     image: alpine/openssl:3.5.8@sha256:3f25da71f70eba788067daac3f3df03bd1de7a7c52ed89fa93b94ad2c92d986b

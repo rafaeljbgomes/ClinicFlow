@@ -22,3 +22,6 @@ deploy/jenkins/secrets/
 secrets/edge/
 
 __pycache__/
+
+secrets/platform/
+secrets/services/

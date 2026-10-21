@@ -53,6 +53,18 @@ function Assert-HelmCompatibility {
     Write-Host "Using supported Helm version $version."
 }
 
+function Set-SecretFromEnvFile {
+    # Creates or updates a Secret from a generated env file and returns the file's SHA-256, which the
+    # charts put on the pod template so a rotated password rolls the pods (ADR-026).
+    param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][string]$Path)
+
+    $manifest = & kubectl create secret generic $Name "--from-env-file=$Path" --namespace $Namespace --dry-run=client -o yaml
+    if ($LASTEXITCODE -ne 0) { throw "Failed to generate the $Name Secret manifest." }
+    $manifest | & kubectl apply -f - | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Failed to apply the $Name Secret." }
+    return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
+}
+
 function Invoke-Checked {
     # A simple function keeps native flags such as kubectl's -o out of
     # PowerShell's common-parameter binding (OutVariable/OutBuffer).
@@ -156,6 +168,17 @@ try {
         throw "Failed to apply the clinicflow-jwt Secret."
     }
 
+    # Keeps existing passwords and generates only missing ones; -Rotate on that script replaces them.
+    & (Join-Path $PSScriptRoot "generate-dev-credentials.ps1")
+    Write-Host "Creating or updating the platform administrator and per-service credential Secrets..."
+    $credentialChecksums = @{
+        postgres = Set-SecretFromEnvFile -Name clinicflow-postgres-admin -Path (Join-Path $repoRoot "secrets/platform/postgres.env")
+        rabbitmq = Set-SecretFromEnvFile -Name clinicflow-rabbitmq-admin -Path (Join-Path $repoRoot "secrets/platform/rabbitmq.env")
+    }
+    foreach ($credentialFile in Get-ChildItem (Join-Path $repoRoot "secrets/services") -Filter "*.env") {
+        $credentialChecksums[$credentialFile.BaseName] = Set-SecretFromEnvFile -Name "$($credentialFile.BaseName)-credentials" -Path $credentialFile.FullName
+    }
+
     if (-not $SkipObservability -and $Component -in @("All", "Platform")) {
         Write-Host "Installing or upgrading observability..."
         Invoke-Checked helm dependency update $observabilityChart
@@ -174,6 +197,8 @@ try {
         Invoke-Checked helm upgrade --install clinicflow-platform $platformChart `
             --namespace $Namespace `
             --values $platformValues `
+            --set-string "postgres.credentialsChecksum=$($credentialChecksums.postgres)" `
+            --set-string "rabbitmq.credentialsChecksum=$($credentialChecksums.rabbitmq)" `
             --rollback-on-failure `
             --wait=watcher `
             --server-side=false `
@@ -221,6 +246,7 @@ try {
         )
         if ($definition.Values) {
             $arguments += @("--values", (Join-Path $serviceValuesDirectory $definition.Values), "--set-string", "networkPolicy.gatewayNamespace=$IngressNamespace", "--set-string", "networkPolicy.monitoringNamespace=$MonitoringNamespace")
+            $arguments += @("--set-string", "credentials.checksum=$($credentialChecksums[$definition.Image])")
         }
 
         if ($componentName -eq 'Frontend') {

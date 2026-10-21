@@ -23,3 +23,7 @@ app.kubernetes.io/component: {{ .Values.name }}
 {{- printf "%s:%s" .Values.image.repository .Values.image.tag -}}
 {{- end -}}
 {{- end }}
+
+{{- define "clinicflow-service.credentialsSecretName" -}}
+{{- default (printf "%s-credentials" .Values.name) .Values.credentials.secretName -}}
+{{- end }}

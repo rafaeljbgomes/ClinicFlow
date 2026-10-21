@@ -14,6 +14,11 @@ spec:
       labels:
         {{- include "clinicflow-service.labels" . | nindent 8 }}
         app.kubernetes.io/component: {{ .Values.name }}
+      {{- with .Values.credentials.checksum }}
+      annotations:
+        # Rolls the pods when the externally created credentials Secret changes (ADR-026).
+        clinicflow.io/credentials-checksum: {{ . | quote }}
+      {{- end }}
     spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
@@ -31,36 +36,20 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "clinicflow-service.configName" . }}
+            # This service's own database (runtime and Flyway owner) and broker logins, provisioned
+            # by the platform bootstrap; no service receives another's or an administrator's (ADR-026).
+            - secretRef:
+                name: {{ include "clinicflow-service.credentialsSecretName" . }}
           env:
             - name: SPRING_PROFILES_ACTIVE
               value: kubernetes
             - name: SPRING_DATASOURCE_URL
               value: "jdbc:postgresql://{{ .Values.database.host }}:{{ .Values.database.port }}/{{ .Values.database.name }}"
-            - name: SPRING_DATASOURCE_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.database.secretName }}
-                  key: username
-            - name: SPRING_DATASOURCE_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.database.secretName }}
-                  key: password
             {{- if .Values.rabbitmq.enabled }}
             - name: SPRING_RABBITMQ_HOST
               value: {{ .Values.rabbitmq.host | quote }}
             - name: SPRING_RABBITMQ_PORT
               value: {{ .Values.rabbitmq.port | quote }}
-            - name: SPRING_RABBITMQ_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.rabbitmq.secretName }}
-                  key: username
-            - name: SPRING_RABBITMQ_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.rabbitmq.secretName }}
-                  key: password
             {{- end }}
             - name: CLINICFLOW_SECURITY_JWT_PUBLIC_KEY_PATH
               value: /run/secrets/clinicflow/jwt-public.pem
