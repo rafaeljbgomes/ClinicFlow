@@ -61,6 +61,13 @@ services:
       context: ./docker/postgres
       target: bootstrap
     image: clinicflow/postgres-bootstrap:local
+    # The credential files are owner-only (600, in a 700 directory) and owned by the host user, so
+    # UID 70 cannot read them on Linux. This one-shot psql client runs as root with every capability
+    # dropped except DAC_READ_SEARCH, which only lets it read them; it never starts PostgreSQL (ADR-028).
+    user: "0:0"
+    cap_drop: [ALL]
+    cap_add: [DAC_READ_SEARCH]
+    security_opt: [no-new-privileges:true]
     env_file:
       - path: ./secrets/platform/postgres.env
         required: false

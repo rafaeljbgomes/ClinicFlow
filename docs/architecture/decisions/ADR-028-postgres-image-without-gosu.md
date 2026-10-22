@@ -53,6 +53,12 @@ weekly PRs.
   are compatible, because the official image always initialised them as
   `postgres`. A volume created as another user would need its ownership
   changed.
+- Compose's `postgres-bootstrap` is the one exception to UID 70. It reads the
+  generated credential files, which are owner-only (600 in a 700 directory)
+  and owned by the host user, so on Linux UID 70 cannot open them. That
+  one-shot `psql` client runs as root with every capability dropped except
+  `DAC_READ_SEARCH` and with `no-new-privileges`. It never starts PostgreSQL,
+  so it does not need `gosu`. In Kubernetes the Job reads Secrets as UID 70.
 - The Testcontainers integration tests still use the official image. They are
   not part of the system scan, and Testcontainers starts it as root.
 - If upstream ships `gosu` with a current Go runtime, keeping the removal
