@@ -2,9 +2,13 @@ postgres:
   name: postgres
   image: postgres:16.15-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
   database: clinicflow
+  # Administrator login, used only by PostgreSQL itself and the platform bootstrap (ADR-026).
+  # Set password, or existingSecret naming a Secret with POSTGRES_USER and POSTGRES_PASSWORD.
   username: clinicflow
-  password: clinicflow
+  password: ""
   existingSecret: ""
+  # A digest of the administrator Secret; when it changes the pod restarts and re-applies the password.
+  credentialsChecksum: ""
   storage:
     size: 1Gi
   resources:
@@ -31,9 +35,13 @@ postgres:
 rabbitmq:
   name: rabbitmq
   image: rabbitmq:4.3.6-management-alpine@sha256:3505b6096cdbc083bcc363e74366f575ecd0c1a55be4dadcbc60fa08e34647e1
+  # Administrator login, used only by RabbitMQ itself and the platform bootstrap (ADR-026).
+  # Set password, or existingSecret naming a Secret with RABBITMQ_DEFAULT_USER and RABBITMQ_DEFAULT_PASS.
   username: clinicflow
-  password: clinicflow
+  password: ""
   existingSecret: ""
+  # A digest of the administrator Secret; when it changes the pod restarts and re-applies the password.
+  credentialsChecksum: ""
   storage:
     size: 1Gi
   resources:
@@ -48,6 +56,28 @@ rabbitmq:
     runAsNonRoot: true
     runAsUser: 100
     runAsGroup: 101
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+
+# Per-service identities (ADR-026). After every install and upgrade a Job creates or updates each
+# service listed in files/bootstrap/service-identities.conf: its PostgreSQL owner and runtime roles
+# and its RabbitMQ user. It reads them from the "<service>-credentials" Secrets, created outside the chart.
+bootstrap:
+  credentialsSecretSuffix: -credentials
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+  podSecurityContext:
+    runAsNonRoot: true
     seccompProfile:
       type: RuntimeDefault
   securityContext:

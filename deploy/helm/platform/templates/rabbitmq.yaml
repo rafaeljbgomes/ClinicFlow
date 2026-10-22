@@ -38,6 +38,10 @@ spec:
       labels:
         {{- include "clinicflow-platform.labels" . | nindent 8 }}
         app.kubernetes.io/component: rabbitmq
+      {{- with .Values.rabbitmq.credentialsChecksum }}
+      annotations:
+        clinicflow.io/credentials-checksum: {{ . | quote }}
+      {{- end }}
     spec:
       securityContext:
         {{- toYaml .Values.rabbitmq.podSecurityContext | nindent 8 }}
@@ -58,19 +62,17 @@ spec:
               containerPort: 15672
             - name: prometheus
               containerPort: 15692
+          envFrom:
+            - secretRef:
+                name: {{ include "clinicflow-platform.rabbitmqSecretName" . }}
           env:
             - name: RABBITMQ_ENABLED_PLUGINS_FILE
               value: /var/lib/rabbitmq/enabled_plugins
-            - name: RABBITMQ_DEFAULT_USER
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "clinicflow-platform.rabbitmqSecretName" . }}
-                  key: username
-            - name: RABBITMQ_DEFAULT_PASS
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "clinicflow-platform.rabbitmqSecretName" . }}
-                  key: password
+          lifecycle:
+            # Re-applies the administrator password on every start, so existing volumes pick up a rotation.
+            postStart:
+              exec:
+                command: ["sh", "/platform-bootstrap/sync-rabbitmq-admin.sh"]
           startupProbe:
             tcpSocket:
               port: amqp
@@ -95,9 +97,15 @@ spec:
               mountPath: /var/lib/rabbitmq
             - name: tmp
               mountPath: /tmp
+            - name: bootstrap
+              mountPath: /platform-bootstrap
+              readOnly: true
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: bootstrap
+          configMap:
+            name: {{ include "clinicflow-platform.bootstrapConfigName" . }}
   volumeClaimTemplates:
     - metadata:
         name: data

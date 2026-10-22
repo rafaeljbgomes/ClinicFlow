@@ -35,6 +35,8 @@ function Wait-HttpEndpoint {
 
 Push-Location $RepositoryRoot
 try {
+    # Per-service and platform administrator credentials (ADR-026); existing files are kept.
+    & (Join-Path $RepositoryRoot 'scripts/generate-dev-credentials.ps1')
     & docker compose --file docker-compose.yml --file docker-compose.ci.yml --project-name $ProjectName up --detach --build
     if ($LASTEXITCODE -ne 0) { throw "Isolated Compose startup failed." }
 

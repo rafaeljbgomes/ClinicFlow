@@ -14,13 +14,20 @@ database:
   name: clinicflow
   host: postgres
   port: 5432
-  secretName: clinicflow-platform-postgres
 
 rabbitmq:
   enabled: false
   host: rabbitmq
   port: 5672
-  secretName: clinicflow-platform-rabbitmq
+
+# This service's own logins (ADR-026), created outside the chart from the generated
+# secrets/services/<name>.env. The Secret holds SPRING_DATASOURCE_USERNAME/PASSWORD (runtime role),
+# SPRING_FLYWAY_USER/PASSWORD (owner role) and, for messaging services, SPRING_RABBITMQ_USERNAME/PASSWORD.
+credentials:
+  # Defaults to "<name>-credentials".
+  secretName: ""
+  # A digest of the Secret's content; when it changes the pods roll so they pick up rotated passwords.
+  checksum: ""
 
 jwt:
   issuer: clinicflow-auth

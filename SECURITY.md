@@ -53,8 +53,8 @@ Important trust boundaries are:
    packaging, and image operations. Fork pull requests run with a read-only
    token and no secrets.
 
-The local demo credentials, local database credentials, and generated JWT keys
-are development conveniences only. They must not be treated as production
+The local demo credentials, generated database and broker credentials, and
+generated JWT keys are development conveniences only. They must not be treated as production
 credentials or reused outside an isolated local environment.
 
 ## Security Invariants
@@ -84,6 +84,11 @@ The following properties must hold for supported behavior:
   payloads.
 - Each service owns its persistence boundary; cross-service access uses the
   documented API or event contract rather than shared database tables.
+- Each service connects with its own database and broker logins. Its runtime
+  role cannot change its schema or connect to another service's database, its
+  RabbitMQ user reaches only its own exchanges and queues, it may publish and
+  bind only its own routing keys, and no service
+  receives an administrator credential (ADR-026).
 - Kubernetes network policies restrict traffic to the documented frontend,
   service, database, broker, DNS, and monitoring flows.
 - CI changes must not silently broaden credentials, publish mutable artifacts,

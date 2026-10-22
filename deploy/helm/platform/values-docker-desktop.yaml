@@ -1,9 +1,7 @@
-# Local development credentials only. Use managed services and externally
-# provisioned Secrets before deploying outside Docker Desktop Kubernetes.
+# Local development only. scripts/deploy-local-kubernetes.ps1 creates these Secrets from the
+# Git-ignored files written by scripts/generate-dev-credentials.ps1 (ADR-026).
 postgres:
-  username: clinicflow
-  password: clinicflow
+  existingSecret: clinicflow-postgres-admin
 
 rabbitmq:
-  username: clinicflow
-  password: clinicflow
+  existingSecret: clinicflow-rabbitmq-admin

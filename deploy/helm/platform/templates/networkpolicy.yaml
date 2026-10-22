@@ -35,6 +35,7 @@ spec:
                   - appointment-service
                   - clinical-service
                   - notification-service
+                  - platform-bootstrap
       ports:
         - port: 5432
           protocol: TCP
@@ -65,11 +66,61 @@ spec:
       ports:
         - port: 5672
           protocol: TCP
+    # Only the platform bootstrap uses the management API; service users have no management tags.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: platform-bootstrap
+      ports:
+        - port: 15672
+          protocol: TCP
     - from:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: {{ .Values.networkPolicy.monitoringNamespace }}
       ports:
         - port: 15692
+          protocol: TCP
+---
+# The bootstrap Job reaches only DNS, PostgreSQL and the RabbitMQ management API (ADR-026).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: clinicflow-platform-bootstrap
+  labels:
+    {{- include "clinicflow-platform.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: platform-bootstrap
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: postgres
+      ports:
+        - port: 5432
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: rabbitmq
+      ports:
+        - port: 15672
           protocol: TCP
 {{- end }}

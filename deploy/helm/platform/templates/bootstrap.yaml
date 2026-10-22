@@ -1,0 +1,100 @@
+{{- $services := splitList "\n" (include "clinicflow-platform.bootstrapServices" . | trim) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "clinicflow-platform.bootstrapConfigName" . }}
+  labels:
+    {{- include "clinicflow-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: platform-bootstrap
+data:
+  {{- (.Files.Glob "files/bootstrap/*").AsConfig | nindent 2 }}
+---
+# Creates or updates every service's PostgreSQL roles and RabbitMQ user after each install and upgrade
+# (ADR-026). It is idempotent, so a rerun applies rotated passwords; a failure fails the release.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "clinicflow-platform.bootstrapConfigName" . }}
+  labels:
+    {{- include "clinicflow-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: platform-bootstrap
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        {{- include "clinicflow-platform.labels" . | nindent 8 }}
+        app.kubernetes.io/component: platform-bootstrap
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.bootstrap.podSecurityContext | nindent 8 }}
+      containers:
+        - name: postgres-roles
+          image: {{ .Values.postgres.image | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "/platform-bootstrap/provision-postgres.sh"]
+          securityContext:
+            {{- toYaml .Values.bootstrap.securityContext | nindent 12 }}
+            runAsUser: {{ .Values.postgres.podSecurityContext.runAsUser }}
+            runAsGroup: {{ .Values.postgres.podSecurityContext.runAsGroup }}
+          env:
+            - name: PGHOST
+              value: {{ .Values.postgres.name | quote }}
+            - name: PGDATABASE
+              value: {{ .Values.postgres.database | quote }}
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "clinicflow-platform.postgresSecretName" . }}
+                  key: POSTGRES_USER
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "clinicflow-platform.postgresSecretName" . }}
+                  key: POSTGRES_PASSWORD
+          resources:
+            {{- toYaml .Values.bootstrap.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "clinicflow-platform.bootstrapMounts" . | nindent 12 }}
+        - name: rabbitmq-users
+          image: {{ .Values.rabbitmq.image | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "/platform-bootstrap/provision-rabbitmq.sh"]
+          securityContext:
+            {{- toYaml .Values.bootstrap.securityContext | nindent 12 }}
+            runAsUser: {{ .Values.rabbitmq.podSecurityContext.runAsUser }}
+            runAsGroup: {{ .Values.rabbitmq.podSecurityContext.runAsGroup }}
+          env:
+            - name: RABBITMQADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "clinicflow-platform.rabbitmqSecretName" . }}
+                  key: RABBITMQ_DEFAULT_USER
+            - name: RABBITMQADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "clinicflow-platform.rabbitmqSecretName" . }}
+                  key: RABBITMQ_DEFAULT_PASS
+            - name: RABBITMQADMIN_TARGET_HOST
+              value: {{ .Values.rabbitmq.name | quote }}
+            - name: RABBITMQADMIN_TARGET_PORT
+              value: "15672"
+          resources:
+            {{- toYaml .Values.bootstrap.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "clinicflow-platform.bootstrapMounts" . | nindent 12 }}
+      volumes:
+        - name: bootstrap
+          configMap:
+            name: {{ include "clinicflow-platform.bootstrapConfigName" . }}
+        {{- range $services }}
+        - name: {{ . }}
+          secret:
+            secretName: {{ . }}{{ $.Values.bootstrap.credentialsSecretSuffix }}
+        {{- end }}
