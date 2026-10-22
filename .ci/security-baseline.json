@@ -435,6 +435,18 @@
     },
     {
       "component": "platform",
+      "target": "postgres",
+      "id": "CVE-2026-111943",
+      "package": "stdlib",
+      "version": "v1.24.6",
+      "owner": "rafaeljbgomes",
+      "reason": "Go runtime of gosu in the official postgres image; no upstream rebuild, and Kubernetes pods start as UID 70 without it.",
+      "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/35",
+      "reviewedAt": "2026-10-22",
+      "expiresAt": "2026-11-19"
+    },
+    {
+      "component": "platform",
       "target": "postgres-bootstrap",
       "id": "CVE-2025-61726",
       "package": "stdlib",
@@ -731,6 +743,18 @@
       "reason": "Go runtime of gosu in the official postgres image; no upstream rebuild, and Kubernetes pods start as UID 70 without it.",
       "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/35",
       "reviewedAt": "2026-10-20",
+      "expiresAt": "2026-11-19"
+    },
+    {
+      "component": "platform",
+      "target": "postgres-bootstrap",
+      "id": "CVE-2026-111943",
+      "package": "stdlib",
+      "version": "v1.24.6",
+      "owner": "rafaeljbgomes",
+      "reason": "Go runtime of gosu in the official postgres image; no upstream rebuild, and Kubernetes pods start as UID 70 without it.",
+      "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/35",
+      "reviewedAt": "2026-10-22",
       "expiresAt": "2026-11-19"
     }
   ]
