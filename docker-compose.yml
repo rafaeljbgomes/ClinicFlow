@@ -91,6 +91,8 @@ services:
     # Re-applies the administrator password on every start, so existing volumes pick up a rotation.
     post_start:
       - command: ["sh", "/platform-bootstrap/sync-rabbitmq-admin.sh"]
+        # rabbitmqctl must run as the node's user to share its Erlang cookie.
+        user: rabbitmq
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
       interval: 10s

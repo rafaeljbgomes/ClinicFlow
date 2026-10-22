@@ -4,9 +4,10 @@
 # trusts through its Erlang cookie. Rotating the administrator password is then: change the secret, restart.
 set -eu
 
-# The hook can start before the node process exists, which await_startup reports as an error at once.
+# The hook can start before the node exists. rabbitmqctl would then create the Erlang cookie itself,
+# and a cookie the node cannot read stops it from starting, so wait until the node has written one.
 attempt=1
-until rabbitmqctl --quiet await_startup --timeout 10 >/dev/null 2>&1; do
+until [ -s "${HOME:-/var/lib/rabbitmq}/.erlang.cookie" ] && rabbitmqctl --quiet await_startup --timeout 10 >/dev/null 2>&1; do
     if [ "$attempt" -ge 60 ]; then
         rabbitmqctl await_startup --timeout 10
         exit 1
