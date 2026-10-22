@@ -52,3 +52,9 @@ b5e7c4f6c2c8ea3e55985d1e53f4b692fbafadea:scripts/gateway/test-kubernetes-contrac
 5ca07c10128e06f103012b5815ccbb3741e2b92a:auth-service/src/test/java/com/clinicflow/auth/AuthApiIT.java:generic-password:36
 e03842936f19b73604003c0f9f8895d449d81afa:frontend/tests/e2e/clinicflow-smoke.spec.ts:generic-password:17
 e03842936f19b73604003c0f9f8895d449d81afa:frontend/tests/e2e/clinicflow-smoke.spec.ts:generic-password:51
+33d0eb84dab2ab2e259705b87e2587ff48114fac:docker-compose.yml:generic-password:71
+33d0eb84dab2ab2e259705b87e2587ff48114fac:docker-compose.yml:generic-password:115
+33d0eb84dab2ab2e259705b87e2587ff48114fac:scripts/generate-dev-credentials.ps1:generic-password:40
+33d0eb84dab2ab2e259705b87e2587ff48114fac:scripts/generate-dev-credentials.ps1:generic-password:51
+33d0eb84dab2ab2e259705b87e2587ff48114fac:scripts/generate-dev-credentials.ps1:generic-password:53
+33d0eb84dab2ab2e259705b87e2587ff48114fac:scripts/generate-dev-credentials.ps1:generic-password:58
