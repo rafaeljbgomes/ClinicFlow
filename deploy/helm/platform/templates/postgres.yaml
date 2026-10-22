@@ -46,6 +46,10 @@ spec:
       labels:
         {{- include "clinicflow-platform.labels" . | nindent 8 }}
         app.kubernetes.io/component: postgres
+      {{- with .Values.postgres.credentialsChecksum }}
+      annotations:
+        clinicflow.io/credentials-checksum: {{ . | quote }}
+      {{- end }}
     spec:
       securityContext:
         {{- toYaml .Values.postgres.podSecurityContext | nindent 8 }}
@@ -58,21 +62,19 @@ spec:
           ports:
             - name: postgres
               containerPort: 5432
+          envFrom:
+            - secretRef:
+                name: {{ include "clinicflow-platform.postgresSecretName" . }}
           env:
-            - name: POSTGRES_USER
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "clinicflow-platform.postgresSecretName" . }}
-                  key: username
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "clinicflow-platform.postgresSecretName" . }}
-                  key: password
             - name: POSTGRES_DB
               value: {{ .Values.postgres.database | quote }}
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
+          lifecycle:
+            # Re-applies the administrator password on every start, so existing volumes pick up a rotation.
+            postStart:
+              exec:
+                command: ["sh", "/platform-bootstrap/sync-postgres-admin.sh"]
           livenessProbe:
             exec:
               command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\""]
@@ -91,6 +93,9 @@ spec:
             - name: init
               mountPath: /docker-entrypoint-initdb.d
               readOnly: true
+            - name: bootstrap
+              mountPath: /platform-bootstrap
+              readOnly: true
             # Writable paths beside PGDATA on the read-only root filesystem.
             - name: run
               mountPath: /var/run/postgresql
@@ -104,6 +109,9 @@ spec:
         - name: init
           configMap:
             name: postgres-init
+        - name: bootstrap
+          configMap:
+            name: {{ include "clinicflow-platform.bootstrapConfigName" . }}
   volumeClaimTemplates:
     - metadata:
         name: data

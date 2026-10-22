@@ -91,6 +91,8 @@ try {
         $env:CLINICFLOW_FRONTEND_PORT
     ) | ForEach-Object { [int]$_ }
     Wait-DockerHostPorts -HostName $RuntimeHost -Ports $HostPorts
+    # Per-service and platform administrator credentials (ADR-026); existing files are kept.
+    & (Join-Path $RepositoryRoot 'scripts/generate-dev-credentials.ps1')
     & docker compose --file docker-compose.yml --file docker-compose.ci.yml --project-name $ProjectName up --detach --no-build
     if ($LASTEXITCODE -ne 0) { throw "Isolated Compose startup failed." }
     foreach ($Service in @('auth-service','patient-service','appointment-service','clinical-service','notification-service')) {
