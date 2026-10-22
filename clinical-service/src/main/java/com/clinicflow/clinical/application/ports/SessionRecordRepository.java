@@ -15,5 +15,6 @@ public interface SessionRecordRepository {
     Optional<SessionRecord> findByAppointmentId(AppointmentId appointmentId);
     List<SessionRecord> findByClinicalCaseId(ClinicalCaseId clinicalCaseId);
     List<SessionRecord> findByPsychologistIdAndPatientId(PsychologistId psychologistId, PatientId patientId);
-    void save(SessionRecord sessionRecord);
+    // Returns the stored record, including the version persistence assigned.
+    SessionRecord save(SessionRecord sessionRecord);
 }

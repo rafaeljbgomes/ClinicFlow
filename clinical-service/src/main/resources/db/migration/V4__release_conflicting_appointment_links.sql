@@ -19,7 +19,9 @@ CREATE TABLE session_record_link_conflicts (
 CREATE INDEX idx_session_record_link_conflicts_appointment ON session_record_link_conflicts (appointment_id);
 
 -- Signed rows stay final (ADR-019) with one exception: clearing an appointment link that has a conflict entry
--- above. Nothing else in the row may change in the same statement, so note content and signature are untouched.
+-- above. The only other change allowed in the same statement is the one-step version increment persistence makes
+-- on every update (ADR-024), so readers of the old revision get a stale-version answer. Note content and
+-- signature are untouched.
 CREATE OR REPLACE FUNCTION reject_signed_session_record_change() RETURNS trigger
     LANGUAGE plpgsql AS
 $$
@@ -32,7 +34,8 @@ BEGIN
         IF NEW IS DISTINCT FROM OLD AND NOT (
                 OLD.appointment_id IS NOT NULL
                 AND NEW.appointment_id IS NULL
-                AND to_jsonb(NEW) - 'appointment_id' = to_jsonb(OLD) - 'appointment_id'
+                AND NEW.version = OLD.version + 1
+                AND to_jsonb(NEW) - 'appointment_id' - 'version' = to_jsonb(OLD) - 'appointment_id' - 'version'
                 AND EXISTS (SELECT 1
                             FROM session_record_link_conflicts conflict
                             WHERE conflict.session_record_id = OLD.id

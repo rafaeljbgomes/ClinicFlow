@@ -12,18 +12,22 @@ import com.clinicflow.clinical.domain.PracticeProfile;
 import com.clinicflow.clinical.domain.SessionRecord;
 import org.mapstruct.Mapper;
 
+import java.util.Optional;
+
 @Mapper(config = MapperConfiguration.class)
 public abstract class ClinicalApplicationMapper {
     public PracticeProfileResult toResult(PracticeProfile profile) {
         return new PracticeProfileResult(profile.psychologistId().value(), profile.professionalRegistration(),
                 profile.timezone().getId(), profile.defaultSessionDurationMinutes(), profile.primaryLocation(),
-                profile.telehealthEnabled(), profile.createdAt(), profile.updatedAt());
+                profile.telehealthEnabled(), profile.createdAt(), profile.updatedAt(),
+                profile.version().orElse(null));
     }
 
     public ClinicalCaseResult toResult(ClinicalCase clinicalCase) {
         return new ClinicalCaseResult(clinicalCase.id().value(), clinicalCase.psychologistId().value(),
                 clinicalCase.patientId().value(), clinicalCase.presentingConcern(), clinicalCase.status(),
-                clinicalCase.openedAt(), clinicalCase.closedAt(), clinicalCase.createdAt(), clinicalCase.updatedAt());
+                clinicalCase.openedAt(), clinicalCase.closedAt(), clinicalCase.createdAt(), clinicalCase.updatedAt(),
+                storedVersion(clinicalCase.version()));
     }
 
     public CarePlanResult toResult(CarePlan carePlan) {
@@ -31,7 +35,7 @@ public abstract class ClinicalApplicationMapper {
                 carePlan.psychologistId().value(), carePlan.patientId().value(), carePlan.therapeuticFocus(),
                 carePlan.plannedFrequency(), carePlan.reviewDate(),
                 carePlan.goals().stream().map(this::toResult).toList(),
-                carePlan.createdAt(), carePlan.updatedAt());
+                carePlan.createdAt(), carePlan.updatedAt(), storedVersion(carePlan.version()));
     }
 
     public CareGoalResult toResult(CareGoal goal) {
@@ -47,6 +51,10 @@ public abstract class ClinicalApplicationMapper {
                 session.modality(), session.durationMinutes(), session.attendanceStatus(), session.noteStatus(),
                 session.summary(), session.focusAreas(), session.interventions(), session.homework(),
                 session.nextSteps(), session.createdAt(), session.updatedAt(), session.signedAt().orElse(null),
-                session.signedBy().map(id -> id.value()).orElse(null));
+                session.signedBy().map(id -> id.value()).orElse(null), storedVersion(session.version()));
+    }
+
+    private static long storedVersion(Optional<Long> version) {
+        return version.orElseThrow(() -> new IllegalStateException("Record has not been saved"));
     }
 }

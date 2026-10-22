@@ -1,9 +1,15 @@
 package com.clinicflow.appointment;
 
 import com.clinicflow.appointment.application.AppointmentService;
+import com.clinicflow.appointment.application.commands.CancelAppointmentCommand;
+import com.clinicflow.appointment.application.commands.CompleteAppointmentCommand;
 import com.clinicflow.appointment.application.commands.ScheduleAppointmentCommand;
+import com.clinicflow.appointment.application.exceptions.StaleResourceVersionException;
+import com.clinicflow.appointment.application.ports.AppointmentRepository;
 import com.clinicflow.appointment.domain.AppointmentDate;
+import com.clinicflow.appointment.domain.AppointmentId;
 import com.clinicflow.appointment.domain.AppointmentType;
+import com.clinicflow.appointment.domain.CancellationReason;
 import com.clinicflow.appointment.domain.PatientId;
 import com.clinicflow.appointment.domain.PsychologistId;
 import com.clinicflow.appointment.support.StubHttpServer;
@@ -36,8 +42,16 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
@@ -80,6 +94,7 @@ class AppointmentApiIT {
     @Autowired private RestTestClient http;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private AppointmentService appointmentService;
+    @Autowired private AppointmentRepository appointmentRepository;
     @Autowired private TransactionTemplate transactions;
     @MockitoBean private JwtDecoder jwtDecoder;
 
@@ -190,7 +205,9 @@ class AppointmentApiIT {
     void anotherPsychologistCannotCancelTheAppointment() {
         // Arrange
         String id = scheduleAppointment(inThreeDays());
-        var request = new HttpEntity<>(Map.of("reason", "Probe"), bearer("other-psychologist-token"));
+        HttpHeaders headers = bearer("other-psychologist-token");
+        headers.setIfMatch("\"0\"");
+        var request = new HttpEntity<>(Map.of("reason", "Probe"), headers);
 
         // Act
         var response = exchange("/appointments/" + id + "/cancel", HttpMethod.PATCH, request, Map.class);
@@ -222,7 +239,7 @@ class AppointmentApiIT {
 
         // Act
         var response = exchange("/appointments/" + id + "/reschedule", HttpMethod.PATCH,
-                Map.of("newDate", newDate.toString()));
+                Map.of("newDate", newDate.toString()), "\"0\"");
 
         // Assert
         assertThat(response.getStatus()).isEqualTo(HttpStatus.OK);
@@ -238,7 +255,7 @@ class AppointmentApiIT {
 
         // Act
         exchange("/appointments/" + id + "/reschedule", HttpMethod.PATCH,
-                Map.of("newDate", scheduledAt.plus(1, ChronoUnit.DAYS).toString()));
+                Map.of("newDate", scheduledAt.plus(1, ChronoUnit.DAYS).toString()), "\"0\"");
 
         // Assert
         assertThat(outboxEventCount()).isEqualTo(2);
@@ -250,11 +267,73 @@ class AppointmentApiIT {
         String id = scheduleAppointment(inThreeDays());
 
         // Act
-        var response = exchange("/appointments/" + id + "/complete", HttpMethod.PATCH, null);
+        var response = exchange("/appointments/" + id + "/complete", HttpMethod.PATCH, null, "\"0\"");
 
         // Assert
         assertThat(response.getStatus()).isEqualTo(HttpStatus.OK);
-        assertThat(response.getResponseBody()).containsEntry("status", "COMPLETED");
+        assertThat(response.getResponseBody()).containsEntry("status", "COMPLETED").containsEntry("version", 1);
+        assertThat(response.getResponseHeaders().getETag()).isEqualTo("\"1\"");
+    }
+
+    @Test
+    void completionWithoutIfMatchIsPreconditionRequiredAndRecordsNothing() {
+        // Arrange
+        String id = scheduleAppointment(inThreeDays());
+
+        // Act
+        var response = exchange("/appointments/" + id + "/complete", HttpMethod.PATCH, null);
+
+        // Assert
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.PRECONDITION_REQUIRED);
+        assertThat(outboxEventCount()).isOne();
+    }
+
+    @Test
+    void staleCompletionIsPreconditionFailedAndRecordsNothing() {
+        // Arrange
+        Instant scheduledAt = inThreeDays();
+        String id = scheduleAppointment(scheduledAt);
+        var rescheduled = exchange("/appointments/" + id + "/reschedule", HttpMethod.PATCH,
+                Map.of("newDate", scheduledAt.plus(1, ChronoUnit.DAYS).toString()), "\"0\"");
+        if (rescheduled.getStatus().value() != HttpStatus.OK.value()) {
+            throw new IllegalStateException("Arrange step \"reschedule\" returned " + rescheduled.getStatus());
+        }
+
+        // Act
+        var response = exchange("/appointments/" + id + "/complete", HttpMethod.PATCH, null, "\"0\"");
+
+        // Assert
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.PRECONDITION_FAILED);
+        assertThat(response.getResponseBody()).containsEntry("code", "stale_resource_version");
+        assertThat(jdbc.queryForObject("SELECT status FROM appointments WHERE id = ?::uuid", String.class, id))
+                .isEqualTo("RESCHEDULED");
+        assertThat(outboxEventCount()).isEqualTo(2);
+    }
+
+    // Completing and cancelling the same appointment at once must not record both outcomes: one transaction
+    // wins, the other is rolled back with its outbox event, and the stored status matches the recorded event.
+    @Test
+    void concurrentCompleteAndCancelRecordExactlyOneOutcome() throws Exception {
+        // Arrange
+        UUID id = UUID.fromString(scheduleAppointment(inThreeDays()));
+        AppointmentId appointmentId = new AppointmentId(id);
+        PsychologistId owner = new PsychologistId(PSYCHOLOGIST_ID);
+
+        // Act
+        List<Throwable> outcomes = racingFromTheSameRead(appointmentId,
+                () -> appointmentService.complete(new CompleteAppointmentCommand(owner, appointmentId, 0)),
+                () -> appointmentService.cancel(new CancelAppointmentCommand(owner, appointmentId,
+                        new CancellationReason("Patient cancelled"), 0)));
+
+        // Assert
+        assertThat(outcomes).filteredOn(Objects::isNull).hasSize(1);
+        assertThat(outcomes).filteredOn(Objects::nonNull).singleElement()
+                .isInstanceOf(StaleResourceVersionException.class);
+        String status = jdbc.queryForObject("SELECT status FROM appointments WHERE id = ?", String.class, id);
+        List<String> outcomeEvents = jdbc.queryForList(
+                "SELECT routing_key FROM outbox_events WHERE routing_key <> 'appointment.scheduled'", String.class);
+        assertThat(outcomeEvents).containsExactly(
+                "COMPLETED".equals(status) ? "appointment.completed" : "appointment.cancelled");
     }
 
     @Test
@@ -263,7 +342,7 @@ class AppointmentApiIT {
         String id = scheduleAppointment(inThreeDays());
 
         // Act
-        exchange("/appointments/" + id + "/complete", HttpMethod.PATCH, null);
+        exchange("/appointments/" + id + "/complete", HttpMethod.PATCH, null, "\"0\"");
 
         // Assert
         assertThat(outboxEventCount()).isEqualTo(2);
@@ -400,6 +479,45 @@ class AppointmentApiIT {
 
     private EntityExchangeResult<Map> exchange(String path, HttpMethod method, Object body) {
         return exchange(path, method, new HttpEntity<>(body, bearer("psychologist-token")), Map.class);
+    }
+
+    private EntityExchangeResult<Map> exchange(String path, HttpMethod method, Object body, String ifMatch) {
+        HttpHeaders headers = bearer("psychologist-token");
+        headers.setIfMatch(ifMatch);
+        return exchange(path, method, new HttpEntity<>(body, headers), Map.class);
+    }
+
+    // Each writer loads the appointment in its own transaction, waits until both have read it, then runs its
+    // command in that transaction, so the service sees the same snapshot and only the database can tell.
+    private List<Throwable> racingFromTheSameRead(AppointmentId id, Runnable first, Runnable second)
+            throws Exception {
+        CyclicBarrier bothLoaded = new CyclicBarrier(2);
+        ExecutorService writers = Executors.newFixedThreadPool(2);
+        try {
+            List<Future<Throwable>> futures = new ArrayList<>();
+            for (Runnable writer : List.of(first, second)) {
+                futures.add(writers.submit(() -> catchThrowable(() -> transactions.executeWithoutResult(status -> {
+                    appointmentRepository.findById(id).orElseThrow();
+                    await(bothLoaded);
+                    writer.run();
+                }))));
+            }
+            List<Throwable> outcomes = new ArrayList<>();
+            for (Future<Throwable> future : futures) {
+                outcomes.add(future.get(30, TimeUnit.SECONDS));
+            }
+            return outcomes;
+        } finally {
+            writers.shutdownNow();
+        }
+    }
+
+    private static void await(CyclicBarrier barrier) {
+        try {
+            barrier.await(10, TimeUnit.SECONDS);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Concurrent writers did not meet", ex);
+        }
     }
 
     private <T> EntityExchangeResult<T> exchange(String path, HttpMethod method, HttpEntity<?> request, Class<T> type) {

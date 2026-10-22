@@ -14,6 +14,7 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
@@ -29,10 +30,17 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.reset;
@@ -279,11 +287,33 @@ class ClinicalApiIT {
                 "telehealthEnabled", true);
 
         // Act
-        var response = exchange("/practice-profile", HttpMethod.PUT, request);
+        var response = putPracticeProfile(request, "If-None-Match", "*");
 
         // Assert
         assertThat(response.getStatus()).isEqualTo(HttpStatus.OK);
-        assertThat(response.getResponseBody()).containsEntry("professionalRegistration", "OPP 12345");
+        assertThat(response.getResponseBody()).containsEntry("professionalRegistration", "OPP 12345")
+                .containsEntry("version", 0);
+    }
+
+    @Test
+    void practiceProfileSaveWithoutAPreconditionIsPreconditionRequired() {
+        // Act
+        var response = exchange("/practice-profile", HttpMethod.PUT, practiceProfile("OPP 12345"));
+
+        // Assert
+        assertProblem(response, HttpStatus.PRECONDITION_REQUIRED, "precondition_required");
+    }
+
+    // Two first saves at once: one creates the profile, the other is told it is stale, never a 500.
+    @Test
+    void concurrentFirstPracticeProfileSavesLetExactlyOneWin() throws Exception {
+        // Act
+        List<HttpStatus> statuses = concurrently(
+                () -> putPracticeProfile(practiceProfile("OPP 11111"), "If-None-Match", "*").getStatus(),
+                () -> putPracticeProfile(practiceProfile("OPP 22222"), "If-None-Match", "*").getStatus());
+
+        // Assert
+        assertThat(statuses).containsExactlyInAnyOrder(HttpStatus.OK, HttpStatus.PRECONDITION_FAILED);
     }
 
     @Test
@@ -312,6 +342,116 @@ class ClinicalApiIT {
         // Assert
         assertThat(response.getStatus()).isEqualTo(HttpStatus.OK);
         assertThat(goalIds(response.getResponseBody())).hasSize(1);
+    }
+
+    @Test
+    void stalePlanReplacementKeepsGoalsAddedSinceTheFormWasOpened() {
+        // Arrange
+        String caseId = createCase("psychologist-token", PATIENT_ID);
+        var created = arrangeStep("create plan", putCarePlan("psychologist-token", caseId, List.of(Map.of(
+                "description", "First goal", "status", "IN_PROGRESS", "progressPercentage", 10))), HttpStatus.OK);
+        Map<String, Object> firstGoal = Map.of("id", goalIds(created.getResponseBody()).getFirst(),
+                "description", "First goal", "status", "IN_PROGRESS", "progressPercentage", 10);
+        arrangeStep("add a goal in another tab", putCarePlan("psychologist-token", caseId, List.of(firstGoal,
+                Map.of("description", "Second goal", "status", "NOT_STARTED", "progressPercentage", 0))),
+                HttpStatus.OK);
+
+        // Act
+        var response = carePlanPut("psychologist-token", caseId, List.of(firstGoal), "If-Match", "\"0\"");
+
+        // Assert
+        assertProblem(response, HttpStatus.PRECONDITION_FAILED, "stale_resource_version");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM care_goals", Integer.class)).isEqualTo(2);
+    }
+
+    @Test
+    void secondFirstSaveOfACarePlanIsPreconditionFailed() {
+        // Arrange
+        String caseId = createCase("psychologist-token", PATIENT_ID);
+        List<Map<String, Object>> goals = List.of(Map.of(
+                "description", "Goal", "status", "IN_PROGRESS", "progressPercentage", 10));
+        arrangeStep("create plan", carePlanPut("psychologist-token", caseId, goals, "If-None-Match", "*"),
+                HttpStatus.OK);
+
+        // Act
+        var response = carePlanPut("psychologist-token", caseId, goals, "If-None-Match", "*");
+
+        // Assert
+        assertProblem(response, HttpStatus.PRECONDITION_FAILED, "stale_resource_version");
+    }
+
+    @Test
+    void caseReadReturnsTheVersionAsEntityTag() {
+        // Arrange
+        String caseId = createCase("psychologist-token", PATIENT_ID);
+
+        // Act
+        var response = exchange("/clinical-cases/" + caseId, HttpMethod.GET, null);
+
+        // Assert
+        assertThat(response.getResponseHeaders().getETag()).isEqualTo("\"0\"");
+    }
+
+    @Test
+    void staleSessionEditIsPreconditionFailedAndKeepsTheNewerText() {
+        // Arrange
+        String sessionId = createSession(createCase("psychologist-token", PATIENT_ID), "Initial formulation");
+        arrangeStep("edit in another tab", editSessionAt(sessionId, "\"0\"", sessionUpdate("DRAFT", "Newer text")),
+                HttpStatus.OK);
+
+        // Act
+        var response = editSessionAt(sessionId, "\"0\"", sessionUpdate("DRAFT", "Older text"));
+
+        // Assert
+        assertProblem(response, HttpStatus.PRECONDITION_FAILED, "stale_resource_version");
+        assertThat(storedSession(sessionId)).containsEntry("summary", "Newer text");
+    }
+
+    @Test
+    void sessionEditWithoutIfMatchIsPreconditionRequired() {
+        // Arrange
+        String sessionId = createSession(createCase("psychologist-token", PATIENT_ID), "Initial formulation");
+
+        // Act
+        var response = exchange("/session-records/" + sessionId, HttpMethod.PATCH,
+                sessionUpdate("DRAFT", "Unversioned edit"));
+
+        // Assert
+        assertProblem(response, HttpStatus.PRECONDITION_REQUIRED, "precondition_required");
+    }
+
+    // The psychologist reviewed revision 0; a newer revision saved elsewhere must not be signed in its place.
+    @Test
+    void signingAStaleRevisionLeavesTheNoteDraft() {
+        // Arrange
+        String sessionId = createSession(createCase("psychologist-token", PATIENT_ID), "Reviewed text");
+        arrangeStep("edit in another tab", editSessionAt(sessionId, "\"0\"", sessionUpdate("DRAFT", "Unreviewed text")),
+                HttpStatus.OK);
+
+        // Act
+        var response = signAt("psychologist-token", sessionId, "\"0\"");
+
+        // Assert
+        assertProblem(response, HttpStatus.PRECONDITION_FAILED, "stale_resource_version");
+        assertThat(storedSession(sessionId)).containsEntry("note_status", "DRAFT").containsEntry("signed_at", null);
+    }
+
+    // Signing and editing the same revision at once: one wins, and a signed note always holds the reviewed text.
+    @Test
+    void concurrentSignAndEditOfTheSameRevisionLetExactlyOneWin() throws Exception {
+        // Arrange
+        String sessionId = createSession(createCase("psychologist-token", PATIENT_ID), "Reviewed text");
+
+        // Act
+        List<HttpStatus> statuses = concurrently(
+                () -> signAt("psychologist-token", sessionId, "\"0\"").getStatus(),
+                () -> editSessionAt(sessionId, "\"0\"", sessionUpdate("DRAFT", "Unreviewed text")).getStatus());
+
+        // Assert
+        assertThat(statuses).containsExactlyInAnyOrder(HttpStatus.OK, HttpStatus.PRECONDITION_FAILED);
+        Map<String, Object> stored = storedSession(sessionId);
+        assertThat(stored.get("summary")).isEqualTo(
+                "SIGNED".equals(stored.get("note_status")) ? "Reviewed text" : "Unreviewed text");
     }
 
     @Test
@@ -481,7 +621,7 @@ class ClinicalApiIT {
         String sessionId = createSession(createCase("psychologist-token", PATIENT_ID), "Initial formulation");
 
         // Act
-        var response = exchange("/session-records/" + sessionId, HttpMethod.PATCH,
+        var response = editSession(sessionId,
                 sessionUpdate("SIGNED", "Initial formulation"));
 
         // Assert
@@ -589,7 +729,7 @@ class ClinicalApiIT {
         String sessionId = signedSession();
 
         // Act
-        var response = exchange("/session-records/" + sessionId, HttpMethod.PATCH,
+        var response = editSession(sessionId,
                 sessionUpdate(noteStatus, summary));
 
         // Assert
@@ -603,7 +743,7 @@ class ClinicalApiIT {
         Map<String, Object> signedRow = storedSession(sessionId);
 
         // Act
-        exchange("/session-records/" + sessionId, HttpMethod.PATCH, sessionUpdate("DRAFT", "Rewritten after signing"));
+        editSession(sessionId, sessionUpdate("DRAFT", "Rewritten after signing"));
 
         // Assert
         assertThat(storedSession(sessionId)).isEqualTo(signedRow);
@@ -686,14 +826,77 @@ class ClinicalApiIT {
 
     private String draftWithoutSummary() {
         String pendingId = createSession(createCase("psychologist-token", PATIENT_ID), null);
-        arrangeStep("move note to draft", exchange("/session-records/" + pendingId, HttpMethod.PATCH,
+        arrangeStep("move note to draft", editSession(pendingId,
                 sessionUpdate("DRAFT", null)), HttpStatus.OK);
         return pendingId;
     }
 
+    // Signs the revision that is stored now, like a psychologist who just reviewed it.
     private EntityExchangeResult<Map> signAs(String token, String sessionId) {
+        return signAt(token, sessionId, versionTag("session_records", "id", sessionId));
+    }
+
+    private EntityExchangeResult<Map> signAt(String token, String sessionId, String ifMatch) {
+        HttpHeaders headers = bearer(token);
+        headers.setIfMatch(ifMatch);
         return exchange("/session-records/" + sessionId + "/sign", HttpMethod.POST,
-                new HttpEntity<>(null, bearer(token)), Map.class);
+                new HttpEntity<>(null, headers), Map.class);
+    }
+
+    private EntityExchangeResult<Map> editSession(String sessionId, Map<String, Object> update) {
+        return editSessionAt(sessionId, versionTag("session_records", "id", sessionId), update);
+    }
+
+    private EntityExchangeResult<Map> editSessionAt(String sessionId, String ifMatch, Map<String, Object> update) {
+        HttpHeaders headers = bearer("psychologist-token");
+        headers.setIfMatch(ifMatch);
+        return exchange("/session-records/" + sessionId, HttpMethod.PATCH, new HttpEntity<>(update, headers),
+                Map.class);
+    }
+
+    // The stored version as an entity tag; an unknown row gets "0" so the request still reaches the lookup.
+    private String versionTag(String table, String column, String id) {
+        List<Long> versions = jdbc.queryForList(
+                "SELECT version FROM " + table + " WHERE " + column + " = ?::uuid", Long.class, id);
+        return "\"" + (versions.isEmpty() ? 0 : versions.getFirst()) + "\"";
+    }
+
+    private Map<String, Object> practiceProfile(String registration) {
+        return Map.of(
+                "professionalRegistration", registration,
+                "timezone", "Europe/Lisbon",
+                "defaultSessionDurationMinutes", 50,
+                "primaryLocation", "Lisbon",
+                "telehealthEnabled", true);
+    }
+
+    private EntityExchangeResult<Map> putPracticeProfile(Map<String, Object> profile, String header, String value) {
+        HttpHeaders headers = bearer("psychologist-token");
+        headers.set(header, value);
+        return exchange("/practice-profile", HttpMethod.PUT, new HttpEntity<>(profile, headers), Map.class);
+    }
+
+    // Starts both requests together, so they race for the same stored version.
+    private List<HttpStatus> concurrently(Callable<HttpStatusCode> first, Callable<HttpStatusCode> second)
+            throws Exception {
+        CyclicBarrier start = new CyclicBarrier(2);
+        ExecutorService clients = Executors.newFixedThreadPool(2);
+        try {
+            List<Future<HttpStatusCode>> futures = new ArrayList<>();
+            for (Callable<HttpStatusCode> request : List.of(first, second)) {
+                futures.add(clients.submit(() -> {
+                    start.await(10, TimeUnit.SECONDS);
+                    return request.call();
+                }));
+            }
+            List<HttpStatus> statuses = new ArrayList<>();
+            for (Future<HttpStatusCode> future : futures) {
+                statuses.add(HttpStatus.valueOf(future.get(30, TimeUnit.SECONDS).value()));
+            }
+            return statuses;
+        } finally {
+            clients.shutdownNow();
+        }
     }
 
     private String createSession(String caseId, String summary) {
@@ -794,13 +997,24 @@ class ClinicalApiIT {
         return response.getResponseBody().get("id").toString();
     }
 
+    // Creates the plan when the case has none, otherwise replaces the stored version.
     private EntityExchangeResult<Map> putCarePlan(String token, String caseId,
                                                                      List<Map<String, Object>> goals) {
+        List<Long> versions = jdbc.queryForList(
+                "SELECT version FROM care_plans WHERE clinical_case_id = ?::uuid", Long.class, caseId);
+        return versions.isEmpty() ? carePlanPut(token, caseId, goals, "If-None-Match", "*")
+                : carePlanPut(token, caseId, goals, "If-Match", "\"" + versions.getFirst() + "\"");
+    }
+
+    private EntityExchangeResult<Map> carePlanPut(String token, String caseId, List<Map<String, Object>> goals,
+                                                  String header, String value) {
+        HttpHeaders headers = bearer(token);
+        headers.set(header, value);
         return exchange("/clinical-cases/" + caseId + "/care-plan", HttpMethod.PUT, new HttpEntity<>(Map.of(
                 "therapeuticFocus", "Reduce avoidance",
                 "plannedFrequency", "Weekly",
                 "reviewDate", LocalDate.now().plusMonths(1).toString(),
-                "goals", goals), bearer(token)), Map.class);
+                "goals", goals), headers), Map.class);
     }
 
     private List<String> goalIds(Map<?, ?> carePlan) {

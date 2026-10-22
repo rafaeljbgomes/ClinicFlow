@@ -33,7 +33,8 @@ public abstract class PatientPersistenceMapper {
                 patient.consentUpdatedAt(),
                 patient.status(),
                 patient.createdAt(),
-                patient.updatedAt()
+                patient.updatedAt(),
+                patient.version().orElse(null)
         );
     }
 
@@ -54,7 +55,8 @@ public abstract class PatientPersistenceMapper {
                 entity.consentUpdatedAt(),
                 entity.status(),
                 entity.createdAt(),
-                entity.updatedAt()
+                entity.updatedAt(),
+                entity.version()
         );
     }
 }

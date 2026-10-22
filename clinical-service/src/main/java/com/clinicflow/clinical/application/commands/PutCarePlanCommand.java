@@ -8,5 +8,6 @@ import java.util.List;
 
 public record PutCarePlanCommand(PsychologistId psychologistId, ClinicalCaseId clinicalCaseId,
                                  String therapeuticFocus, String plannedFrequency, LocalDate reviewDate,
-                                 List<CareGoalInput> goals) {
+                                 List<CareGoalInput> goals, Long expectedVersion) {
+    // A null expected version means the caller expects to create the plan (If-None-Match: *).
 }

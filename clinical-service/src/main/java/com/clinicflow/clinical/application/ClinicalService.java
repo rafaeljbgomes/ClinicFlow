@@ -18,6 +18,7 @@ import com.clinicflow.clinical.application.exceptions.ClinicalAccessDeniedExcept
 import com.clinicflow.clinical.application.exceptions.ClinicalCaseNotFoundException;
 import com.clinicflow.clinical.application.exceptions.PatientNotFoundException;
 import com.clinicflow.clinical.application.exceptions.SessionRecordNotFoundException;
+import com.clinicflow.clinical.application.exceptions.StaleResourceVersionException;
 import com.clinicflow.clinical.application.mapping.ClinicalApplicationMapper;
 import com.clinicflow.clinical.application.ports.AppointmentDirectory;
 import com.clinicflow.clinical.application.ports.CarePlanRepository;
@@ -61,6 +62,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -104,15 +106,16 @@ public class ClinicalService {
     @Transactional
     public PracticeProfileResult updatePracticeProfile(UpdatePracticeProfileCommand command) {
         Instant now = Instant.now();
-        PracticeProfile profile = practiceProfiles.findByPsychologistId(command.psychologistId())
+        Optional<PracticeProfile> existingProfile = practiceProfiles.findByPsychologistId(command.psychologistId());
+        requireVersion(existingProfile.flatMap(PracticeProfile::version), command.expectedVersion());
+        PracticeProfile profile = existingProfile
                 .map(existing -> existing.update(command.professionalRegistration(), command.timezone(),
                         command.defaultSessionDurationMinutes(), command.primaryLocation(),
                         command.telehealthEnabled(), now))
                 .orElseGet(() -> PracticeProfile.create(command.psychologistId(), command.professionalRegistration(),
                         command.timezone(), command.defaultSessionDurationMinutes(), command.primaryLocation(),
                         command.telehealthEnabled(), now));
-        practiceProfiles.save(profile);
-        return mapper.toResult(profile);
+        return mapper.toResult(practiceProfiles.save(profile));
     }
 
     @Transactional
@@ -126,8 +129,7 @@ public class ClinicalService {
         }
         ClinicalCase clinicalCase = ClinicalCase.create(new ClinicalCaseId(UUID.randomUUID()),
                 command.psychologistId(), command.patientId(), command.presentingConcern(), Instant.now());
-        clinicalCases.save(clinicalCase);
-        return mapper.toResult(clinicalCase);
+        return mapper.toResult(clinicalCases.save(clinicalCase));
     }
 
     @Transactional(readOnly = true)
@@ -154,9 +156,9 @@ public class ClinicalService {
     @Transactional
     public ClinicalCaseResult changeClinicalCaseStatus(ChangeClinicalCaseStatusCommand command) {
         ClinicalCase clinicalCase = requireOwnedCase(command.psychologistId(), command.clinicalCaseId());
+        requireVersion(clinicalCase.version(), command.expectedVersion());
         clinicalCase.changeStatus(command.status(), Instant.now());
-        clinicalCases.save(clinicalCase);
-        return mapper.toResult(clinicalCase);
+        return mapper.toResult(clinicalCases.save(clinicalCase));
     }
 
     @Transactional
@@ -164,6 +166,7 @@ public class ClinicalService {
         ClinicalCase clinicalCase = requireOwnedCase(command.psychologistId(), command.clinicalCaseId());
         Instant now = Instant.now();
         Optional<CarePlan> existingPlan = carePlans.findByClinicalCaseId(clinicalCase.id());
+        requireVersion(existingPlan.flatMap(CarePlan::version), command.expectedVersion());
         Set<CareGoalId> ownedGoalIds = existingPlan
                 .map(plan -> plan.goals().stream().map(CareGoal::id).collect(Collectors.toSet()))
                 .orElseGet(Set::of);
@@ -173,8 +176,7 @@ public class ClinicalService {
                         command.reviewDate(), goals, now))
                 .orElseGet(() -> CarePlan.create(new CarePlanId(UUID.randomUUID()), clinicalCase,
                         command.therapeuticFocus(), command.plannedFrequency(), command.reviewDate(), goals, now));
-        carePlans.save(carePlan);
-        return mapper.toResult(carePlan);
+        return mapper.toResult(carePlans.save(carePlan));
     }
 
     @Transactional(readOnly = true)
@@ -195,8 +197,7 @@ public class ClinicalService {
                 command.homework(), command.nextSteps(), Instant.now());
         conflictingHolder.ifPresent(holder -> releaseConflictingLink(holder, clinicalCase.psychologistId(),
                 clinicalCase.patientId(), LinkConflictSource.MANUAL_LINK));
-        sessionRecords.save(session);
-        return mapper.toResult(session);
+        return mapper.toResult(sessionRecords.save(session));
     }
 
     @Transactional(readOnly = true)
@@ -208,6 +209,7 @@ public class ClinicalService {
     @Transactional
     public SessionRecordResult updateSessionRecord(UpdateSessionRecordCommand command) {
         SessionRecord session = requireOwnedSession(command.psychologistId(), command.sessionRecordId());
+        requireVersion(session.version(), command.expectedVersion());
         if (command.clinicalCaseId() != null) {
             ClinicalCase clinicalCase = requireOwnedCase(command.psychologistId(), command.clinicalCaseId());
             if (!clinicalCase.patientId().equals(session.patientId())) {
@@ -217,16 +219,15 @@ public class ClinicalService {
         session.update(command.clinicalCaseId(), command.sessionDate(), command.modality(), command.durationMinutes(),
                 command.attendanceStatus(), command.noteStatus(), command.summary(), command.focusAreas(),
                 command.interventions(), command.homework(), command.nextSteps(), Instant.now());
-        sessionRecords.save(session);
-        return mapper.toResult(session);
+        return mapper.toResult(sessionRecords.save(session));
     }
 
     @Transactional
     public SessionRecordResult signSessionRecord(SignSessionRecordCommand command) {
         SessionRecord session = requireOwnedSession(command.psychologistId(), command.sessionRecordId());
+        requireVersion(session.version(), command.expectedVersion());
         session.sign(command.psychologistId(), Instant.now());
-        sessionRecords.save(session);
-        return mapper.toResult(session);
+        return mapper.toResult(sessionRecords.save(session));
     }
 
     @Transactional
@@ -283,6 +284,14 @@ public class ClinicalService {
             throw new SessionRecordNotFoundException();
         }
         return session;
+    }
+
+    // Runs after the ownership check, so another psychologist's record still looks missing, never stale.
+    // An empty current version with a null expectation is a create that expected no record (If-None-Match: *).
+    private static void requireVersion(Optional<Long> currentVersion, Long expectedVersion) {
+        if (!Objects.equals(currentVersion.orElse(null), expectedVersion)) {
+            throw new StaleResourceVersionException();
+        }
     }
 
     // Ownership is checked before the local uniqueness check so a foreign appointment id reveals nothing.

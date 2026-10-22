@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { ErrorAlert } from "@/components/error-alert";
 import { LoadingTable } from "@/components/loading-table";
 import { SectionHeader } from "@/components/section-header";
+import { STALE_VERSION_MESSAGE, StaleVersionAlert } from "@/components/stale-version-alert";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -52,7 +53,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { apiFetch, swrFetcher } from "@/lib/api-client";
+import { apiFetch, isStaleVersion, swrFetcher } from "@/lib/api-client";
 import { formatDateTime, formatEnum } from "@/lib/format";
 import type { Appointment, AppointmentStatus, AppointmentType, Patient } from "@/lib/types";
 
@@ -106,9 +107,17 @@ export default function AppointmentsPage() {
   }
 
   async function complete(appointment: Appointment) {
-    await apiFetch<Appointment>(`/api/appointments/${appointment.id}/complete`, {
-      method: "PATCH",
-    });
+    try {
+      await apiFetch<Appointment>(`/api/appointments/${appointment.id}/complete`, {
+        method: "PATCH",
+        expectedVersion: appointment.version,
+      });
+    } catch (failure) {
+      if (!isStaleVersion(failure)) throw failure;
+      toast.error(`${STALE_VERSION_MESSAGE} Check the latest appointment and try again.`);
+      await appointments.mutate();
+      return;
+    }
     toast.success("Appointment completed. Review the clinical record for session notes.");
     await appointments.mutate();
   }
@@ -377,6 +386,12 @@ function ScheduleForm({
   );
 }
 
+// The appointment may have moved on (completed, cancelled), so reloading closes the dialog on the latest list.
+async function reload(setConflict: (conflict: boolean) => void, onDone: () => Promise<void>) {
+  setConflict(false);
+  await onDone();
+}
+
 function RescheduleDialog({
   appointment,
   onOpenChange,
@@ -390,19 +405,32 @@ function RescheduleDialog({
     resolver: zodResolver(rescheduleSchema),
     values: { newDate: "" },
   });
+  const [conflict, setConflict] = useState(false);
 
   async function submit(values: RescheduleValues) {
     if (!appointment) return;
-    await apiFetch<Appointment>(`/api/appointments/${appointment.id}/reschedule`, {
-      method: "PATCH",
-      body: { newDate: new Date(values.newDate).toISOString() },
-    });
+    try {
+      await apiFetch<Appointment>(`/api/appointments/${appointment.id}/reschedule`, {
+        method: "PATCH",
+        body: { newDate: new Date(values.newDate).toISOString() },
+        expectedVersion: appointment.version,
+      });
+    } catch (failure) {
+      if (!isStaleVersion(failure)) throw failure;
+      setConflict(true);
+      return;
+    }
     toast.success("Appointment rescheduled");
     await onDone();
   }
 
+  function changeOpen(open: boolean) {
+    if (!open) setConflict(false);
+    onOpenChange(open);
+  }
+
   return (
-    <Dialog open={!!appointment} onOpenChange={onOpenChange}>
+    <Dialog open={!!appointment} onOpenChange={changeOpen}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Reschedule session</DialogTitle>
@@ -410,6 +438,7 @@ function RescheduleDialog({
             Choose a new date and time for this session.
           </DialogDescription>
         </DialogHeader>
+        {conflict ? <StaleVersionAlert onReload={() => reload(setConflict, onDone)} /> : null}
         <form onSubmit={form.handleSubmit(submit)}>
           <FieldGroup>
             <Field data-invalid={!!form.formState.errors.newDate}>
@@ -445,19 +474,32 @@ function CancelDialog({
     resolver: zodResolver(cancelSchema),
     values: { reason: "" },
   });
+  const [conflict, setConflict] = useState(false);
 
   async function submit(values: CancelValues) {
     if (!appointment) return;
-    await apiFetch<Appointment>(`/api/appointments/${appointment.id}/cancel`, {
-      method: "PATCH",
-      body: values,
-    });
+    try {
+      await apiFetch<Appointment>(`/api/appointments/${appointment.id}/cancel`, {
+        method: "PATCH",
+        body: values,
+        expectedVersion: appointment.version,
+      });
+    } catch (failure) {
+      if (!isStaleVersion(failure)) throw failure;
+      setConflict(true);
+      return;
+    }
     toast.success("Appointment cancelled");
     await onDone();
   }
 
+  function changeOpen(open: boolean) {
+    if (!open) setConflict(false);
+    onOpenChange(open);
+  }
+
   return (
-    <Dialog open={!!appointment} onOpenChange={onOpenChange}>
+    <Dialog open={!!appointment} onOpenChange={changeOpen}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Cancel session</DialogTitle>
@@ -465,6 +507,7 @@ function CancelDialog({
             Store a short reason so the appointment history stays clear.
           </DialogDescription>
         </DialogHeader>
+        {conflict ? <StaleVersionAlert onReload={() => reload(setConflict, onDone)} /> : null}
         <form onSubmit={form.handleSubmit(submit)}>
           <FieldGroup>
             <Field data-invalid={!!form.formState.errors.reason}>

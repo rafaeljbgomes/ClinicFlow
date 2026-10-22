@@ -24,13 +24,15 @@ public final class SessionRecord {
     private Instant updatedAt;
     private Instant signedAt;
     private PsychologistId signedBy;
+    // Assigned and incremented by persistence; null until the record is first saved.
+    private final Long version;
 
     private SessionRecord(SessionRecordId id, ClinicalCaseId clinicalCaseId, PsychologistId psychologistId,
                           PatientId patientId, AppointmentId appointmentId, Instant sessionDate,
                           SessionModality modality, int durationMinutes, AttendanceStatus attendanceStatus,
                           NoteStatus noteStatus, String summary, String focusAreas, String interventions,
                           String homework, String nextSteps, Instant createdAt, Instant updatedAt,
-                          Instant signedAt, PsychologistId signedBy) {
+                          Instant signedAt, PsychologistId signedBy, Long version) {
         if (id == null || psychologistId == null || patientId == null || sessionDate == null
                 || modality == null || attendanceStatus == null || noteStatus == null
                 || createdAt == null || updatedAt == null) {
@@ -60,6 +62,7 @@ public final class SessionRecord {
         this.updatedAt = updatedAt;
         this.signedAt = signedAt;
         this.signedBy = signedBy;
+        this.version = version;
     }
 
     public static SessionRecord manual(SessionRecordId id, ClinicalCase clinicalCase, AppointmentId appointmentId,
@@ -69,7 +72,7 @@ public final class SessionRecord {
         NoteStatus noteStatus = summary == null || summary.isBlank() ? NoteStatus.PENDING_NOTE : NoteStatus.DRAFT;
         return new SessionRecord(id, clinicalCase.id(), clinicalCase.psychologistId(), clinicalCase.patientId(),
                 appointmentId, sessionDate, modality, durationMinutes, attendanceStatus, noteStatus, summary,
-                focusAreas, interventions, homework, nextSteps, now, now, null, null);
+                focusAreas, interventions, homework, nextSteps, now, now, null, null, null);
     }
 
     public static SessionRecord fromCompletedAppointment(SessionRecordId id, ClinicalCaseId clinicalCaseId,
@@ -78,7 +81,7 @@ public final class SessionRecord {
                                                         SessionModality modality, int durationMinutes, Instant now) {
         return new SessionRecord(id, clinicalCaseId, psychologistId, patientId, appointmentId, sessionDate,
                 modality, durationMinutes, AttendanceStatus.ATTENDED, NoteStatus.PENDING_NOTE,
-                null, null, null, null, null, now, now, null, null);
+                null, null, null, null, null, now, now, null, null, null);
     }
 
     public static SessionRecord rehydrate(SessionRecordId id, ClinicalCaseId clinicalCaseId,
@@ -87,10 +90,10 @@ public final class SessionRecord {
                                           int durationMinutes, AttendanceStatus attendanceStatus, NoteStatus noteStatus,
                                           String summary, String focusAreas, String interventions, String homework,
                                           String nextSteps, Instant createdAt, Instant updatedAt,
-                                          Instant signedAt, PsychologistId signedBy) {
+                                          Instant signedAt, PsychologistId signedBy, Long version) {
         return new SessionRecord(id, clinicalCaseId, psychologistId, patientId, appointmentId, sessionDate,
                 modality, durationMinutes, attendanceStatus, noteStatus, summary, focusAreas, interventions,
-                homework, nextSteps, createdAt, updatedAt, signedAt, signedBy);
+                homework, nextSteps, createdAt, updatedAt, signedAt, signedBy, version);
     }
 
     // Edits only move a note between PENDING_NOTE and DRAFT; signing is a separate, one-way action.
@@ -200,6 +203,7 @@ public final class SessionRecord {
     public Optional<PsychologistId> signedBy() {
         return Optional.ofNullable(signedBy).map(value -> new PsychologistId(value.value()));
     }
+    public Optional<Long> version() { return Optional.ofNullable(version); }
 
     @Override
     public boolean equals(Object other) {

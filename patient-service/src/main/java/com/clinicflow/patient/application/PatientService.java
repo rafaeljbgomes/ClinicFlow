@@ -4,6 +4,7 @@ import com.clinicflow.patient.application.commands.ChangePatientStatusCommand;
 import com.clinicflow.patient.application.commands.CreatePatientCommand;
 import com.clinicflow.patient.application.commands.UpdatePatientCommand;
 import com.clinicflow.patient.application.exceptions.PatientNotFoundException;
+import com.clinicflow.patient.application.exceptions.StaleResourceVersionException;
 import com.clinicflow.patient.application.mapping.PatientApplicationMapper;
 import com.clinicflow.patient.application.ports.PatientEventPublisher;
 import com.clinicflow.patient.application.ports.PatientRepository;
@@ -46,9 +47,9 @@ public class PatientService {
         Patient patient = Patient.create(new PatientId(UUID.randomUUID()), command.psychologistId(),
                 command.email(), command.fullName(), command.preferredName(), command.birthDate(),
                 command.phone(), command.emergencyContact(), contactPreference, command.consentStatus(), now);
-        patientRepository.save(patient);
-        eventPublisher.publish(PatientCreatedEvent.of(patient.id(), patient.psychologistId(), patient.email()));
-        return mapper.toResult(patient);
+        Patient saved = patientRepository.save(patient);
+        eventPublisher.publish(PatientCreatedEvent.of(saved.id(), saved.psychologistId(), saved.email()));
+        return mapper.toResult(saved);
     }
 
     @Transactional(readOnly = true)
@@ -65,20 +66,20 @@ public class PatientService {
     @Transactional
     public PatientResult update(UpdatePatientCommand command) {
         Patient patient = requireOwnedPatient(command.psychologistId(), command.patientId());
+        requireVersion(patient, command.expectedVersion());
         var contactPreference = command.contactPreference() == null
                 ? patient.contactPreference() : command.contactPreference();
         patient.update(command.fullName(), command.preferredName(), command.birthDate(), command.phone(),
                 command.emergencyContact(), contactPreference, command.consentStatus(), Instant.now());
-        patientRepository.save(patient);
-        return mapper.toResult(patient);
+        return mapper.toResult(patientRepository.save(patient));
     }
 
     @Transactional
     public PatientResult changeStatus(ChangePatientStatusCommand command) {
         Patient patient = requireOwnedPatient(command.psychologistId(), command.patientId());
+        requireVersion(patient, command.expectedVersion());
         patient.changeStatus(command.status(), Instant.now());
-        patientRepository.save(patient);
-        return mapper.toResult(patient);
+        return mapper.toResult(patientRepository.save(patient));
     }
 
     // Another psychologist's patient answers exactly like a missing one, so ids cannot be probed.
@@ -89,5 +90,12 @@ public class PatientService {
             throw new PatientNotFoundException();
         }
         return patient;
+    }
+
+    // Runs after the ownership check, so another psychologist's patient still looks missing, never stale.
+    private static void requireVersion(Patient patient, long expectedVersion) {
+        if (!patient.isAtVersion(expectedVersion)) {
+            throw new StaleResourceVersionException();
+        }
     }
 }

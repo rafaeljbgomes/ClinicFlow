@@ -7,6 +7,7 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -23,15 +24,18 @@ class JpaClinicalCaseEntity {
     @Column(name = "closed_at") private Instant closedAt;
     @Column(name = "created_at", nullable = false) private Instant createdAt;
     @Column(name = "updated_at", nullable = false) private Instant updatedAt;
+    // A wrapper type, so Spring Data persists a null version and merges anything else.
+    @Version @Column(nullable = false) private Long version;
 
     protected JpaClinicalCaseEntity() {}
 
     JpaClinicalCaseEntity(UUID id, UUID psychologistId, UUID patientId, String presentingConcern,
                           ClinicalCaseStatus status, Instant openedAt, Instant closedAt,
-                          Instant createdAt, Instant updatedAt) {
+                          Instant createdAt, Instant updatedAt, Long version) {
         this.id = id; this.psychologistId = psychologistId; this.patientId = patientId;
         this.presentingConcern = presentingConcern; this.status = status; this.openedAt = openedAt;
         this.closedAt = closedAt; this.createdAt = createdAt; this.updatedAt = updatedAt;
+        this.version = version;
     }
 
     UUID id() { return id; }
@@ -43,4 +47,5 @@ class JpaClinicalCaseEntity {
     Instant closedAt() { return closedAt; }
     Instant createdAt() { return createdAt; }
     Instant updatedAt() { return updatedAt; }
+    Long version() { return version; }
 }

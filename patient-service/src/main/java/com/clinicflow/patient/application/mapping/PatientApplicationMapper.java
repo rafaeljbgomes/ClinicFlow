@@ -27,7 +27,8 @@ public abstract class PatientApplicationMapper {
                 patient.consentUpdatedAt(),
                 patient.status(),
                 patient.createdAt(),
-                patient.updatedAt()
+                patient.updatedAt(),
+                patient.version().orElseThrow(() -> new IllegalStateException("Patient has not been saved"))
         );
     }
 }

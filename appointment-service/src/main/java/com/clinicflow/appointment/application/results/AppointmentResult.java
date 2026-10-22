@@ -7,5 +7,6 @@ import java.time.Instant;
 import java.util.UUID;
 
 public record AppointmentResult(UUID id, UUID psychologistId, UUID patientId, Instant scheduledAt,
-                                AppointmentStatus status, AppointmentType type, String cancellationReason) {
+                                AppointmentStatus status, AppointmentType type, String cancellationReason,
+                                long version) {
 }

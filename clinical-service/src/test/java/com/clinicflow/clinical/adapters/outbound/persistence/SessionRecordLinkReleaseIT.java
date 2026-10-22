@@ -74,16 +74,20 @@ class SessionRecordLinkReleaseIT {
         jdbc.execute("TRUNCATE TABLE session_record_link_conflicts, session_records");
     }
 
+    // Each statement bumps the version like persistence does, so only the named change can trip the trigger.
     static Stream<Arguments> changesBesideTheRecordedRelease() {
         return Stream.of(
                 Arguments.of("rewrite summary", "UPDATE session_records SET appointment_id = NULL, "
-                        + "summary = 'Rewritten' WHERE id = ?"),
+                        + "version = version + 1, summary = 'Rewritten' WHERE id = ?"),
                 Arguments.of("touch updated_at", "UPDATE session_records SET appointment_id = NULL, "
-                        + "updated_at = now() WHERE id = ?"),
-                Arguments.of("unsign", "UPDATE session_records SET appointment_id = NULL, note_status = 'DRAFT', "
-                        + "signed_at = NULL, signed_by = NULL WHERE id = ?"),
+                        + "version = version + 1, updated_at = now() WHERE id = ?"),
+                Arguments.of("unsign", "UPDATE session_records SET appointment_id = NULL, version = version + 1, "
+                        + "note_status = 'DRAFT', signed_at = NULL, signed_by = NULL WHERE id = ?"),
                 Arguments.of("relink to another appointment", "UPDATE session_records SET appointment_id = "
-                        + "gen_random_uuid() WHERE id = ?"),
+                        + "gen_random_uuid(), version = version + 1 WHERE id = ?"),
+                Arguments.of("keep the version", "UPDATE session_records SET appointment_id = NULL WHERE id = ?"),
+                Arguments.of("skip a version", "UPDATE session_records SET appointment_id = NULL, "
+                        + "version = version + 2 WHERE id = ?"),
                 Arguments.of("delete", "DELETE FROM session_records WHERE id = ?"));
     }
 
@@ -113,9 +117,25 @@ class SessionRecordLinkReleaseIT {
 
         // Assert
         Map<String, Object> after = row(claim.id());
-        before.remove("appointment_id");
-        after.remove("appointment_id");
+        for (String released : new String[] {"appointment_id", "version"}) {
+            before.remove(released);
+            after.remove(released);
+        }
         assertThat(after).isEqualTo(before);
+    }
+
+    @Test
+    void releaseMovesTheSignedRecordToItsNextVersion() {
+        // Arrange
+        SessionRecord claim = signedClaim();
+        long signedVersion = claim.version().orElseThrow();
+        conflicts.save(release(claim));
+
+        // Act
+        SessionRecord released = sessions.save(claim);
+
+        // Assert
+        assertThat(released.version()).contains(signedVersion + 1);
     }
 
     @Test
@@ -179,7 +199,8 @@ class SessionRecordLinkReleaseIT {
 
         // Act
         Throwable thrown = catchThrowable(() -> jdbc.update(
-                "UPDATE session_records SET appointment_id = NULL WHERE id = ?", claim.id().value()));
+                "UPDATE session_records SET appointment_id = NULL, version = version + 1 WHERE id = ?",
+                claim.id().value()));
 
         // Assert
         assertThat(sqlState(thrown)).isEqualTo("23L01");
@@ -218,7 +239,7 @@ class SessionRecordLinkReleaseIT {
         SessionRecord draft = SessionRecord.rehydrate(new SessionRecordId(UUID.randomUUID()), null, CLAIMANT,
                 CLAIMANT_PATIENT, new AppointmentId(UUID.randomUUID()), NOW, SessionModality.ONLINE, 50,
                 AttendanceStatus.ATTENDED, NoteStatus.DRAFT, "Signed summary", "Focus", null, null, null, NOW, NOW,
-                null, null);
+                null, null, null);
         sessions.save(draft);
         sessions.save(sessions.findById(draft.id()).orElseThrow().sign(CLAIMANT, NOW.plusSeconds(60)));
         return sessions.findById(draft.id()).orElseThrow();

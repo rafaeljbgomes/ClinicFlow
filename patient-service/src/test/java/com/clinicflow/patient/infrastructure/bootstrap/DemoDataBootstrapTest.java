@@ -17,6 +17,7 @@ import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -81,6 +82,21 @@ class DemoDataBootstrapTest {
     }
 
     @Test
+    void repeatedRunUpdatesTheStoredDemoPatients() throws Exception {
+        // Arrange
+        InMemoryPatientRepository patients = new InMemoryPatientRepository();
+        DemoDataBootstrap bootstrap = bootstrap(patients);
+        bootstrap.run(null);
+
+        // Act
+        bootstrap.run(null);
+
+        // Assert
+        assertThat(patients.records().values()).extracting(patient -> patient.version().orElseThrow())
+                .containsOnly(1L);
+    }
+
+    @Test
     void repeatedRunDoesNotDuplicateDemoPatients() throws Exception {
         // Arrange
         InMemoryPatientRepository patients = new InMemoryPatientRepository();
@@ -109,8 +125,18 @@ class DemoDataBootstrapTest {
         private final Map<PatientId, Patient> records = new LinkedHashMap<>();
 
         @Override
-        public void save(Patient patient) {
-            records.put(patient.id(), patient);
+        public Patient save(Patient patient) {
+            Long stored = Optional.ofNullable(records.get(patient.id())).flatMap(Patient::version).orElse(null);
+            if (!Objects.equals(stored, patient.version().orElse(null))) {
+                throw new IllegalStateException("Stale or duplicate patient " + patient.id().value());
+            }
+            Patient saved = Patient.rehydrate(patient.id(), patient.psychologistId(), patient.email(),
+                    patient.fullName(), patient.preferredName().orElse(null), patient.birthDate().orElse(null),
+                    patient.phone().orElse(null), patient.emergencyContact().orElse(null),
+                    patient.contactPreference(), patient.consentStatus(), patient.consentUpdatedAt(),
+                    patient.status(), patient.createdAt(), patient.updatedAt(), stored == null ? 0 : stored + 1);
+            records.put(saved.id(), saved);
+            return saved;
         }
 
         @Override

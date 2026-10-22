@@ -4,6 +4,7 @@ import com.clinicflow.patient.application.commands.ChangePatientStatusCommand;
 import com.clinicflow.patient.application.commands.CreatePatientCommand;
 import com.clinicflow.patient.application.commands.UpdatePatientCommand;
 import com.clinicflow.patient.application.exceptions.PatientNotFoundException;
+import com.clinicflow.patient.application.exceptions.StaleResourceVersionException;
 import com.clinicflow.patient.application.mapping.PatientApplicationMapper;
 import com.clinicflow.patient.application.ports.PatientEventPublisher;
 import com.clinicflow.patient.application.ports.PatientRepository;
@@ -41,6 +42,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -53,6 +55,7 @@ class PatientServiceTest {
             new PsychologistId(UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"));
     private static final PatientId PATIENT_ID =
             new PatientId(UUID.fromString("cccccccc-cccc-cccc-cccc-cccccccccccc"));
+    private static final long CURRENT_VERSION = 3;
 
     @Mock
     private PatientRepository repository;
@@ -64,6 +67,11 @@ class PatientServiceTest {
     @BeforeEach
     void setUp() {
         service = new PatientService(repository, publisher, Mappers.getMapper(PatientApplicationMapper.class));
+        // Like persistence: a new patient gets version 0, every save of a stored one increments it.
+        lenient().when(repository.save(any(Patient.class))).thenAnswer(call -> {
+            Patient saved = call.getArgument(0);
+            return withVersion(saved, saved.version().map(version -> version + 1).orElse(0L));
+        });
     }
 
     @Test
@@ -105,6 +113,18 @@ class PatientServiceTest {
         // Assert
         assertThat(result.id()).isEqualTo(savedPatient().id().value());
         assertThat(result.status()).isEqualTo(PatientStatus.ACTIVE);
+    }
+
+    @Test
+    void createReturnsTheFirstVersion() {
+        // Arrange
+        CreatePatientCommand command = completeCreateCommand();
+
+        // Act
+        var result = service.create(command);
+
+        // Assert
+        assertThat(result.version()).isZero();
     }
 
     @Test
@@ -185,6 +205,54 @@ class PatientServiceTest {
     }
 
     @Test
+    void updateReturnsTheVersionAssignedOnSave() {
+        // Arrange
+        when(repository.findById(PATIENT_ID)).thenReturn(Optional.of(patient()));
+
+        // Act
+        var result = service.update(phoneContactUpdate());
+
+        // Assert
+        assertThat(result.version()).isEqualTo(CURRENT_VERSION + 1);
+    }
+
+    @Test
+    void updateRejectsAStaleVersion() {
+        // Arrange
+        when(repository.findById(PATIENT_ID)).thenReturn(Optional.of(patient()));
+
+        // Act
+        Throwable thrown = catchThrowable(() -> service.update(update(OWNER, CURRENT_VERSION - 1)));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(StaleResourceVersionException.class);
+    }
+
+    @Test
+    void staleUpdateIsNeverSaved() {
+        // Arrange
+        when(repository.findById(PATIENT_ID)).thenReturn(Optional.of(patient()));
+
+        // Act
+        catchThrowable(() -> service.update(update(OWNER, CURRENT_VERSION - 1)));
+
+        // Assert
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void foreignPatientLooksMissingEvenWithAStaleVersion() {
+        // Arrange
+        when(repository.findById(PATIENT_ID)).thenReturn(Optional.of(patient()));
+
+        // Act
+        Throwable thrown = catchThrowable(() -> service.update(update(OTHER, CURRENT_VERSION - 1)));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(PatientNotFoundException.class);
+    }
+
+    @Test
     void keepsCurrentContactPreferenceWhenUpdateOmitsIt() {
         // Arrange
         when(repository.findById(PATIENT_ID)).thenReturn(Optional.of(patient()));
@@ -197,7 +265,8 @@ class PatientServiceTest {
                 null,
                 null,
                 null,
-                ConsentStatus.GRANTED
+                ConsentStatus.GRANTED,
+                CURRENT_VERSION
         );
 
         // Act
@@ -214,7 +283,7 @@ class PatientServiceTest {
         when(repository.findById(PATIENT_ID)).thenReturn(Optional.of(patient));
 
         // Act
-        service.changeStatus(new ChangePatientStatusCommand(OWNER, PATIENT_ID, PatientStatus.INACTIVE));
+        service.changeStatus(statusChange(OWNER, CURRENT_VERSION));
 
         // Assert
         verify(repository).save(patient);
@@ -226,11 +295,22 @@ class PatientServiceTest {
         when(repository.findById(PATIENT_ID)).thenReturn(Optional.of(patient()));
 
         // Act
-        var result = service.changeStatus(
-                new ChangePatientStatusCommand(OWNER, PATIENT_ID, PatientStatus.INACTIVE));
+        var result = service.changeStatus(statusChange(OWNER, CURRENT_VERSION));
 
         // Assert
         assertThat(result.status()).isEqualTo(PatientStatus.INACTIVE);
+    }
+
+    @Test
+    void changeStatusRejectsAStaleVersion() {
+        // Arrange
+        when(repository.findById(PATIENT_ID)).thenReturn(Optional.of(patient()));
+
+        // Act
+        Throwable thrown = catchThrowable(() -> service.changeStatus(statusChange(OWNER, CURRENT_VERSION + 1)));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(StaleResourceVersionException.class);
     }
 
     @Test
@@ -263,8 +343,7 @@ class PatientServiceTest {
         when(repository.findById(PATIENT_ID)).thenReturn(Optional.of(patient()));
 
         // Act
-        Throwable thrown = catchThrowable(() -> service.changeStatus(
-                new ChangePatientStatusCommand(OTHER, PATIENT_ID, PatientStatus.INACTIVE)));
+        Throwable thrown = catchThrowable(() -> service.changeStatus(statusChange(OTHER, CURRENT_VERSION)));
 
         // Assert
         assertThat(thrown).isInstanceOf(PatientNotFoundException.class);
@@ -276,8 +355,7 @@ class PatientServiceTest {
         when(repository.findById(PATIENT_ID)).thenReturn(Optional.of(patient()));
 
         // Act
-        catchThrowable(() -> service.changeStatus(
-                new ChangePatientStatusCommand(OTHER, PATIENT_ID, PatientStatus.INACTIVE)));
+        catchThrowable(() -> service.changeStatus(statusChange(OTHER, CURRENT_VERSION)));
 
         // Assert
         verify(repository, never()).save(any());
@@ -310,8 +388,12 @@ class PatientServiceTest {
     }
 
     private UpdatePatientCommand phoneContactUpdate() {
+        return update(OWNER, CURRENT_VERSION);
+    }
+
+    private UpdatePatientCommand update(PsychologistId psychologistId, long expectedVersion) {
         return new UpdatePatientCommand(
-                OWNER,
+                psychologistId,
                 PATIENT_ID,
                 new FullName("Updated Name"),
                 null,
@@ -319,16 +401,29 @@ class PatientServiceTest {
                 null,
                 null,
                 ContactPreference.PHONE,
-                ConsentStatus.REVOKED
+                ConsentStatus.REVOKED,
+                expectedVersion
         );
+    }
+
+    private ChangePatientStatusCommand statusChange(PsychologistId psychologistId, long expectedVersion) {
+        return new ChangePatientStatusCommand(psychologistId, PATIENT_ID, PatientStatus.INACTIVE, expectedVersion);
     }
 
     private Patient patient() {
         Instant now = Instant.parse("2026-06-01T10:00:00Z");
-        return Patient.create(PATIENT_ID, OWNER, new EmailAddress("patient@example.com"),
+        return withVersion(Patient.create(PATIENT_ID, OWNER, new EmailAddress("patient@example.com"),
                 new FullName("Patient Name"), new PreferredName("Pat"), new BirthDate(LocalDate.of(1990, 1, 1)),
                 new PhoneNumber("+351912345678"),
                 new EmergencyContact("Emergency One", new PhoneNumber("+351923456789"), "Partner"),
-                ContactPreference.EMAIL, ConsentStatus.GRANTED, now);
+                ContactPreference.EMAIL, ConsentStatus.GRANTED, now), CURRENT_VERSION);
+    }
+
+    private static Patient withVersion(Patient patient, Long version) {
+        return Patient.rehydrate(patient.id(), patient.psychologistId(), patient.email(), patient.fullName(),
+                patient.preferredName().orElse(null), patient.birthDate().orElse(null),
+                patient.phone().orElse(null), patient.emergencyContact().orElse(null),
+                patient.contactPreference(), patient.consentStatus(), patient.consentUpdatedAt(), patient.status(),
+                patient.createdAt(), patient.updatedAt(), version);
     }
 }

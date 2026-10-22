@@ -51,8 +51,9 @@ public class DemoDataBootstrap implements ApplicationRunner {
     public void run(ApplicationArguments args) {
         Instant now = Instant.now(clock).truncatedTo(ChronoUnit.SECONDS);
         for (DemoPatient patient : demoPatients()) {
+            PatientId id = new PatientId(patient.id());
             patients.save(Patient.rehydrate(
-                    new PatientId(patient.id()),
+                    id,
                     new PsychologistId(patient.psychologistId()),
                     new EmailAddress(patient.email()),
                     new FullName(patient.fullName()),
@@ -66,9 +67,15 @@ public class DemoDataBootstrap implements ApplicationRunner {
                     now.minus(30, ChronoUnit.DAYS),
                     patient.status(),
                     now.minus(45, ChronoUnit.DAYS),
-                    now
+                    now,
+                    storedVersion(id)
             ));
         }
+    }
+
+    // Each start resets the demo rows; carrying the stored version updates them instead of inserting duplicates.
+    private Long storedVersion(PatientId id) {
+        return patients.findById(id).flatMap(Patient::version).orElse(null);
     }
 
     private static List<DemoPatient> demoPatients() {

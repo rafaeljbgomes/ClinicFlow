@@ -24,6 +24,7 @@ import {
 import { ErrorAlert } from "@/components/error-alert";
 import { LoadingTable } from "@/components/loading-table";
 import { SectionHeader } from "@/components/section-header";
+import { STALE_VERSION_MESSAGE, StaleVersionAlert } from "@/components/stale-version-alert";
 import {
   isSignable,
   SessionNoteDetails,
@@ -78,7 +79,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ApiClientError, apiFetch, swrFetcher } from "@/lib/api-client";
+import { ApiClientError, apiFetch, isStaleVersion, swrFetcher } from "@/lib/api-client";
 import { formatDateTime, formatEnum } from "@/lib/format";
 import type {
   CarePlan,
@@ -105,8 +106,12 @@ export default function ClinicalPage() {
   const currentUser = useSWR<UserView>("/api/auth/me", swrFetcher);
   const [createCaseOpen, setCreateCaseOpen] = useState(false);
   const [carePlanOpen, setCarePlanOpen] = useState(false);
+  // The plan the open form was built from; null when the case has no plan yet.
+  const [carePlanBase, setCarePlanBase] = useState<CarePlan | null>(null);
+  const [carePlanConflict, setCarePlanConflict] = useState(false);
   const [newSessionOpen, setNewSessionOpen] = useState(false);
   const [editingSession, setEditingSession] = useState<SessionRecord | null>(null);
+  const [sessionConflict, setSessionConflict] = useState(false);
   const [signingSession, setSigningSession] = useState<SessionRecord | null>(null);
   const [viewingSession, setViewingSession] = useState<SessionRecord | null>(null);
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
@@ -171,23 +176,50 @@ export default function ClinicalPage() {
 
   async function changeStatus(status: ClinicalCaseStatus) {
     if (!selectedCase) return;
-    await apiFetch<ClinicalCase>(`/api/clinical-cases/${selectedCase.id}/status`, {
-      method: "PATCH",
-      body: { status },
-    });
+    try {
+      await apiFetch<ClinicalCase>(`/api/clinical-cases/${selectedCase.id}/status`, {
+        method: "PATCH",
+        body: { status },
+        expectedVersion: selectedCase.version,
+      });
+    } catch (failure) {
+      if (!isStaleVersion(failure)) throw failure;
+      toast.error(`${STALE_VERSION_MESSAGE} Check the latest case status and try again.`);
+      await cases.mutate();
+      return;
+    }
     toast.success("Case status updated");
     await cases.mutate();
   }
 
+  function openCarePlan() {
+    setCarePlanBase(carePlan.data ?? null);
+    setCarePlanConflict(false);
+    setCarePlanOpen(true);
+  }
+
+  // The first save creates the plan; later saves replace the version the form was built from.
   async function saveCarePlan(values: CarePlanFormValues) {
     if (!selectedCase) return;
-    await apiFetch<CarePlan>(`/api/clinical-cases/${selectedCase.id}/care-plan`, {
-      method: "PUT",
-      body: values,
-    });
+    try {
+      await apiFetch<CarePlan>(`/api/clinical-cases/${selectedCase.id}/care-plan`, {
+        method: "PUT",
+        body: values,
+        expectedVersion: carePlanBase ? carePlanBase.version : null,
+      });
+    } catch (failure) {
+      if (!isStaleVersion(failure)) throw failure;
+      setCarePlanConflict(true);
+      return;
+    }
     toast.success("Care plan saved");
     setCarePlanOpen(false);
     await carePlan.mutate();
+  }
+
+  async function reloadCarePlan() {
+    setCarePlanBase((await carePlan.mutate()) ?? null);
+    setCarePlanConflict(false);
   }
 
   async function createSession(values: SessionRecordFormValues) {
@@ -204,32 +236,55 @@ export default function ClinicalPage() {
     await sessions.mutate();
   }
 
+  // `editingSession` is the snapshot the form opened with, so its version is the one the edit is based on.
   async function updateSession(values: SessionRecordFormValues) {
     if (!editingSession || !selectedCase) return;
-    await apiFetch<SessionRecord>(`/api/session-records/${editingSession.id}`, {
-      method: "PATCH",
-      body: {
-        clinicalCaseId: editingSession.clinicalCaseId ?? selectedCase.id,
-        ...toUpdateSessionPayload(values),
-      },
-    });
+    try {
+      await apiFetch<SessionRecord>(`/api/session-records/${editingSession.id}`, {
+        method: "PATCH",
+        body: {
+          clinicalCaseId: editingSession.clinicalCaseId ?? selectedCase.id,
+          ...toUpdateSessionPayload(values),
+        },
+        expectedVersion: editingSession.version,
+      });
+    } catch (failure) {
+      if (!isStaleVersion(failure)) throw failure;
+      setSessionConflict(true);
+      return;
+    }
     toast.success("Session record updated");
-    setEditingSession(null);
+    closeSessionEditor();
     await sessions.mutate();
   }
 
+  async function reloadEditedSession() {
+    const latest = (await sessions.mutate())?.find((record) => record.id === editingSession?.id);
+    setEditingSession(latest ?? null);
+    setSessionConflict(false);
+  }
+
+  function closeSessionEditor() {
+    setEditingSession(null);
+    setSessionConflict(false);
+  }
+
+  // Signs the revision shown in the confirmation; a newer revision is never signed in its place.
   async function signSession() {
     if (!signingSession) return;
     try {
       await apiFetch<SessionRecord>(`/api/session-records/${signingSession.id}/sign`, {
         method: "POST",
+        expectedVersion: signingSession.version,
       });
       toast.success("Session note signed");
     } catch (signFailure) {
       toast.error(
-        signFailure instanceof ApiClientError
-          ? signFailure.message
-          : "The session note could not be signed"
+        isStaleVersion(signFailure)
+          ? "The note changed after you opened it, so it was not signed. Review the latest version before signing."
+          : signFailure instanceof ApiClientError
+            ? signFailure.message
+            : "The session note could not be signed"
       );
     }
     setSigningSession(null);
@@ -285,7 +340,7 @@ export default function ClinicalPage() {
             sessionsError={sessions.error}
             onChangeStatus={changeStatus}
             onCreateSession={() => setNewSessionOpen(true)}
-            onEditCarePlan={() => setCarePlanOpen(true)}
+            onEditCarePlan={openCarePlan}
             onEditSession={setEditingSession}
             onSignSession={setSigningSession}
             onViewSession={setViewingSession}
@@ -379,7 +434,12 @@ export default function ClinicalPage() {
               Maintain focus, review cadence, and measurable goals for this case.
             </DialogDescription>
           </DialogHeader>
-          <CarePlanForm carePlan={carePlan.data} onSubmit={saveCarePlan} />
+          {carePlanConflict ? <StaleVersionAlert onReload={reloadCarePlan} /> : null}
+          <CarePlanForm
+            key={carePlanBase?.version ?? "new"}
+            carePlan={carePlanBase ?? undefined}
+            onSubmit={saveCarePlan}
+          />
         </DialogContent>
       </Dialog>
 
@@ -413,7 +473,7 @@ export default function ClinicalPage() {
 
       <Dialog
         open={!!editingSession}
-        onOpenChange={(open) => !open && setEditingSession(null)}
+        onOpenChange={(open) => !open && closeSessionEditor()}
       >
         <DialogContent className="max-w-3xl">
           <DialogHeader>
@@ -423,8 +483,10 @@ export default function ClinicalPage() {
               draft is final.
             </DialogDescription>
           </DialogHeader>
+          {sessionConflict ? <StaleVersionAlert onReload={reloadEditedSession} /> : null}
           {editingSession ? (
             <SessionRecordForm
+              key={editingSession.version}
               includeNoteStatus
               record={editingSession}
               submitLabel="Save session record"

@@ -29,19 +29,21 @@ public abstract class AppointmentRestMapper {
     }
 
     public RescheduleAppointmentCommand toCommand(UUID psychologistId, UUID appointmentId,
-                                                  RescheduleAppointmentRequest request) {
+                                                  RescheduleAppointmentRequest request, long expectedVersion) {
         return new RescheduleAppointmentCommand(new PsychologistId(psychologistId),
-                new AppointmentId(appointmentId), new AppointmentDate(request.newDate()));
+                new AppointmentId(appointmentId), new AppointmentDate(request.newDate()), expectedVersion);
     }
 
     public CancelAppointmentCommand toCommand(UUID psychologistId, UUID appointmentId,
-                                              CancelAppointmentRequest request) {
+                                              CancelAppointmentRequest request, long expectedVersion) {
         return new CancelAppointmentCommand(new PsychologistId(psychologistId),
-                new AppointmentId(appointmentId), new CancellationReason(request.reason()));
+                new AppointmentId(appointmentId), new CancellationReason(request.reason()), expectedVersion);
     }
 
-    public CompleteAppointmentCommand toCompleteCommand(UUID psychologistId, UUID appointmentId) {
-        return new CompleteAppointmentCommand(new PsychologistId(psychologistId), new AppointmentId(appointmentId));
+    public CompleteAppointmentCommand toCompleteCommand(UUID psychologistId, UUID appointmentId,
+                                                        long expectedVersion) {
+        return new CompleteAppointmentCommand(new PsychologistId(psychologistId), new AppointmentId(appointmentId),
+                expectedVersion);
     }
 
     public GetAppointmentQuery toGetQuery(UUID psychologistId, UUID appointmentId) {

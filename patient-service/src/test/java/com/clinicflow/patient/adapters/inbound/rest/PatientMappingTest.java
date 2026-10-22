@@ -31,6 +31,7 @@ import java.time.LocalDate;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 class PatientMappingTest {
     private static final UUID PSYCHOLOGIST_ID = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
@@ -71,11 +72,12 @@ class PatientMappingTest {
                 null, null, ContactPreference.PHONE, ConsentStatus.REVOKED);
 
         // Act
-        UpdatePatientCommand command = restMapper.toCommand(PSYCHOLOGIST_ID, PATIENT_ID, request);
+        UpdatePatientCommand command = restMapper.toCommand(PSYCHOLOGIST_ID, PATIENT_ID, request, 4);
 
         // Assert
         assertThat(command.patientId()).isEqualTo(new PatientId(PATIENT_ID));
         assertThat(command.phone()).isNull();
+        assertThat(command.expectedVersion()).isEqualTo(4);
     }
 
     @Test
@@ -84,10 +86,11 @@ class PatientMappingTest {
         ChangePatientStatusRequest request = new ChangePatientStatusRequest(PatientStatus.INACTIVE);
 
         // Act
-        ChangePatientStatusCommand command = restMapper.toCommand(PSYCHOLOGIST_ID, PATIENT_ID, request);
+        ChangePatientStatusCommand command = restMapper.toCommand(PSYCHOLOGIST_ID, PATIENT_ID, request, 4);
 
         // Assert
         assertThat(command.status()).isEqualTo(PatientStatus.INACTIVE);
+        assertThat(command.expectedVersion()).isEqualTo(4);
     }
 
     @Test
@@ -111,19 +114,7 @@ class PatientMappingTest {
     @Test
     void patientMapsToApplicationResult() {
         // Arrange
-        Patient patient = Patient.create(
-                new PatientId(PATIENT_ID),
-                new PsychologistId(PSYCHOLOGIST_ID),
-                new EmailAddress("patient@example.com"),
-                new FullName("Patient Name"),
-                new PreferredName("Pat"),
-                new BirthDate(LocalDate.of(1990, 1, 1)),
-                new PhoneNumber("+351912345678"),
-                new EmergencyContact("Emergency One", new PhoneNumber("+351923456789"), "Partner"),
-                ContactPreference.EMAIL,
-                ConsentStatus.GRANTED,
-                NOW
-        );
+        Patient patient = storedPatient();
 
         // Act
         PatientResult result = applicationMapper.toResult(patient);
@@ -134,6 +125,21 @@ class PatientMappingTest {
         assertThat(result.preferredName()).isEqualTo("Pat");
         assertThat(result.birthDate()).isEqualTo(LocalDate.of(1990, 1, 1));
         assertThat(result.status()).isEqualTo(PatientStatus.ACTIVE);
+        assertThat(result.version()).isEqualTo(2);
+    }
+
+    @Test
+    void unsavedPatientHasNoResult() {
+        // Arrange
+        Patient patient = Patient.create(new PatientId(PATIENT_ID), new PsychologistId(PSYCHOLOGIST_ID),
+                new EmailAddress("patient@example.com"), new FullName("Patient Name"), null, null, null, null,
+                ContactPreference.EMAIL, ConsentStatus.GRANTED, NOW);
+
+        // Act
+        Throwable thrown = catchThrowable(() -> applicationMapper.toResult(patient));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(IllegalStateException.class);
     }
 
     @Test
@@ -142,7 +148,7 @@ class PatientMappingTest {
         PatientResult result = new PatientResult(PATIENT_ID, PSYCHOLOGIST_ID, "patient@example.com",
                 "Patient Name", "+351912345678", "Pat", LocalDate.of(1990, 1, 1), "Emergency One",
                 "+351923456789", "Partner", ContactPreference.EMAIL, ConsentStatus.GRANTED,
-                NOW, PatientStatus.ACTIVE, NOW, NOW);
+                NOW, PatientStatus.ACTIVE, NOW, NOW, 2);
 
         // Act
         PatientResponse response = restMapper.toResponse(result);
@@ -153,5 +159,26 @@ class PatientMappingTest {
         assertThat(response.preferredName()).isEqualTo("Pat");
         assertThat(response.birthDate()).isEqualTo(LocalDate.of(1990, 1, 1));
         assertThat(response.status()).isEqualTo(PatientStatus.ACTIVE);
+        assertThat(response.version()).isEqualTo(2);
+    }
+
+    private static Patient storedPatient() {
+        return Patient.rehydrate(
+                new PatientId(PATIENT_ID),
+                new PsychologistId(PSYCHOLOGIST_ID),
+                new EmailAddress("patient@example.com"),
+                new FullName("Patient Name"),
+                new PreferredName("Pat"),
+                new BirthDate(LocalDate.of(1990, 1, 1)),
+                new PhoneNumber("+351912345678"),
+                new EmergencyContact("Emergency One", new PhoneNumber("+351923456789"), "Partner"),
+                ContactPreference.EMAIL,
+                ConsentStatus.GRANTED,
+                NOW,
+                PatientStatus.ACTIVE,
+                NOW,
+                NOW,
+                2L
+        );
     }
 }

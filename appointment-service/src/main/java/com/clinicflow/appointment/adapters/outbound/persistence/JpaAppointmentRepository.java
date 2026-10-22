@@ -1,10 +1,12 @@
 package com.clinicflow.appointment.adapters.outbound.persistence;
 
+import com.clinicflow.appointment.application.exceptions.StaleResourceVersionException;
 import com.clinicflow.appointment.application.ports.AppointmentRepository;
 import com.clinicflow.appointment.domain.Appointment;
 import com.clinicflow.appointment.domain.AppointmentId;
 import com.clinicflow.appointment.domain.PatientId;
 import com.clinicflow.appointment.domain.PsychologistId;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -20,7 +22,14 @@ public class JpaAppointmentRepository implements AppointmentRepository {
         this.mapper = mapper;
     }
 
-    @Override public void save(Appointment appointment) { delegate.save(mapper.toJpa(appointment)); }
+    @Override public Appointment save(Appointment appointment) {
+        try {
+            // Flush here so a concurrent write surfaces as a version conflict, not a commit failure.
+            return mapper.toDomain(delegate.saveAndFlush(mapper.toJpa(appointment)));
+        } catch (OptimisticLockingFailureException ex) {
+            throw new StaleResourceVersionException();
+        }
+    }
     @Override public Optional<Appointment> findById(AppointmentId id) {
         return delegate.findById(id.value()).map(mapper::toDomain);
     }

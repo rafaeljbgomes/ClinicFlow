@@ -1,11 +1,13 @@
 package com.clinicflow.clinical.adapters.outbound.persistence;
 
+import com.clinicflow.clinical.application.exceptions.StaleResourceVersionException;
 import com.clinicflow.clinical.application.ports.ClinicalCaseRepository;
 import com.clinicflow.clinical.domain.ClinicalCase;
 import com.clinicflow.clinical.domain.ClinicalCaseId;
 import com.clinicflow.clinical.domain.ClinicalCaseStatus;
 import com.clinicflow.clinical.domain.PatientId;
 import com.clinicflow.clinical.domain.PsychologistId;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -59,7 +61,12 @@ public class JpaClinicalCaseRepository implements ClinicalCaseRepository {
     }
 
     @Override
-    public void save(ClinicalCase clinicalCase) {
-        delegate.save(mapper.toJpa(clinicalCase));
+    public ClinicalCase save(ClinicalCase clinicalCase) {
+        try {
+            // Flush here so a concurrent write surfaces as a version conflict, not a commit failure.
+            return mapper.toDomain(delegate.saveAndFlush(mapper.toJpa(clinicalCase)));
+        } catch (OptimisticLockingFailureException ex) {
+            throw new StaleResourceVersionException();
+        }
     }
 }

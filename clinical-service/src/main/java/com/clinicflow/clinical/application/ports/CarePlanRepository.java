@@ -7,5 +7,6 @@ import java.util.Optional;
 
 public interface CarePlanRepository {
     Optional<CarePlan> findByClinicalCaseId(ClinicalCaseId clinicalCaseId);
-    void save(CarePlan carePlan);
+    // Returns the stored plan, including the version persistence assigned.
+    CarePlan save(CarePlan carePlan);
 }

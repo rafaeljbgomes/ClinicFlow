@@ -52,10 +52,12 @@ public abstract class ClinicalRestMapper {
         return new GetPracticeProfileQuery(new PsychologistId(psychologistId));
     }
 
-    public UpdatePracticeProfileCommand toCommand(UUID psychologistId, PracticeProfileRequest request) {
+    public UpdatePracticeProfileCommand toCommand(UUID psychologistId, PracticeProfileRequest request,
+                                                  Long expectedVersion) {
         return new UpdatePracticeProfileCommand(new PsychologistId(psychologistId),
                 request.professionalRegistration(), zoneId(request.timezone()),
-                request.defaultSessionDurationMinutes(), request.primaryLocation(), request.telehealthEnabled());
+                request.defaultSessionDurationMinutes(), request.primaryLocation(), request.telehealthEnabled(),
+                expectedVersion);
     }
 
     public CreateClinicalCaseCommand toCommand(UUID psychologistId, CreateClinicalCaseRequest request) {
@@ -73,15 +75,17 @@ public abstract class ClinicalRestMapper {
     }
 
     public ChangeClinicalCaseStatusCommand toCommand(UUID psychologistId, UUID clinicalCaseId,
-                                                     ChangeClinicalCaseStatusRequest request) {
+                                                     ChangeClinicalCaseStatusRequest request,
+                                                     long expectedVersion) {
         return new ChangeClinicalCaseStatusCommand(new PsychologistId(psychologistId),
-                new ClinicalCaseId(clinicalCaseId), request.status());
+                new ClinicalCaseId(clinicalCaseId), request.status(), expectedVersion);
     }
 
-    public PutCarePlanCommand toCommand(UUID psychologistId, UUID clinicalCaseId, CarePlanRequest request) {
+    public PutCarePlanCommand toCommand(UUID psychologistId, UUID clinicalCaseId, CarePlanRequest request,
+                                        Long expectedVersion) {
         return new PutCarePlanCommand(new PsychologistId(psychologistId), new ClinicalCaseId(clinicalCaseId),
                 request.therapeuticFocus(), request.plannedFrequency(), request.reviewDate(),
-                request.goals().stream().map(this::toInput).toList());
+                request.goals().stream().map(this::toInput).toList(), expectedVersion);
     }
 
     public GetCarePlanQuery toGetCarePlanQuery(UUID psychologistId, UUID clinicalCaseId) {
@@ -103,17 +107,18 @@ public abstract class ClinicalRestMapper {
     }
 
     public UpdateSessionRecordCommand toCommand(UUID psychologistId, UUID sessionRecordId,
-                                                UpdateSessionRecordRequest request) {
+                                                UpdateSessionRecordRequest request, long expectedVersion) {
         return new UpdateSessionRecordCommand(new PsychologistId(psychologistId),
                 new SessionRecordId(sessionRecordId),
                 request.clinicalCaseId() == null ? null : new ClinicalCaseId(request.clinicalCaseId()),
                 request.sessionDate(), request.modality(), request.durationMinutes(), request.attendanceStatus(),
                 request.noteStatus(), request.summary(), request.focusAreas(), request.interventions(),
-                request.homework(), request.nextSteps());
+                request.homework(), request.nextSteps(), expectedVersion);
     }
 
-    public SignSessionRecordCommand toSignCommand(UUID psychologistId, UUID sessionRecordId) {
-        return new SignSessionRecordCommand(new PsychologistId(psychologistId), new SessionRecordId(sessionRecordId));
+    public SignSessionRecordCommand toSignCommand(UUID psychologistId, UUID sessionRecordId, long expectedVersion) {
+        return new SignSessionRecordCommand(new PsychologistId(psychologistId), new SessionRecordId(sessionRecordId),
+                expectedVersion);
     }
 
     public GetPatientClinicalHistoryQuery toHistoryQuery(UUID psychologistId, UUID patientId) {

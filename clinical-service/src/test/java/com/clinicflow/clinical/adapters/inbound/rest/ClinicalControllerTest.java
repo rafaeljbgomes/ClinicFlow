@@ -6,7 +6,10 @@ import com.clinicflow.clinical.application.exceptions.AppointmentAlreadyRecorded
 import com.clinicflow.clinical.application.exceptions.AppointmentNotFoundException;
 import com.clinicflow.clinical.application.exceptions.AppointmentPatientMismatchException;
 import com.clinicflow.clinical.application.exceptions.OwnershipCheckUnavailableException;
+import com.clinicflow.clinical.application.commands.SignSessionRecordCommand;
+import com.clinicflow.clinical.application.commands.UpdatePracticeProfileCommand;
 import com.clinicflow.clinical.application.exceptions.PatientNotFoundException;
+import com.clinicflow.clinical.application.exceptions.StaleResourceVersionException;
 import com.clinicflow.clinical.application.results.CareGoalResult;
 import com.clinicflow.clinical.application.results.CarePlanResult;
 import com.clinicflow.clinical.application.results.ClinicalCaseResult;
@@ -26,6 +29,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -44,13 +49,17 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.Stream;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -153,6 +162,7 @@ class ClinicalControllerTest {
         // Arrange
         when(clinicalService.updatePracticeProfile(any())).thenReturn(profile());
         var request = put("/practice-profile").with(psychologist())
+                .header("If-Match", "\"3\"")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {"professionalRegistration":"OPP 123","timezone":"Europe/Lisbon",
@@ -217,6 +227,7 @@ class ClinicalControllerTest {
         // Arrange
         when(clinicalService.changeClinicalCaseStatus(any())).thenReturn(clinicalCase());
         var request = patch("/clinical-cases/{id}/status", CASE_ID).with(psychologist())
+                .header("If-Match", "\"3\"")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"status\":\"ACTIVE\"}");
 
@@ -233,6 +244,7 @@ class ClinicalControllerTest {
         // Arrange
         when(clinicalService.putCarePlan(any())).thenReturn(carePlan());
         var request = put("/clinical-cases/{id}/care-plan", CASE_ID).with(psychologist())
+                .header("If-Match", "\"3\"")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {"therapeuticFocus":"Reduce avoidance","plannedFrequency":"Weekly",
@@ -302,6 +314,7 @@ class ClinicalControllerTest {
         // Arrange
         when(clinicalService.updateSessionRecord(any())).thenReturn(session());
         var request = patch("/session-records/{id}", SESSION_ID).with(psychologist())
+                .header("If-Match", "\"3\"")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {"clinicalCaseId":"cccccccc-cccc-cccc-cccc-cccccccccccc",
@@ -322,7 +335,8 @@ class ClinicalControllerTest {
     void signSessionRecordReturnsTheSignature() throws Exception {
         // Arrange
         when(clinicalService.signSessionRecord(any())).thenReturn(signedSession());
-        var request = post("/session-records/{id}/sign", SESSION_ID).with(psychologist());
+        var request = post("/session-records/{id}/sign", SESSION_ID).with(psychologist())
+                .header("If-Match", "\"3\"");
 
         // Act
         ResultActions response = mvc.perform(request);
@@ -332,6 +346,172 @@ class ClinicalControllerTest {
                 .andExpect(jsonPath("$.noteStatus").value("SIGNED"))
                 .andExpect(jsonPath("$.signedBy").value(PSYCHOLOGIST_ID.toString()))
                 .andExpect(jsonPath("$.signedAt").value("2026-06-01T11:00:00Z"));
+    }
+
+    @Test
+    void signSessionRecordReturnsTheNewVersionAsEntityTag() throws Exception {
+        // Arrange
+        when(clinicalService.signSessionRecord(any())).thenReturn(signedSession());
+        var request = signRequest("\"2\"");
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(header().string("ETag", "\"3\""))
+                .andExpect(jsonPath("$.version").value(3));
+    }
+
+    @Test
+    void signingPassesTheReviewedVersionToTheService() throws Exception {
+        // Arrange
+        when(clinicalService.signSessionRecord(any())).thenReturn(signedSession());
+        var request = signRequest("\"2\"");
+
+        // Act
+        mvc.perform(request);
+
+        // Assert
+        ArgumentCaptor<SignSessionRecordCommand> command = ArgumentCaptor.forClass(SignSessionRecordCommand.class);
+        verify(clinicalService).signSessionRecord(command.capture());
+        assertThat(command.getValue().expectedVersion()).isEqualTo(2);
+    }
+
+    @Test
+    void signingWithoutIfMatchIsPreconditionRequired() throws Exception {
+        // Arrange
+        var request = signRequest(null);
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isPreconditionRequired())
+                .andExpect(jsonPath("$.code").value("precondition_required"));
+    }
+
+    @Test
+    void signingWithoutIfMatchNeverReachesTheService() throws Exception {
+        // Arrange
+        var request = signRequest(null);
+
+        // Act
+        mvc.perform(request);
+
+        // Assert
+        verifyNoInteractions(clinicalService);
+    }
+
+    @Test
+    void signingAStaleRevisionIsPreconditionFailed() throws Exception {
+        // Arrange
+        when(clinicalService.signSessionRecord(any())).thenThrow(new StaleResourceVersionException());
+        var request = signRequest("\"2\"");
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isPreconditionFailed())
+                .andExpect(jsonPath("$.code").value("stale_resource_version"));
+    }
+
+    @Test
+    void statusChangeWithoutIfMatchIsPreconditionRequired() throws Exception {
+        // Arrange
+        var request = patch("/clinical-cases/{id}/status", CASE_ID).with(psychologist())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"status\":\"DISCHARGED\"}");
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isPreconditionRequired());
+    }
+
+    @Test
+    void firstPracticeProfileSaveExpectsNoStoredProfile() throws Exception {
+        // Arrange
+        when(clinicalService.updatePracticeProfile(any())).thenReturn(profile());
+        var request = practiceProfileRequest().header("If-None-Match", "*");
+
+        // Act
+        mvc.perform(request);
+
+        // Assert
+        ArgumentCaptor<UpdatePracticeProfileCommand> command =
+                ArgumentCaptor.forClass(UpdatePracticeProfileCommand.class);
+        verify(clinicalService).updatePracticeProfile(command.capture());
+        assertThat(command.getValue().expectedVersion()).isNull();
+    }
+
+    @Test
+    void practiceProfileSaveWithoutAPreconditionIsPreconditionRequired() throws Exception {
+        // Arrange
+        var request = practiceProfileRequest();
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isPreconditionRequired());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"\"3\"", "W/\"3\""})
+    void practiceProfileSaveRejectsAnIfNoneMatchOtherThanAWildcard(String ifNoneMatch) throws Exception {
+        // Arrange
+        var request = practiceProfileRequest().header("If-None-Match", ifNoneMatch);
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("invalid_precondition"));
+    }
+
+    @Test
+    void practiceProfileSaveRejectsBothPreconditions() throws Exception {
+        // Arrange
+        var request = practiceProfileRequest().header("If-None-Match", "*").header("If-Match", "\"3\"");
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("invalid_precondition"));
+    }
+
+    @Test
+    void unsavedPracticeProfileHasNoEntityTag() throws Exception {
+        // Arrange
+        when(clinicalService.getPracticeProfile(any())).thenReturn(new PracticeProfileResult(PSYCHOLOGIST_ID, null,
+                "UTC", 50, null, false, NOW, NOW, null));
+        var request = get("/practice-profile").with(psychologist());
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isOk())
+                .andExpect(header().doesNotExist("ETag"))
+                .andExpect(jsonPath("$.version").doesNotExist());
+    }
+
+    @Test
+    void storedPracticeProfileHasItsVersionAsEntityTag() throws Exception {
+        // Arrange
+        when(clinicalService.getPracticeProfile(any())).thenReturn(profile());
+        var request = get("/practice-profile").with(psychologist());
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(header().string("ETag", "\"3\""));
     }
 
     @Test
@@ -411,6 +591,7 @@ class ClinicalControllerTest {
         // Arrange
         when(clinicalService.updateSessionRecord(any())).thenThrow(failure);
         var request = patch("/session-records/{id}", SESSION_ID).with(psychologist())
+                .header("If-Match", "\"3\"")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(SIGNING_UPDATE);
 
@@ -428,7 +609,8 @@ class ClinicalControllerTest {
                                                        String expectedCode) throws Exception {
         // Arrange
         when(clinicalService.signSessionRecord(any())).thenThrow(failure);
-        var request = post("/session-records/{id}/sign", SESSION_ID).with(psychologist());
+        var request = post("/session-records/{id}/sign", SESSION_ID).with(psychologist())
+                .header("If-Match", "\"3\"");
 
         // Act
         ResultActions response = mvc.perform(request);
@@ -454,6 +636,21 @@ class ClinicalControllerTest {
         return jwtFor("ROLE_PSYCHOLOGIST");
     }
 
+    private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder signRequest(String ifMatch) {
+        var request = post("/session-records/{id}/sign", SESSION_ID).with(psychologist());
+        return ifMatch == null ? request : request.header("If-Match", ifMatch);
+    }
+
+    private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder practiceProfileRequest() {
+        return put("/practice-profile").with(psychologist())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"professionalRegistration":"OPP 123","timezone":"Europe/Lisbon",
+                         "defaultSessionDurationMinutes":50,"primaryLocation":"Lisbon",
+                         "telehealthEnabled":true}
+                        """);
+    }
+
     private RequestPostProcessor jwtFor(String authority) {
         return jwt()
                 .jwt(token -> token.claim("userId", PSYCHOLOGIST_ID.toString()))
@@ -462,32 +659,32 @@ class ClinicalControllerTest {
 
     private PracticeProfileResult profile() {
         return new PracticeProfileResult(PSYCHOLOGIST_ID, "OPP 123", "Europe/Lisbon",
-                50, "Lisbon", true, NOW, NOW);
+                50, "Lisbon", true, NOW, NOW, 3L);
     }
 
     private ClinicalCaseResult clinicalCase() {
         return new ClinicalCaseResult(CASE_ID, PSYCHOLOGIST_ID, PATIENT_ID, "Anxiety symptoms",
-                ClinicalCaseStatus.ACTIVE, NOW, null, NOW, NOW);
+                ClinicalCaseStatus.ACTIVE, NOW, null, NOW, NOW, 3);
     }
 
     private CarePlanResult carePlan() {
         return new CarePlanResult(UUID.randomUUID(), CASE_ID, PSYCHOLOGIST_ID, PATIENT_ID,
                 "Reduce avoidance", "Weekly", LocalDate.of(2026, 7, 1),
                 List.of(new CareGoalResult(UUID.randomUUID(), "Practice exposure",
-                        null, GoalStatus.IN_PROGRESS, 25)), NOW, NOW);
+                        null, GoalStatus.IN_PROGRESS, 25)), NOW, NOW, 3);
     }
 
     private SessionRecordResult session() {
         return new SessionRecordResult(SESSION_ID, CASE_ID, PSYCHOLOGIST_ID, PATIENT_ID, null,
                 NOW, SessionModality.ONLINE, 50, AttendanceStatus.ATTENDED, NoteStatus.DRAFT,
-                "Session summary", null, null, null, null, NOW, NOW, null, null);
+                "Session summary", null, null, null, null, NOW, NOW, null, null, 3);
     }
 
     private SessionRecordResult signedSession() {
         Instant signedAt = Instant.parse("2026-06-01T11:00:00Z");
         return new SessionRecordResult(SESSION_ID, CASE_ID, PSYCHOLOGIST_ID, PATIENT_ID, null,
                 NOW, SessionModality.ONLINE, 50, AttendanceStatus.ATTENDED, NoteStatus.SIGNED,
-                "Session summary", null, null, null, null, NOW, signedAt, signedAt, PSYCHOLOGIST_ID);
+                "Session summary", null, null, null, null, NOW, signedAt, signedAt, PSYCHOLOGIST_ID, 3);
     }
 
     private PatientClinicalHistoryResult history() {

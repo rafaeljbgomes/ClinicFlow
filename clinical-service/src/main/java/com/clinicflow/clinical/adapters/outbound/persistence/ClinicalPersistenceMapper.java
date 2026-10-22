@@ -23,41 +23,44 @@ public abstract class ClinicalPersistenceMapper {
     public JpaPracticeProfileEntity toJpa(PracticeProfile profile) {
         return new JpaPracticeProfileEntity(profile.psychologistId().value(), profile.professionalRegistration(),
                 profile.timezone().getId(), profile.defaultSessionDurationMinutes(), profile.primaryLocation(),
-                profile.telehealthEnabled(), profile.createdAt(), profile.updatedAt());
+                profile.telehealthEnabled(), profile.createdAt(), profile.updatedAt(),
+                profile.version().orElse(null));
     }
 
     public PracticeProfile toDomain(JpaPracticeProfileEntity entity) {
         return PracticeProfile.rehydrate(new PsychologistId(entity.psychologistId()),
                 entity.professionalRegistration(), ZoneId.of(entity.timezone()),
                 entity.defaultSessionDurationMinutes(), entity.primaryLocation(), entity.telehealthEnabled(),
-                entity.createdAt(), entity.updatedAt());
+                entity.createdAt(), entity.updatedAt(), entity.version());
     }
 
     public JpaClinicalCaseEntity toJpa(ClinicalCase clinicalCase) {
         return new JpaClinicalCaseEntity(clinicalCase.id().value(), clinicalCase.psychologistId().value(),
                 clinicalCase.patientId().value(), clinicalCase.presentingConcern(), clinicalCase.status(),
                 clinicalCase.openedAt(), clinicalCase.closedAt(), clinicalCase.createdAt(),
-                clinicalCase.updatedAt());
+                clinicalCase.updatedAt(), clinicalCase.version().orElse(null));
     }
 
     public ClinicalCase toDomain(JpaClinicalCaseEntity entity) {
         return ClinicalCase.rehydrate(new ClinicalCaseId(entity.id()), new PsychologistId(entity.psychologistId()),
                 new PatientId(entity.patientId()), entity.presentingConcern(), entity.status(), entity.openedAt(),
-                entity.closedAt(), entity.createdAt(), entity.updatedAt());
+                entity.closedAt(), entity.createdAt(), entity.updatedAt(), entity.version());
     }
 
     public JpaCarePlanEntity toJpa(CarePlan carePlan) {
         return new JpaCarePlanEntity(carePlan.id().value(), carePlan.clinicalCaseId().value(),
                 carePlan.psychologistId().value(), carePlan.patientId().value(), carePlan.therapeuticFocus(),
                 carePlan.plannedFrequency(), carePlan.reviewDate(),
-                carePlan.goals().stream().map(this::toJpa).toList(), carePlan.createdAt(), carePlan.updatedAt());
+                carePlan.goals().stream().map(this::toJpa).toList(), carePlan.createdAt(), carePlan.updatedAt(),
+                carePlan.version().orElse(null));
     }
 
     public CarePlan toDomain(JpaCarePlanEntity entity) {
         return CarePlan.rehydrate(new CarePlanId(entity.id()), new ClinicalCaseId(entity.clinicalCaseId()),
                 new PsychologistId(entity.psychologistId()), new PatientId(entity.patientId()),
                 entity.therapeuticFocus(), entity.plannedFrequency(), entity.reviewDate(),
-                entity.goals().stream().map(this::toDomain).toList(), entity.createdAt(), entity.updatedAt());
+                entity.goals().stream().map(this::toDomain).toList(), entity.createdAt(), entity.updatedAt(),
+                entity.version());
     }
 
     public JpaCareGoalEntity toJpa(CareGoal goal) {
@@ -78,7 +81,7 @@ public abstract class ClinicalPersistenceMapper {
                 session.modality(), session.durationMinutes(), session.attendanceStatus(), session.noteStatus(),
                 session.summary(), session.focusAreas(), session.interventions(), session.homework(),
                 session.nextSteps(), session.createdAt(), session.updatedAt(), session.signedAt().orElse(null),
-                session.signedBy().map(PsychologistId::value).orElse(null));
+                session.signedBy().map(PsychologistId::value).orElse(null), session.version().orElse(null));
     }
 
     public JpaSessionRecordLinkConflictEntity toJpa(SessionRecordLinkConflict conflict) {
@@ -95,6 +98,6 @@ public abstract class ClinicalPersistenceMapper {
                 entity.sessionDate(), entity.modality(), entity.durationMinutes(), entity.attendanceStatus(),
                 entity.noteStatus(), entity.summary(), entity.focusAreas(), entity.interventions(),
                 entity.homework(), entity.nextSteps(), entity.createdAt(), entity.updatedAt(), entity.signedAt(),
-                entity.signedBy() == null ? null : new PsychologistId(entity.signedBy()));
+                entity.signedBy() == null ? null : new PsychologistId(entity.signedBy()), entity.version());
     }
 }
