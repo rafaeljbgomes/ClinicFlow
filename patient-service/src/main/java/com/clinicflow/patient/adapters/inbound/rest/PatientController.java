@@ -8,7 +8,9 @@ import com.clinicflow.patient.application.PatientService;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -31,11 +33,11 @@ public class PatientController {
     }
 
     @PostMapping
-    @ResponseStatus(HttpStatus.CREATED)
-    public PatientResponse create(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody CreatePatientRequest request) {
+    public ResponseEntity<PatientResponse> create(@AuthenticationPrincipal Jwt jwt,
+                                                  @Valid @RequestBody CreatePatientRequest request) {
         PatientResponse patient = mapper.toResponse(patientService.create(mapper.toCommand(userId(jwt), request)));
         log.info("patient_created patientId={} psychologistId={}", patient.id(), patient.psychologistId());
-        return patient;
+        return ResponseEntity.status(HttpStatus.CREATED).eTag(EntityTags.of(patient.version())).body(patient);
     }
 
     @GetMapping
@@ -44,20 +46,32 @@ public class PatientController {
     }
 
     @GetMapping("/{id}")
-    public PatientResponse get(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        return mapper.toResponse(patientService.get(mapper.toGetQuery(userId(jwt), id)));
+    public ResponseEntity<PatientResponse> get(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        return tagged(mapper.toResponse(patientService.get(mapper.toGetQuery(userId(jwt), id))));
     }
 
     @PutMapping("/{id}")
-    public PatientResponse update(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
-                                  @Valid @RequestBody UpdatePatientRequest request) {
-        return mapper.toResponse(patientService.update(mapper.toCommand(userId(jwt), id, request)));
+    public ResponseEntity<PatientResponse> update(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
+                                                  @RequestHeader(name = HttpHeaders.IF_MATCH, required = false)
+                                                  String ifMatch,
+                                                  @Valid @RequestBody UpdatePatientRequest request) {
+        long expectedVersion = EntityTags.requireIfMatch(ifMatch);
+        return tagged(mapper.toResponse(patientService.update(
+                mapper.toCommand(userId(jwt), id, request, expectedVersion))));
     }
 
     @PatchMapping("/{id}/status")
-    public PatientResponse changeStatus(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
-                                        @Valid @RequestBody ChangePatientStatusRequest request) {
-        return mapper.toResponse(patientService.changeStatus(mapper.toCommand(userId(jwt), id, request)));
+    public ResponseEntity<PatientResponse> changeStatus(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
+                                                        @RequestHeader(name = HttpHeaders.IF_MATCH, required = false)
+                                                        String ifMatch,
+                                                        @Valid @RequestBody ChangePatientStatusRequest request) {
+        long expectedVersion = EntityTags.requireIfMatch(ifMatch);
+        return tagged(mapper.toResponse(patientService.changeStatus(
+                mapper.toCommand(userId(jwt), id, request, expectedVersion))));
+    }
+
+    private static ResponseEntity<PatientResponse> tagged(PatientResponse patient) {
+        return ResponseEntity.ok().eTag(EntityTags.of(patient.version())).body(patient);
     }
 
     private UUID userId(Jwt jwt) {

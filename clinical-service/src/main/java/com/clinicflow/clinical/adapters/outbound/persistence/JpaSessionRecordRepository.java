@@ -1,5 +1,6 @@
 package com.clinicflow.clinical.adapters.outbound.persistence;
 
+import com.clinicflow.clinical.application.exceptions.StaleResourceVersionException;
 import com.clinicflow.clinical.application.ports.SessionRecordRepository;
 import com.clinicflow.clinical.domain.AppointmentId;
 import com.clinicflow.clinical.domain.ClinicalCaseId;
@@ -9,6 +10,7 @@ import com.clinicflow.clinical.domain.SessionRecord;
 import com.clinicflow.clinical.domain.SessionRecordId;
 import com.clinicflow.clinical.domain.SignedSessionRecordException;
 import org.springframework.dao.DataAccessException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Repository;
 
 import java.sql.SQLException;
@@ -50,10 +52,13 @@ public class JpaSessionRecordRepository implements SessionRecordRepository {
     }
 
     @Override
-    public void save(SessionRecord sessionRecord) {
+    public SessionRecord save(SessionRecord sessionRecord) {
         try {
-            // Flush here so the database lock on signed rows surfaces as a domain error, not a commit failure.
-            delegate.saveAndFlush(mapper.toJpa(sessionRecord));
+            // Flush here so a concurrent write or the database lock on signed rows surfaces as an application
+            // error, not a commit failure.
+            return mapper.toDomain(delegate.saveAndFlush(mapper.toJpa(sessionRecord)));
+        } catch (OptimisticLockingFailureException ex) {
+            throw new StaleResourceVersionException();
         } catch (DataAccessException ex) {
             if (isSignedRecordLock(ex)) {
                 throw new SignedSessionRecordException();

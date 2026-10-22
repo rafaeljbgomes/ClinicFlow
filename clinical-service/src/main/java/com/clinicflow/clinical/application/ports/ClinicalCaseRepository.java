@@ -16,5 +16,6 @@ public interface ClinicalCaseRepository {
     List<ClinicalCase> findByPsychologistIdAndStatus(PsychologistId psychologistId, ClinicalCaseStatus status);
     Optional<ClinicalCase> findOpenByPsychologistIdAndPatientId(PsychologistId psychologistId, PatientId patientId);
     boolean existsOpenByPsychologistIdAndPatientId(PsychologistId psychologistId, PatientId patientId);
-    void save(ClinicalCase clinicalCase);
+    // Returns the stored case, including the version persistence assigned.
+    ClinicalCase save(ClinicalCase clinicalCase);
 }

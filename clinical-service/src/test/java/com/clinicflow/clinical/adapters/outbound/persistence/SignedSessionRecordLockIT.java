@@ -1,5 +1,6 @@
 package com.clinicflow.clinical.adapters.outbound.persistence;
 
+import com.clinicflow.clinical.application.exceptions.StaleResourceVersionException;
 import com.clinicflow.clinical.domain.AppointmentId;
 import com.clinicflow.clinical.domain.AttendanceStatus;
 import com.clinicflow.clinical.domain.NoteStatus;
@@ -176,13 +177,31 @@ class SignedSessionRecordLockIT {
         assertThat(sqlState(thrown)).isEqualTo("23514");
     }
 
+    // The version check rejects the stale write before the trigger sees it (ADR-024).
     @Test
-    void staleDraftSaveAfterACommittedSignatureIsRejected() {
+    void staleDraftSaveAfterACommittedSignatureIsRejectedAsStale() {
         // Arrange
         SessionRecord stale = staleDraftOfASignedRecord("Original summary");
 
         // Act
         Throwable thrown = catchThrowable(() -> sessions.save(stale));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(StaleResourceVersionException.class);
+    }
+
+    // A write that bypasses the domain but names the current version still meets the ADR-019 trigger.
+    @Test
+    void changedSignedRowAtItsCurrentVersionIsRejectedByTheDatabase() {
+        // Arrange
+        SessionRecord signed = sessions.findById(signedRecord("Signed summary")).orElseThrow();
+        SessionRecord rewritten = SessionRecord.rehydrate(signed.id(), null, OWNER, PATIENT, null, NOW,
+                SessionModality.ONLINE, 50, AttendanceStatus.ATTENDED, NoteStatus.SIGNED, "Rewritten", "Focus", null,
+                null, null, NOW, NOW.plusSeconds(60), signed.signedAt().orElseThrow(), OWNER,
+                signed.version().orElseThrow());
+
+        // Act
+        Throwable thrown = catchThrowable(() -> sessions.save(rewritten));
 
         // Assert
         assertThat(thrown).isInstanceOf(SignedSessionRecordException.class);
@@ -240,7 +259,7 @@ class SignedSessionRecordLockIT {
     private SessionRecord draft(String summary) {
         return SessionRecord.rehydrate(new SessionRecordId(UUID.randomUUID()), null, OWNER, PATIENT, null, NOW,
                 SessionModality.ONLINE, 50, AttendanceStatus.ATTENDED, NoteStatus.DRAFT, summary, "Focus", null,
-                null, null, NOW, NOW, null, null);
+                null, null, NOW, NOW, null, null, null);
     }
 
     private Map<String, Object> row(SessionRecordId id) {

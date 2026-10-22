@@ -490,6 +490,12 @@ The system shall maintain a basic notification history.
 
 Each service shall expose metrics, health checks, and structured logs.
 
+## FR15 — Concurrent Edits
+
+Updates and actions shall name the version of the record they were based on. A write based on a version
+that is no longer current shall be rejected without changing anything, so that one edit never silently
+overwrites another (ADR-024).
+
 ---
 
 # 9. Non-Functional Requirements

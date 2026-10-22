@@ -2,6 +2,7 @@ package com.clinicflow.clinical.domain;
 
 import java.time.Instant;
 import java.util.Objects;
+import java.util.Optional;
 
 public final class ClinicalCase {
     private final ClinicalCaseId id;
@@ -13,10 +14,12 @@ public final class ClinicalCase {
     private Instant closedAt;
     private final Instant createdAt;
     private Instant updatedAt;
+    // Assigned and incremented by persistence; null until the case is first saved.
+    private final Long version;
 
     private ClinicalCase(ClinicalCaseId id, PsychologistId psychologistId, PatientId patientId,
                          String presentingConcern, ClinicalCaseStatus status, Instant openedAt,
-                         Instant closedAt, Instant createdAt, Instant updatedAt) {
+                         Instant closedAt, Instant createdAt, Instant updatedAt, Long version) {
         if (id == null || psychologistId == null || patientId == null || status == null
                 || openedAt == null || createdAt == null || updatedAt == null) {
             throw new IllegalArgumentException("Clinical case required fields are missing");
@@ -30,19 +33,20 @@ public final class ClinicalCase {
         this.closedAt = closedAt;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
+        this.version = version;
     }
 
     public static ClinicalCase create(ClinicalCaseId id, PsychologistId psychologistId, PatientId patientId,
                                       String presentingConcern, Instant now) {
         return new ClinicalCase(id, psychologistId, patientId, presentingConcern,
-                ClinicalCaseStatus.INTAKE, now, null, now, now);
+                ClinicalCaseStatus.INTAKE, now, null, now, now, null);
     }
 
     public static ClinicalCase rehydrate(ClinicalCaseId id, PsychologistId psychologistId, PatientId patientId,
                                          String presentingConcern, ClinicalCaseStatus status, Instant openedAt,
-                                         Instant closedAt, Instant createdAt, Instant updatedAt) {
+                                         Instant closedAt, Instant createdAt, Instant updatedAt, Long version) {
         return new ClinicalCase(id, psychologistId, patientId, presentingConcern, status, openedAt,
-                closedAt, createdAt, updatedAt);
+                closedAt, createdAt, updatedAt, version);
     }
 
     public ClinicalCase changeStatus(ClinicalCaseStatus newStatus, Instant now) {
@@ -64,6 +68,7 @@ public final class ClinicalCase {
     public Instant closedAt() { return closedAt; }
     public Instant createdAt() { return createdAt; }
     public Instant updatedAt() { return updatedAt; }
+    public Optional<Long> version() { return Optional.ofNullable(version); }
 
     @Override
     public boolean equals(Object other) {

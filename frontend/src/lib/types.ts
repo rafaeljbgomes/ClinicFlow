@@ -29,6 +29,7 @@ export type Patient = {
   status: PatientStatus;
   createdAt: string;
   updatedAt: string;
+  version: number;
 };
 
 export type AppointmentStatus =
@@ -47,6 +48,7 @@ export type Appointment = {
   status: AppointmentStatus;
   type: AppointmentType;
   cancellationReason: string | null;
+  version: number;
 };
 
 export type NotificationStatus = "PENDING" | "SENT" | "FAILED";
@@ -87,6 +89,8 @@ export type PracticeProfile = {
   telehealthEnabled: boolean;
   createdAt: string;
   updatedAt: string;
+  // Null until the psychologist first saves the profile.
+  version: number | null;
 };
 
 export type ClinicalCase = {
@@ -99,6 +103,7 @@ export type ClinicalCase = {
   closedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  version: number;
 };
 
 export type CareGoal = {
@@ -120,6 +125,7 @@ export type CarePlan = {
   goals: CareGoal[];
   createdAt: string;
   updatedAt: string;
+  version: number;
 };
 
 export type SessionRecord = {
@@ -142,6 +148,7 @@ export type SessionRecord = {
   updatedAt: string;
   signedAt: string | null;
   signedBy: string | null;
+  version: number;
 };
 
 export type PatientClinicalHistory = {

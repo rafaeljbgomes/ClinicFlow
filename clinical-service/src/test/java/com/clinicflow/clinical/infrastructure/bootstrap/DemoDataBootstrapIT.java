@@ -95,8 +95,13 @@ class DemoDataBootstrapIT {
     private void ensureSeededDraftIsSigned() {
         if (!"SIGNED".equals(note(SEEDED_DRAFT_NOTE).get("note_status"))) {
             clinicalService.signSessionRecord(new SignSessionRecordCommand(
-                    new PsychologistId(SOFIA), new SessionRecordId(SEEDED_DRAFT_NOTE)));
+                    new PsychologistId(SOFIA), new SessionRecordId(SEEDED_DRAFT_NOTE),
+                    currentVersion(SEEDED_DRAFT_NOTE)));
         }
+    }
+
+    private long currentVersion(UUID id) {
+        return ((Number) note(id).get("version")).longValue();
     }
 
     private Map<String, Object> note(UUID id) {

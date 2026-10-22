@@ -14,10 +14,13 @@ public final class Appointment {
     private CancellationReason cancellationReason;
     private final Instant createdAt;
     private Instant updatedAt;
+    // Assigned and incremented by persistence; null until the appointment is first saved.
+    private final Long version;
 
     private Appointment(AppointmentId id, PsychologistId psychologistId, PatientId patientId,
                         AppointmentDate scheduledAt, AppointmentStatus status, AppointmentType type,
-                        CancellationReason cancellationReason, Instant createdAt, Instant updatedAt) {
+                        CancellationReason cancellationReason, Instant createdAt, Instant updatedAt,
+                        Long version) {
         if (id == null || psychologistId == null || patientId == null || scheduledAt == null
                 || status == null || type == null || createdAt == null || updatedAt == null) {
             throw new IllegalArgumentException("Appointment required fields are missing");
@@ -31,20 +34,22 @@ public final class Appointment {
         this.cancellationReason = cancellationReason;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
+        this.version = version;
     }
 
     public static Appointment create(AppointmentId id, PsychologistId psychologistId, PatientId patientId,
                                      AppointmentDate scheduledAt, AppointmentType type, Instant now) {
         scheduledAt.requireFutureFrom(now);
         return new Appointment(id, psychologistId, patientId, scheduledAt, AppointmentStatus.SCHEDULED,
-                type, null, now, now);
+                type, null, now, now, null);
     }
 
     public static Appointment rehydrate(AppointmentId id, PsychologistId psychologistId, PatientId patientId,
                                         AppointmentDate scheduledAt, AppointmentStatus status, AppointmentType type,
-                                        CancellationReason cancellationReason, Instant createdAt, Instant updatedAt) {
+                                        CancellationReason cancellationReason, Instant createdAt, Instant updatedAt,
+                                        Long version) {
         return new Appointment(id, psychologistId, patientId, scheduledAt, status, type,
-                cancellationReason, createdAt, updatedAt);
+                cancellationReason, createdAt, updatedAt, version);
     }
 
     public Appointment reschedule(AppointmentDate newDate, Instant now) {
@@ -104,6 +109,11 @@ public final class Appointment {
     }
     public Instant createdAt() { return createdAt; }
     public Instant updatedAt() { return updatedAt; }
+    public Optional<Long> version() { return Optional.ofNullable(version); }
+
+    public boolean isAtVersion(long expectedVersion) {
+        return version != null && version == expectedVersion;
+    }
 
     @Override
     public boolean equals(Object other) {

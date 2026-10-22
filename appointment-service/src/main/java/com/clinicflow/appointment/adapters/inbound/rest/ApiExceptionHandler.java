@@ -3,6 +3,7 @@ package com.clinicflow.appointment.adapters.inbound.rest;
 import com.clinicflow.appointment.application.exceptions.AppointmentNotFoundException;
 import com.clinicflow.appointment.application.exceptions.OwnershipCheckUnavailableException;
 import com.clinicflow.appointment.application.exceptions.PatientNotFoundException;
+import com.clinicflow.appointment.application.exceptions.StaleResourceVersionException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,6 +39,24 @@ public class ApiExceptionHandler {
     ProblemDetail ownershipCheckUnavailable(OwnershipCheckUnavailableException ex) {
         return ApiProblems.create(HttpStatus.SERVICE_UNAVAILABLE, "ownership_check_unavailable",
                 "Service unavailable", "Patient ownership could not be verified; try again later");
+    }
+
+    @ExceptionHandler(StaleResourceVersionException.class)
+    ProblemDetail staleVersion(StaleResourceVersionException ex) {
+        return ApiProblems.create(HttpStatus.PRECONDITION_FAILED, "stale_resource_version", "Stale resource version",
+                "The resource changed since you loaded it. Reload it and try again.");
+    }
+
+    @ExceptionHandler(PreconditionRequiredException.class)
+    ProblemDetail preconditionRequired(PreconditionRequiredException ex) {
+        return ApiProblems.create(HttpStatus.PRECONDITION_REQUIRED, "precondition_required", "Precondition required",
+                "Send If-Match with the version you last loaded");
+    }
+
+    @ExceptionHandler(InvalidPreconditionException.class)
+    ProblemDetail invalidPrecondition(InvalidPreconditionException ex) {
+        return ApiProblems.create(HttpStatus.BAD_REQUEST, "invalid_precondition", "Invalid precondition",
+                "If-Match must be one strong entity tag, such as \"3\"");
     }
 
     @ExceptionHandler(AccessDeniedException.class)

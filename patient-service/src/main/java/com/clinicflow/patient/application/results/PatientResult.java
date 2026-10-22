@@ -13,5 +13,5 @@ public record PatientResult(UUID id, UUID psychologistId, String email, String f
                             String emergencyContactPhone, String emergencyContactRelationship,
                             ContactPreference contactPreference, ConsentStatus consentStatus,
                             Instant consentUpdatedAt, PatientStatus status,
-                            Instant createdAt, Instant updatedAt) {
+                            Instant createdAt, Instant updatedAt, long version) {
 }

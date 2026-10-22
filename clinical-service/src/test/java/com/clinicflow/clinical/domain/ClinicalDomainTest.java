@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -27,18 +28,63 @@ class ClinicalDomainTest {
     private static final Instant NOW = Instant.parse("2026-06-01T10:00:00Z");
     private static final ZoneId UTC = ZoneId.of("UTC");
 
+    static Stream<Arguments> storedRecordVersions() {
+        ClinicalCase clinicalCase = ClinicalCase.rehydrate(new ClinicalCaseId(UUID.randomUUID()), PSYCHOLOGIST_ID,
+                PATIENT_ID, "Concern", ClinicalCaseStatus.ACTIVE, NOW, null, NOW, NOW, 7L);
+        CareGoal goal = new CareGoal(new CareGoalId(UUID.randomUUID()), "Goal", null, GoalStatus.NOT_STARTED, 0);
+        return Stream.of(
+                Arguments.of("clinical case", clinicalCase.version()),
+                Arguments.of("care plan", CarePlan.rehydrate(new CarePlanId(UUID.randomUUID()), clinicalCase.id(),
+                        PSYCHOLOGIST_ID, PATIENT_ID, "Focus", "Weekly", LocalDate.of(2026, 7, 15), List.of(goal), NOW,
+                        NOW, 7L).version()),
+                Arguments.of("session record", SessionRecord.rehydrate(new SessionRecordId(UUID.randomUUID()), null,
+                        PSYCHOLOGIST_ID, PATIENT_ID, null, NOW, SessionModality.ONLINE, 50, AttendanceStatus.ATTENDED,
+                        NoteStatus.DRAFT, null, null, null, null, null, NOW, NOW, null, null, 7L).version()),
+                Arguments.of("practice profile", PracticeProfile.rehydrate(PSYCHOLOGIST_ID, null, UTC, 50, null,
+                        false, NOW, NOW, 7L).version()));
+    }
+
+    static Stream<Arguments> newRecordVersions() {
+        ClinicalCase clinicalCase = ClinicalCase.create(new ClinicalCaseId(UUID.randomUUID()), PSYCHOLOGIST_ID,
+                PATIENT_ID, "Concern", NOW);
+        CareGoal goal = new CareGoal(new CareGoalId(UUID.randomUUID()), "Goal", null, GoalStatus.NOT_STARTED, 0);
+        return Stream.of(
+                Arguments.of("clinical case", clinicalCase.version()),
+                Arguments.of("care plan", CarePlan.create(new CarePlanId(UUID.randomUUID()), clinicalCase, "Focus",
+                        "Weekly", LocalDate.of(2026, 7, 15), List.of(goal), NOW).version()),
+                Arguments.of("session record", SessionRecord.fromCompletedAppointment(
+                        new SessionRecordId(UUID.randomUUID()), null, PSYCHOLOGIST_ID, PATIENT_ID, null, NOW,
+                        SessionModality.ONLINE, 50, NOW).version()),
+                Arguments.of("practice profile",
+                        PracticeProfile.create(PSYCHOLOGIST_ID, null, UTC, 50, null, false, NOW).version()));
+    }
+
+    @ParameterizedTest(name = "stored {0} keeps its version")
+    @MethodSource("storedRecordVersions")
+    void storedRecordsKeepTheVersionTheyWereLoadedWith(String record, Optional<Long> version) {
+        // Assert
+        assertThat(version).contains(7L);
+    }
+
+    @ParameterizedTest(name = "new {0} has no version")
+    @MethodSource("newRecordVersions")
+    void newRecordsHaveNoVersionUntilSaved(String record, Optional<Long> version) {
+        // Assert
+        assertThat(version).isEmpty();
+    }
+
     static Stream<Arguments> invalidPracticeProfiles() {
         return Stream.of(
                 Arguments.of("duration above maximum", (ThrowingCallable) () ->
                         PracticeProfile.create(PSYCHOLOGIST_ID, null, UTC, 241, null, false, NOW)),
                 Arguments.of("missing psychologist", (ThrowingCallable) () ->
-                        PracticeProfile.rehydrate(null, null, UTC, 50, null, false, NOW, NOW)),
+                        PracticeProfile.rehydrate(null, null, UTC, 50, null, false, NOW, NOW, null)),
                 Arguments.of("missing timezone", (ThrowingCallable) () ->
-                        PracticeProfile.rehydrate(PSYCHOLOGIST_ID, null, null, 50, null, false, NOW, NOW)),
+                        PracticeProfile.rehydrate(PSYCHOLOGIST_ID, null, null, 50, null, false, NOW, NOW, null)),
                 Arguments.of("missing createdAt", (ThrowingCallable) () ->
-                        PracticeProfile.rehydrate(PSYCHOLOGIST_ID, null, UTC, 50, null, false, null, NOW)),
+                        PracticeProfile.rehydrate(PSYCHOLOGIST_ID, null, UTC, 50, null, false, null, NOW, null)),
                 Arguments.of("missing updatedAt", (ThrowingCallable) () ->
-                        PracticeProfile.rehydrate(PSYCHOLOGIST_ID, null, UTC, 50, null, false, NOW, null)));
+                        PracticeProfile.rehydrate(PSYCHOLOGIST_ID, null, UTC, 50, null, false, NOW, null, null)));
     }
 
     static Stream<Arguments> invalidPracticeProfileUpdates() {
@@ -188,22 +234,23 @@ class ClinicalDomainTest {
         return Stream.of(
                 Arguments.of("clinical case", clinicalCase, ClinicalCase.rehydrate(clinicalCase.id(), PSYCHOLOGIST_ID,
                         PATIENT_ID, "Different concern", ClinicalCaseStatus.ACTIVE, NOW, null, NOW,
-                        NOW.plusSeconds(1))),
+                        NOW.plusSeconds(1), null)),
                 Arguments.of("practice profile",
                         PracticeProfile.create(PSYCHOLOGIST_ID, "OPP 123", ZoneId.of("Europe/Lisbon"), 50, "Lisbon",
                                 true, NOW),
                         PracticeProfile.rehydrate(PSYCHOLOGIST_ID, null, UTC, 60, null, false, NOW,
-                                NOW.plusSeconds(1))),
+                                NOW.plusSeconds(1), null)),
                 Arguments.of("care goal", goal, new CareGoal(goal.id(), "Other", null, GoalStatus.ACHIEVED, 100)),
                 Arguments.of("care plan",
                         CarePlan.create(planId, clinicalCase, "Focus", "Weekly", LocalDate.of(2026, 7, 15),
                                 List.of(goal), NOW),
                         CarePlan.rehydrate(planId, clinicalCase.id(), PSYCHOLOGIST_ID, PATIENT_ID, "Other", "Monthly",
-                                LocalDate.of(2026, 8, 1), List.of(goal), NOW, NOW)),
+                                LocalDate.of(2026, 8, 1), List.of(goal), NOW, NOW, null)),
                 Arguments.of("session record",
                         SessionRecord.rehydrate(sessionId, clinicalCase.id(), PSYCHOLOGIST_ID, PATIENT_ID,
                                 appointmentId, NOW, SessionModality.ONLINE, 50, AttendanceStatus.ATTENDED,
-                                NoteStatus.SIGNED, "Summary", null, null, null, null, NOW, NOW, NOW, PSYCHOLOGIST_ID),
+                                NoteStatus.SIGNED, "Summary", null, null, null, null, NOW, NOW, NOW, PSYCHOLOGIST_ID,
+                                null),
                         SessionRecord.fromCompletedAppointment(sessionId, null, PSYCHOLOGIST_ID, PATIENT_ID,
                                 appointmentId, NOW, SessionModality.IN_PERSON, 45, NOW)));
     }
@@ -306,7 +353,7 @@ class ClinicalDomainTest {
                                              Instant createdAt, Instant updatedAt) {
         // Act
         Throwable thrown = catchThrowable(() -> ClinicalCase.rehydrate(id, psychologistId, patientId, "Concern",
-                status, openedAt, null, createdAt, updatedAt));
+                status, openedAt, null, createdAt, updatedAt, null));
 
         // Assert
         assertThat(thrown).isInstanceOf(IllegalArgumentException.class);
@@ -381,7 +428,7 @@ class ClinicalDomainTest {
                                          List<CareGoal> goals, Instant createdAt, Instant updatedAt) {
         // Act
         Throwable thrown = catchThrowable(() -> CarePlan.rehydrate(id, caseId, psychologistId, patientId, "Focus",
-                "Weekly", reviewDate, goals, createdAt, updatedAt));
+                "Weekly", reviewDate, goals, createdAt, updatedAt, null));
 
         // Assert
         assertThat(thrown).isInstanceOf(IllegalArgumentException.class);
@@ -641,7 +688,7 @@ class ClinicalDomainTest {
         // Act
         Throwable thrown = catchThrowable(() -> SessionRecord.rehydrate(new SessionRecordId(UUID.randomUUID()),
                 null, PSYCHOLOGIST_ID, PATIENT_ID, null, NOW, SessionModality.ONLINE, 50, AttendanceStatus.ATTENDED,
-                noteStatus, "Summary", null, null, null, null, NOW, NOW, signedAt, signedBy));
+                noteStatus, "Summary", null, null, null, null, NOW, NOW, signedAt, signedBy, null));
 
         // Assert
         assertThat(thrown).isInstanceOf(IllegalArgumentException.class);
@@ -652,7 +699,7 @@ class ClinicalDomainTest {
         // Act
         SessionRecord signed = SessionRecord.rehydrate(new SessionRecordId(UUID.randomUUID()), null,
                 PSYCHOLOGIST_ID, PATIENT_ID, null, NOW, SessionModality.ONLINE, 50, AttendanceStatus.ATTENDED,
-                NoteStatus.SIGNED, "Summary", null, null, null, null, NOW, NOW, NOW, PSYCHOLOGIST_ID);
+                NoteStatus.SIGNED, "Summary", null, null, null, null, NOW, NOW, NOW, PSYCHOLOGIST_ID, null);
 
         // Assert
         assertThat(signed.signedBy()).contains(PSYCHOLOGIST_ID);
@@ -679,7 +726,7 @@ class ClinicalDomainTest {
         // Act
         Throwable thrown = catchThrowable(() -> SessionRecord.rehydrate(id, null, psychologistId, patientId, null,
                 sessionDate, modality, 50, attendance, noteStatus, null, null, null, null, null, createdAt,
-                updatedAt, null, null));
+                updatedAt, null, null, null));
 
         // Assert
         assertThat(thrown).isInstanceOf(IllegalArgumentException.class);
@@ -777,7 +824,7 @@ class ClinicalDomainTest {
         SessionRecord session = SessionRecord.rehydrate(sessionId, caseId, PSYCHOLOGIST_ID, PATIENT_ID,
                 appointmentId, NOW, SessionModality.ONLINE, 50, AttendanceStatus.ATTENDED, NoteStatus.SIGNED,
                 "Summary", "Focus", "CBT", "Homework", "Next", NOW, NOW.plusSeconds(1), NOW.plusSeconds(1),
-                PSYCHOLOGIST_ID);
+                PSYCHOLOGIST_ID, null);
 
         // Assert
         assertThat(session.id()).isEqualTo(sessionId);
@@ -905,7 +952,7 @@ class ClinicalDomainTest {
     private static SessionRecord session(NoteStatus noteStatus, String summary) {
         return SessionRecord.rehydrate(new SessionRecordId(UUID.randomUUID()), new ClinicalCaseId(UUID.randomUUID()),
                 PSYCHOLOGIST_ID, PATIENT_ID, null, NOW, SessionModality.ONLINE, 50, AttendanceStatus.ATTENDED,
-                noteStatus, summary, null, null, null, null, NOW, NOW, null, null);
+                noteStatus, summary, null, null, null, null, NOW, NOW, null, null, null);
     }
 
     private static SessionRecord signedSession() {

@@ -1,8 +1,11 @@
 package com.clinicflow.clinical.adapters.outbound.persistence;
 
+import com.clinicflow.clinical.application.exceptions.StaleResourceVersionException;
 import com.clinicflow.clinical.application.ports.PracticeProfileRepository;
 import com.clinicflow.clinical.domain.PracticeProfile;
 import com.clinicflow.clinical.domain.PsychologistId;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
@@ -24,7 +27,18 @@ public class JpaPracticeProfileRepository implements PracticeProfileRepository {
     }
 
     @Override
-    public void save(PracticeProfile profile) {
-        delegate.save(mapper.toJpa(profile));
+    public PracticeProfile save(PracticeProfile profile) {
+        try {
+            // Flush here so a concurrent write surfaces as a version conflict, not a commit failure.
+            return mapper.toDomain(delegate.saveAndFlush(mapper.toJpa(profile)));
+        } catch (OptimisticLockingFailureException ex) {
+            throw new StaleResourceVersionException();
+        } catch (DataIntegrityViolationException ex) {
+            // The psychologist id is the key, so a concurrent first save of the same profile collides here.
+            if (profile.version().isEmpty()) {
+                throw new StaleResourceVersionException();
+            }
+            throw ex;
+        }
     }
 }

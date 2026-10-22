@@ -8,7 +8,8 @@ import java.util.List;
 import java.util.Optional;
 
 public interface PatientRepository {
-    void save(Patient patient);
+    // Returns the stored patient, including the version persistence assigned.
+    Patient save(Patient patient);
     Optional<Patient> findById(PatientId id);
     List<Patient> findByPsychologistId(PsychologistId psychologistId);
 }

@@ -13,5 +13,5 @@ import com.clinicflow.patient.domain.PsychologistId;
 public record UpdatePatientCommand(PsychologistId psychologistId, PatientId patientId, FullName fullName,
                                    PreferredName preferredName, BirthDate birthDate, PhoneNumber phone,
                                    EmergencyContact emergencyContact, ContactPreference contactPreference,
-                                   ConsentStatus consentStatus) {
+                                   ConsentStatus consentStatus, long expectedVersion) {
 }

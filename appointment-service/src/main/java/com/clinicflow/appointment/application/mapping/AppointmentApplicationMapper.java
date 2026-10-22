@@ -16,7 +16,8 @@ public abstract class AppointmentApplicationMapper {
                 appointment.scheduledAt().value(),
                 appointment.status(),
                 appointment.type(),
-                appointment.cancellationReason().map(reason -> reason.value()).orElse(null)
+                appointment.cancellationReason().map(reason -> reason.value()).orElse(null),
+                appointment.version().orElseThrow(() -> new IllegalStateException("Appointment has not been saved"))
         );
     }
 }

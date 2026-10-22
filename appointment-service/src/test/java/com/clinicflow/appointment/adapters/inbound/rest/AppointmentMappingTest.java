@@ -56,10 +56,11 @@ class AppointmentMappingTest {
         RescheduleAppointmentRequest request = new RescheduleAppointmentRequest(Instant.now().plusSeconds(7200));
 
         // Act
-        RescheduleAppointmentCommand command = restMapper.toCommand(PSYCHOLOGIST_ID, APPOINTMENT_ID, request);
+        RescheduleAppointmentCommand command = restMapper.toCommand(PSYCHOLOGIST_ID, APPOINTMENT_ID, request, 3);
 
         // Assert
         assertThat(command.appointmentId()).isEqualTo(new AppointmentId(APPOINTMENT_ID));
+        assertThat(command.expectedVersion()).isEqualTo(3);
     }
 
     @Test
@@ -68,7 +69,7 @@ class AppointmentMappingTest {
         CancelAppointmentRequest request = new CancelAppointmentRequest("  Patient request ");
 
         // Act
-        CancelAppointmentCommand command = restMapper.toCommand(PSYCHOLOGIST_ID, APPOINTMENT_ID, request);
+        CancelAppointmentCommand command = restMapper.toCommand(PSYCHOLOGIST_ID, APPOINTMENT_ID, request, 3);
 
         // Assert
         assertThat(command.reason().value()).isEqualTo("Patient request");
@@ -77,10 +78,11 @@ class AppointmentMappingTest {
     @Test
     void completeCommandTargetsTheRequestedAppointment() {
         // Act
-        CompleteAppointmentCommand command = restMapper.toCompleteCommand(PSYCHOLOGIST_ID, APPOINTMENT_ID);
+        CompleteAppointmentCommand command = restMapper.toCompleteCommand(PSYCHOLOGIST_ID, APPOINTMENT_ID, 3);
 
         // Assert
         assertThat(command.appointmentId()).isEqualTo(new AppointmentId(APPOINTMENT_ID));
+        assertThat(command.expectedVersion()).isEqualTo(3);
     }
 
     @Test
@@ -105,13 +107,18 @@ class AppointmentMappingTest {
     void appointmentMapsToApplicationResult() {
         // Arrange
         Instant scheduledAt = Instant.now().plusSeconds(3600);
-        Appointment appointment = Appointment.create(
+        Instant now = Instant.now();
+        Appointment appointment = Appointment.rehydrate(
                 new AppointmentId(APPOINTMENT_ID),
                 new PsychologistId(PSYCHOLOGIST_ID),
                 new PatientId(PATIENT_ID),
                 new AppointmentDate(scheduledAt),
+                AppointmentStatus.SCHEDULED,
                 AppointmentType.ONLINE,
-                Instant.now()
+                null,
+                now,
+                now,
+                4L
         );
 
         // Act
@@ -121,6 +128,7 @@ class AppointmentMappingTest {
         assertThat(result.id()).isEqualTo(APPOINTMENT_ID);
         assertThat(result.scheduledAt()).isEqualTo(scheduledAt);
         assertThat(result.status()).isEqualTo(AppointmentStatus.SCHEDULED);
+        assertThat(result.version()).isEqualTo(4);
     }
 
     @Test
@@ -128,7 +136,7 @@ class AppointmentMappingTest {
         // Arrange
         Instant scheduledAt = Instant.parse("2099-06-12T10:00:00Z");
         AppointmentResult result = new AppointmentResult(APPOINTMENT_ID, PSYCHOLOGIST_ID, PATIENT_ID,
-                scheduledAt, AppointmentStatus.SCHEDULED, AppointmentType.ONLINE, null);
+                scheduledAt, AppointmentStatus.SCHEDULED, AppointmentType.ONLINE, null, 4);
 
         // Act
         AppointmentResponse response = restMapper.toResponse(result);

@@ -1,5 +1,6 @@
 package com.clinicflow.patient.adapters.outbound.persistence;
 
+import com.clinicflow.patient.application.exceptions.StaleResourceVersionException;
 import com.clinicflow.patient.domain.BirthDate;
 import com.clinicflow.patient.domain.ConsentStatus;
 import com.clinicflow.patient.domain.ContactPreference;
@@ -13,12 +14,15 @@ import com.clinicflow.patient.domain.PreferredName;
 import com.clinicflow.patient.domain.PsychologistId;
 import org.junit.jupiter.api.Test;
 import org.mapstruct.factory.Mappers;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowable;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -43,7 +47,19 @@ class PatientPersistenceMapperTest {
     }
 
     @Test
-    void repositorySavePersistsTheMappedEntity() {
+    void roundTripsTheVersion() {
+        // Arrange
+        Patient patient = storedPatient(4L);
+
+        // Act
+        Patient restored = mapper.toDomain(mapper.toJpa(patient));
+
+        // Assert
+        assertThat(restored.version()).contains(4L);
+    }
+
+    @Test
+    void repositorySaveFlushesTheMappedEntity() {
         // Arrange
         SpringDataPatientJpaRepository delegate = mock(SpringDataPatientJpaRepository.class);
         PatientPersistenceMapper mockedMapper = mock(PatientPersistenceMapper.class);
@@ -56,21 +72,45 @@ class PatientPersistenceMapperTest {
         repository.save(patient);
 
         // Assert
-        verify(delegate).save(jpa);
+        verify(delegate).saveAndFlush(jpa);
     }
 
     @Test
-    void repositorySaveKeepsTheSuppliedDomainInstance() {
+    void repositorySaveReturnsTheStoredPatient() {
         // Arrange
         SpringDataPatientJpaRepository delegate = mock(SpringDataPatientJpaRepository.class);
-        Patient patient = patient();
+        when(delegate.saveAndFlush(any())).thenReturn(mapper.toJpa(storedPatient(0L)));
         JpaPatientRepository repository = new JpaPatientRepository(delegate, mapper);
 
         // Act
-        repository.save(patient);
+        Patient saved = repository.save(patient());
 
         // Assert
-        assertThat(patient.fullName()).isEqualTo(new FullName("Patient Name"));
+        assertThat(saved.version()).contains(0L);
+    }
+
+    @Test
+    void repositorySaveReportsAConcurrentWriteAsAStaleVersion() {
+        // Arrange
+        SpringDataPatientJpaRepository delegate = mock(SpringDataPatientJpaRepository.class);
+        when(delegate.saveAndFlush(any())).thenThrow(new ObjectOptimisticLockingFailureException(
+                JpaPatientEntity.class, UUID.randomUUID()));
+        JpaPatientRepository repository = new JpaPatientRepository(delegate, mapper);
+
+        // Act
+        Throwable thrown = catchThrowable(() -> repository.save(storedPatient(1L)));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(StaleResourceVersionException.class);
+    }
+
+    private Patient storedPatient(Long version) {
+        Patient patient = patient();
+        return Patient.rehydrate(patient.id(), patient.psychologistId(), patient.email(), patient.fullName(),
+                patient.preferredName().orElseThrow(), patient.birthDate().orElseThrow(),
+                patient.phone().orElseThrow(), patient.emergencyContact().orElseThrow(),
+                patient.contactPreference(), patient.consentStatus(), patient.consentUpdatedAt(),
+                patient.status(), patient.createdAt(), patient.updatedAt(), version);
     }
 
     private Patient patient() {
