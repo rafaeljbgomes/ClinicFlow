@@ -386,8 +386,9 @@ consequences.
 
 Decision: each service has its own PostgreSQL owner role (used only by Flyway), a
 runtime role with data-only privileges on its own database, and, for messaging
-services, its own RabbitMQ user whose permissions name exactly the exchanges and
-queues it uses. `CONNECT` is revoked from `PUBLIC`, so no service reaches
+services, its own RabbitMQ user whose permissions name exactly the exchanges,
+queues and routing keys it uses, so it can neither forge another service's
+events nor subscribe to events it does not consume. `CONNECT` is revoked from `PUBLIC`, so no service reaches
 another service's database. The administrator logins stay with the platform.
 Passwords are generated into Git-ignored files. An idempotent bootstrap
 (Compose services, Helm hook Job) creates or rotates the identities, and

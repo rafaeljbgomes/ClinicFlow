@@ -78,8 +78,11 @@ in existing PostgreSQL volumes and clears incompatible legacy `patients.phone`
 values, so the strict E.164 Flyway migration can be applied locally. It then
 creates or updates each service's owner role (used by Flyway) and runtime role
 (data access only), and hands objects created under the old shared login to the
-owner role. `rabbitmq-bootstrap` creates or updates each messaging service's
-RabbitMQ user and its permissions. A bootstrap fails with a pointer to the
+owner role. `rabbitmq-bootstrap` declares the shared exchanges and creates or
+updates each messaging service's RabbitMQ user, its permissions, and the routing
+keys it may publish and bind with. A new event or subscription therefore needs
+its routing key added to `deploy/helm/platform/files/bootstrap/service-identities.conf`.
+A bootstrap fails with a pointer to the
 generator when credentials are missing.
 
 Docker Compose also enables the demo-data bootstrap through

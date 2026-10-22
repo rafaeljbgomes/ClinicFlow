@@ -85,7 +85,8 @@ The following properties must hold for supported behavior:
   documented API or event contract rather than shared database tables.
 - Each service connects with its own database and broker logins. Its runtime
   role cannot change its schema or connect to another service's database, its
-  RabbitMQ user reaches only its own exchanges and queues, and no service
+  RabbitMQ user reaches only its own exchanges and queues, it may publish and
+  bind only its own routing keys, and no service
   receives an administrator credential (ADR-026).
 - Kubernetes network policies restrict traffic to the documented frontend,
   service, database, broker, DNS, and monitoring flows.

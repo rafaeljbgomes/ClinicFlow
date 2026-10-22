@@ -30,7 +30,7 @@ service is added once.
 |---|---|---|
 | `clinicflow_<service>_owner` | Flyway (`spring.flyway.user`) | Owns `clinicflow_<service>` and every object in it. No superuser, `CREATEDB`, `CREATEROLE`, replication or `BYPASSRLS`. |
 | `clinicflow_<service>_app` | The runtime datasource | `CONNECT` on its own database. `SELECT/INSERT/UPDATE/DELETE` on tables and `USAGE/SELECT` on sequences, granted through default privileges for later migrations. No DDL, no `TRUNCATE`, read-only Flyway history. |
-| `<service>` (RabbitMQ) | Messaging services | No tags, so no management API. Configure, write and read regexes on vhost `/` list exactly the exchanges and queues the service declares, binds, publishes to or consumes. |
+| `<service>` (RabbitMQ) | Messaging services | No tags, so no management API. Configure, write and read regexes on vhost `/` list exactly the exchanges and queues the service declares, binds, publishes to or consumes. Topic permissions on the shared exchanges list the routing keys it may publish and bind with. |
 | `clinicflow` | PostgreSQL, RabbitMQ and the bootstrap | Administrator. |
 
 `CONNECT` is revoked from `PUBLIC` on every service database and on the
@@ -41,6 +41,34 @@ follow the
 consumer declaring its queue with a dead-letter exchange needs configure on the
 queue, write on the DLX and read on the queue. Binding needs write on the queue
 and read on the exchange.
+
+Those permissions check exchange and queue names, not routing keys. All events
+share one topic exchange, `therapy.events.exchange`, so on their own they would
+let any publisher send any event: patient-service could publish
+`appointment.completed`, and clinical-service would create a session record for
+an appointment that never happened. They would also let any consumer bind its
+own queue with `#`: clinical-service would then receive `patient.created`, which
+carries the patient's email address. RabbitMQ
+[topic permissions](https://www.rabbitmq.com/docs/access-control#topic-authorisation)
+close both holes. On `therapy.events.exchange` and `therapy.events.dlx`:
+
+- a *write* pattern is matched against the routing key of every message the
+  user publishes;
+- a *read* pattern is matched against the binding key of every binding the user
+  creates.
+
+| User | May publish | May bind |
+|---|---|---|
+| patient-service | `patient.created` | nothing |
+| appointment-service | `appointment.scheduled`, `.rescheduled`, `.cancelled`, `.completed` | nothing |
+| clinical-service | nothing | `appointment.completed`, and `clinical.failed` for its DLQ |
+| notification-service | nothing | `patient.created`, `appointment.scheduled`, `.rescheduled`, `.cancelled`, and `notification.failed` for its DLQ |
+
+A topic permission can only name an existing exchange, so the bootstrap declares
+both exchanges with the same settings as the services (durable topic, not
+auto-deleted), and the services' declarations stay idempotent. `rabbitmqadmin`
+has no topic-permission command, so the bootstrap merges them through a
+definitions import.
 
 ### Generated credentials
 
@@ -95,15 +123,23 @@ Rotation:
 
 - One compromised or faulty service reaches only its own data and its own
   queues. It cannot change its schema at runtime, so it cannot drop the
-  signed-note trigger.
+  signed-note trigger. It can publish only its own events and receive only the
+  events it subscribes to.
+- A new event or subscription needs its routing key added to
+  `service-identities.conf` with the code change. Otherwise the broker refuses
+  the publish or the binding, and the service fails at startup or when it
+  publishes. The list is the contract of who may send and receive which event.
 - The runtime role can still read every table in its own database, including
   `flyway_schema_history`. Its write privileges on that table are revoked from
   the second bootstrap run onwards, because the table does not exist before the
   first migration.
-- Applications still declare their own topology, so a consumer has read on the
-  shared `therapy.events.exchange` and could bind its own queue to any routing
-  key. Moving the topology into broker-owned definitions would remove that, at
-  the cost of taking the declarations out of the services. It is deferred.
+- Applications still declare their own queues and bindings, within the name and
+  routing-key limits above. Moving the whole topology into broker-owned
+  definitions would also stop a service from creating or shaping its own queues.
+  It would need code changes in four services, test fixtures that preload the
+  definitions, and a platform change before every new binding, against ADR-017's
+  independent service delivery. Topic permissions already close the security
+  gap, so broker-owned topology is deferred.
 - The bootstrap passes service passwords to `rabbitmqadmin` as arguments, which
   are visible only inside the short-lived bootstrap container. The administrator
   login travels through the environment.
