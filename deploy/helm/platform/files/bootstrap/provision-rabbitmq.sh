@@ -8,9 +8,23 @@ set -eu
 . "$(dirname "$0")/credentials.sh"
 export RABBITMQADMIN_NON_INTERACTIVE_MODE=true RABBITMQADMIN_QUIET_MODE=true
 
+# Topic exchanges whose routing keys are limited per service. The exchange-level permissions alone
+# would let any publisher send any event and any consumer bind its queue with "#".
+topic_exchanges="therapy.events.exchange therapy.events.dlx"
+
+json_string() {
+    printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+}
+
 retry rabbitmqadmin show overview
 
-while read -r service _database configure write read; do
+# Topic permissions can only name an existing exchange. Declare them exactly as the services do
+# (durable, not auto-deleted), so the services' own declarations stay idempotent.
+for exchange in $topic_exchanges; do
+    rabbitmqadmin declare exchange --name "$exchange" --type topic --durable true --auto-delete false
+done
+
+while read -r service _database configure write read topic_write topic_read; do
     case "$service" in ''|'#'*) continue ;; esac
     [ "$configure" = "-" ] && continue
     (
@@ -19,6 +33,18 @@ while read -r service _database configure write read; do
         rabbitmqadmin users declare --name "$SPRING_RABBITMQ_USERNAME" --password "$SPRING_RABBITMQ_PASSWORD" --tags ""
         rabbitmqadmin permissions declare --vhost / --username "$SPRING_RABBITMQ_USERNAME" \
             --configure "$configure" --write "$write" --read "$read"
+        # rabbitmqadmin has no topic-permission command; a definitions import merges them instead.
+        separator=""
+        {
+            printf '{"topic_permissions":['
+            for exchange in $topic_exchanges; do
+                printf '%s{"user":%s,"vhost":"/","exchange":%s,"write":%s,"read":%s}' "$separator" \
+                    "$(json_string "$SPRING_RABBITMQ_USERNAME")" "$(json_string "$exchange")" \
+                    "$(json_string "$topic_write")" "$(json_string "$topic_read")"
+                separator=","
+            done
+            printf ']}'
+        } | rabbitmqadmin definitions import --stdin
     )
     echo "RabbitMQ user ready for $service."
 done < "$identities_file"
