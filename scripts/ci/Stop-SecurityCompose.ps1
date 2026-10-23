@@ -11,6 +11,6 @@ try {
     & docker compose --file docker-compose.yml --file docker-compose.ci.yml --file docker-compose.security.yml --project-name $Project --profile security down --volumes --remove-orphans --rmi local
     if ($LASTEXITCODE -ne 0) { Write-Warning "Security cleanup failed for $Project; investigate its labeled resources." }
     # Only tags created for this isolated run, never vendor/base images.
-    & docker image rm "clinicflow/zap:$Project" "clinicflow/gateway:ci-$Project" "clinicflow/postgres-bootstrap:ci-$Project" 2>$null
+    & docker image rm "clinicflow/zap:$Project" "clinicflow/gateway:ci-$Project" "clinicflow/postgres:ci-$Project" "clinicflow/postgres-bootstrap:ci-$Project" 2>$null
 }
 finally { Pop-Location }

@@ -43,7 +43,7 @@ Shared infrastructure remains shared where that is operationally appropriate.
 - `deploy/helm/platform/templates/networkpolicy.yaml`
 - `deploy/helm/service/templates/configmap.yaml`
 - `deploy/helm/service/templates/networkpolicy.yaml`
-- `docker/postgres/init/**` and `docker/postgres/bootstrap/**`
+- `docker/postgres/Dockerfile`, `docker/postgres/init/**` and `docker/postgres/bootstrap/**`
 - `docker-compose.yml` and `docker-compose.ci.yml`
 - backend Kubernetes profiles
 

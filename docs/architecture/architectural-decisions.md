@@ -415,3 +415,15 @@ Passwords are generated into Git-ignored files. An idempotent bootstrap
 post-start hooks re-apply the administrator passwords to existing volumes. See
 [ADR-026](decisions/ADR-026-per-service-credentials.md) for the privilege table,
 rotation and residual risks.
+
+## ADR-028: ClinicFlow PostgreSQL Image without gosu
+
+Decision: PostgreSQL and its bootstrap run ClinicFlow's image built from
+`docker/postgres/Dockerfile`: the digest-pinned official image with `gosu`
+removed and `USER 70:70`, in Compose, CI and Kubernetes.
+
+Rationale: `gosu` only drops root to UID 70 at container start, and it carried
+Go 1.24.6 standard-library CVEs with no upstream rebuild. Starting as UID 70
+everywhere makes the binary unnecessary, so it is removed rather than tracked.
+See [ADR-028](decisions/ADR-028-postgres-image-without-gosu.md) for the image
+tags, upgrade path and consequences.

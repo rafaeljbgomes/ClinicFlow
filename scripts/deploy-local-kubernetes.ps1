@@ -142,6 +142,22 @@ try {
         }
     }
 
+    # The platform runs ClinicFlow's PostgreSQL image without gosu (ADR-028). It is tagged by image ID,
+    # so a rebuild that changes nothing keeps the tag and does not restart the database. Provenance is
+    # off because its timestamped attestation would change the ID of every build.
+    if ($Component -in @("All", "Platform")) {
+        if (-not $SkipBuild) {
+            Write-Host "Building the PostgreSQL image..."
+            Invoke-Checked docker build --provenance=false --target server -t clinicflow/postgres:local docker/postgres
+        }
+        $postgresImageId = (& docker image inspect clinicflow/postgres:local --format '{{.Id}}' 2>$null)
+        if ($LASTEXITCODE -ne 0 -or "$postgresImageId" -notmatch '^sha256:[0-9a-f]{64}$') {
+            throw "Image 'clinicflow/postgres:local' was not found; run without -SkipBuild to build it."
+        }
+        $postgresImage = "clinicflow/postgres:id-$("$postgresImageId".Substring(7, 12))"
+        Invoke-Checked docker tag clinicflow/postgres:local $postgresImage
+    }
+
     if (-not (Test-Path $privateKey) -or -not (Test-Path $publicKey)) {
         Write-Host "JWT development keys are missing; generating them..."
         & (Join-Path $PSScriptRoot "generate-dev-jwt-keys.ps1")
@@ -197,6 +213,7 @@ try {
         Invoke-Checked helm upgrade --install clinicflow-platform $platformChart `
             --namespace $Namespace `
             --values $platformValues `
+            --set-string "postgres.image=$postgresImage" `
             --set-string "postgres.credentialsChecksum=$($credentialChecksums.postgres)" `
             --set-string "rabbitmq.credentialsChecksum=$($credentialChecksums.rabbitmq)" `
             --rollback-on-failure `

@@ -201,7 +201,10 @@ Run the complete local deployment from the repository root:
 ```
 
 The script derives a commit/timestamp image tag, builds the local images,
-generates missing development JWT keys and credentials, and creates or updates
+builds ClinicFlow's PostgreSQL image (the official image without `gosu`,
+ADR-028) and pins it by an `id-<image id>` tag, so a rebuild that changes
+nothing does not restart the database. It generates missing development JWT
+keys and credentials, and creates or updates
 the JWT Secret. It also creates or updates `clinicflow-postgres-admin`,
 `clinicflow-rabbitmq-admin` and one `<service>-credentials` Secret per service.
 It then installs observability and the shared platform, upgrades six
@@ -236,6 +239,7 @@ docker build -t "clinicflow/appointment-service:$imageTag" -f appointment-servic
 docker build -t "clinicflow/clinical-service:$imageTag" -f clinical-service/Dockerfile .
 docker build -t "clinicflow/notification-service:$imageTag" -f notification-service/Dockerfile .
 docker build -t "clinicflow/frontend:$imageTag" -f frontend/Dockerfile frontend
+docker build --target server -t "clinicflow/postgres:$imageTag" docker/postgres
 ```
 
 Create the JWT Secret from the local development keys:
@@ -274,6 +278,7 @@ helm upgrade --install clinicflow-observability deploy/helm/observability `
 
 helm upgrade --install clinicflow-platform deploy/helm/platform `
   -n clinicflow -f deploy/helm/platform/values-docker-desktop.yaml `
+  --set-string "postgres.image=clinicflow/postgres:$imageTag" `
   --rollback-on-failure --wait=watcher --server-side=false --timeout 5m
 
 foreach ($service in "auth", "patient", "appointment", "clinical", "notification") {
