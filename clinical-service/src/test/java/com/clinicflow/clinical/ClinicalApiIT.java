@@ -1,15 +1,18 @@
 package com.clinicflow.clinical;
 
+import com.clinicflow.clinical.application.ports.SessionRecordRepository;
 import com.clinicflow.clinical.support.StubHttpServer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.mockito.InOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -21,6 +24,7 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.client.EntityExchangeResult;
 import org.springframework.test.web.servlet.client.RestTestClient;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -43,6 +47,9 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.when;
 
@@ -87,6 +94,8 @@ class ClinicalApiIT {
     @Autowired private RestTestClient http;
     @Autowired private JdbcTemplate jdbc;
     @MockitoBean private JwtDecoder jwtDecoder;
+    // Calls the real repository unless a test makes one save fail.
+    @MockitoSpyBean private SessionRecordRepository sessionRecords;
 
     @BeforeEach
     void cleanDatabaseAndConfigureSecurity() {
@@ -273,6 +282,50 @@ class ClinicalApiIT {
 
         // Assert
         assertThat(storedSession(claimId.toString())).containsEntry("appointment_id", APPOINTMENT_ID);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM session_record_link_conflicts", Long.class)).isZero();
+    }
+
+    @Test
+    void ownersFailedRecordFailsOnlyAfterTheLegacyClaimWasReleased() {
+        // Arrange
+        UUID claimId = legacySignedClaim(APPOINTMENT_ID);
+        String caseId = createCase("psychologist-token", PATIENT_ID);
+        failTheOwnersSessionRecord();
+
+        // Act
+        exchange("/clinical-cases/" + caseId + "/session-records", HttpMethod.POST, linkedSession(APPOINTMENT_ID));
+
+        // Assert
+        InOrder order = inOrder(sessionRecords);
+        order.verify(sessionRecords).save(argThat(record -> record.id().value().equals(claimId)));
+        order.verify(sessionRecords).save(argThat(record -> record.psychologistId().value().equals(PSYCHOLOGIST_ID)));
+    }
+
+    @Test
+    void ownersFailedRecordRollsBackTheReleasedLink() {
+        // Arrange
+        UUID claimId = legacySignedClaim(APPOINTMENT_ID);
+        String caseId = createCase("psychologist-token", PATIENT_ID);
+        failTheOwnersSessionRecord();
+
+        // Act
+        exchange("/clinical-cases/" + caseId + "/session-records", HttpMethod.POST, linkedSession(APPOINTMENT_ID));
+
+        // Assert
+        assertThat(storedSession(claimId.toString())).containsEntry("appointment_id", APPOINTMENT_ID);
+    }
+
+    @Test
+    void ownersFailedRecordRollsBackTheConflictAudit() {
+        // Arrange
+        legacySignedClaim(APPOINTMENT_ID);
+        String caseId = createCase("psychologist-token", PATIENT_ID);
+        failTheOwnersSessionRecord();
+
+        // Act
+        exchange("/clinical-cases/" + caseId + "/session-records", HttpMethod.POST, linkedSession(APPOINTMENT_ID));
+
+        // Assert
         assertThat(jdbc.queryForObject("SELECT count(*) FROM session_record_link_conflicts", Long.class)).isZero();
     }
 
@@ -964,6 +1017,13 @@ class ClinicalApiIT {
             body.put("summary", summary);
         }
         return body;
+    }
+
+    // The owner's insert fails after the claim's link was released, as a constraint violation on that row would.
+    private void failTheOwnersSessionRecord() {
+        doThrow(new DataIntegrityViolationException("Forced failure of the owner's session record"))
+                .when(sessionRecords)
+                .save(argThat(record -> record.psychologistId().value().equals(PSYCHOLOGIST_ID)));
     }
 
     // Before ADR-021 any psychologist could link any appointment id; this rebuilds such a row, already signed.
