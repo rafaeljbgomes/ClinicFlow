@@ -262,7 +262,9 @@ per-account control behind it.
   password placeholders, which Keycloak resolves from the environment at import.
   The spike confirmed this for the client secret and the user credentials. No
   secret is committed. The bootstrap admin, database password and client secret
-  come from generated, Git-ignored files, following ADR-026.
+  come from generated, Git-ignored files, following ADR-026. Keycloak's own
+  database runs on the ClinicFlow PostgreSQL image (ADR-028). The spike used the
+  upstream image only because it is throwaway.
 - **Kubernetes: the codecentric `keycloakx` chart** (7.4.0, `appVersion`
   26.8.1) with the ClinicFlow image, installed as its own Helm release (ADR-011,
   ADR-017). The realm is mounted from the same JSON file that Compose uses, and
