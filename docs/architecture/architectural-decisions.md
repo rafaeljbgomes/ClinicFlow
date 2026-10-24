@@ -264,8 +264,8 @@ for a signed note. Signing an incomplete note returns `409 session_record_not_si
 The domain enforces the lock, and PostgreSQL backs it (`V2__lock_signed_session_records.sql`). A
 CHECK constraint ties the signature columns to `note_status`. A row trigger rejects `DELETE` and
 any changing `UPDATE` of a signed row with SQLSTATE `23L01`, which the persistence adapter maps to
-the same `409`. This closes the stale-edit race that exists until optimistic locking lands, and
-covers code paths that bypass `update()`.
+the same `409`. Since ADR-024 the version check rejects a stale edit or signature first; the
+trigger remains the backstop for code paths that bypass versions or `update()`.
 
 Consequences: demo seeding inserts session records only when absent. Corrections need linked
 amendment records, which are future work; until then a signed note cannot be changed. A database
@@ -387,6 +387,26 @@ listener retry (four deliveries before dead-lettering, unchanged), and
 [ADR-023](decisions/ADR-023-spring-boot-4.md) for the migration details and
 consequences.
 
+## ADR-024: Optimistic Concurrency for Mutable Records
+
+Decision: patients, appointments, clinical cases, care plans, session records and
+practice profiles carry a persistence-assigned version (`@Version`); a care plan's
+version covers its goals. Every update and action names the version it was based
+on with `If-Match: "<version>"`. A missing header returns `428
+precondition_required`, a malformed one `400 invalid_precondition`, and a stale
+version `412 stale_resource_version` with nothing changed. Responses carry the
+version in the body and, for single records, as `ETag`. Care plans and practice
+profiles are created by their first `PUT` with `If-None-Match: *`. The version is
+compared after the ADR-021 ownership check, so foreign ids still answer `404`.
+
+Rationale: writes replaced whole rows from the loaded snapshot, so a stale form
+silently reverted consent, deleted care goals, overwrote clinical text or signed
+a revision nobody reviewed, and racing appointment commands left contradictory
+outbox events. The UI sends the version of the snapshot a form opened with and,
+on `412`, keeps the user's input and offers to reload the latest version instead
+of merging. See [ADR-024](decisions/ADR-024-optimistic-concurrency.md) for the
+contract, the alternatives considered and the consequences.
+
 ## ADR-026: Per-Service Database and Broker Credentials
 
 Decision: each service has its own PostgreSQL owner role (used only by Flyway), a
@@ -416,3 +436,15 @@ Self-registration yields only `PATIENT`. Kubernetes uses the codecentric
 [ADR-027](decisions/ADR-027-keycloak-identity-provider.md) for the token
 contract, the spike evidence, the issuer and backchannel rule, footprint and
 upgrade cadence. ADR-027 supersedes ADR-006 for token issuance.
+
+## ADR-028: ClinicFlow PostgreSQL Image without gosu
+
+Decision: PostgreSQL and its bootstrap run ClinicFlow's image built from
+`docker/postgres/Dockerfile`: the digest-pinned official image with `gosu`
+removed and `USER 70:70`, in Compose, CI and Kubernetes.
+
+Rationale: `gosu` only drops root to UID 70 at container start, and it carried
+Go 1.24.6 standard-library CVEs with no upstream rebuild. Starting as UID 70
+everywhere makes the binary unnecessary, so it is removed rather than tracked.
+See [ADR-028](decisions/ADR-028-postgres-image-without-gosu.md) for the image
+tags, upgrade path and consequences.

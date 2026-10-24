@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import useSWR from "swr";
 import { LockKeyholeIcon, ShieldCheckIcon, UserRoundIcon } from "lucide-react";
 import { toast } from "sonner";
@@ -10,6 +11,7 @@ import {
   type PracticeProfileFormValues,
 } from "@/components/clinical-forms";
 import { SectionHeader } from "@/components/section-header";
+import { StaleVersionAlert } from "@/components/stale-version-alert";
 import {
   Card,
   CardContent,
@@ -19,7 +21,7 @@ import {
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { apiFetch, swrFetcher } from "@/lib/api-client";
+import { apiFetch, isStaleVersion, swrFetcher } from "@/lib/api-client";
 import type { PracticeProfile, UserView } from "@/lib/types";
 
 export default function SettingsPage() {
@@ -28,18 +30,36 @@ export default function SettingsPage() {
     error: userError,
     isLoading: isUserLoading,
   } = useSWR<UserView>("/api/auth/me", swrFetcher);
+  // The form follows this data, so it only refreshes on an explicit save or reload: a background
+  // revalidation must not swap the profile, and its version, under an edit in progress.
   const practiceProfile = useSWR<PracticeProfile>(
     user?.role === "PSYCHOLOGIST" ? "/api/practice-profile" : null,
-    swrFetcher
+    swrFetcher,
+    { revalidateOnFocus: false, revalidateOnReconnect: false }
   );
+  const [profileConflict, setProfileConflict] = useState(false);
 
+  // The first save creates the profile; later saves replace the version the form shows.
   async function savePracticeProfile(values: PracticeProfileFormValues) {
-    await apiFetch<PracticeProfile>("/api/practice-profile", {
-      method: "PUT",
-      body: values,
-    });
+    try {
+      await apiFetch<PracticeProfile>("/api/practice-profile", {
+        method: "PUT",
+        body: values,
+        expectedVersion: practiceProfile.data?.version ?? null,
+      });
+    } catch (failure) {
+      if (!isStaleVersion(failure)) throw failure;
+      setProfileConflict(true);
+      return;
+    }
     toast.success("Practice profile saved");
+    setProfileConflict(false);
     await practiceProfile.mutate();
+  }
+
+  async function reloadPracticeProfile() {
+    await practiceProfile.mutate();
+    setProfileConflict(false);
   }
 
   const error = userError ?? practiceProfile.error;
@@ -82,7 +102,10 @@ export default function SettingsPage() {
                   {practiceProfile.isLoading ? (
                     <Skeleton className="h-80 rounded-[24px]" />
                   ) : (
-                    <PracticeProfileForm profile={practiceProfile.data} onSubmit={savePracticeProfile} />
+                    <>
+                      {profileConflict ? <StaleVersionAlert onReload={reloadPracticeProfile} /> : null}
+                      <PracticeProfileForm profile={practiceProfile.data} onSubmit={savePracticeProfile} />
+                    </>
                   )}
                 </CardContent>
               </Card>

@@ -19,13 +19,17 @@ class JpaAppointmentEntity {
     @Column(name = "cancellation_reason", length = 500) private String cancellationReason;
     @Column(name = "created_at", nullable = false) private Instant createdAt;
     @Column(name = "updated_at", nullable = false) private Instant updatedAt;
+    // A wrapper type, so Spring Data persists a null version and merges anything else.
+    @Version @Column(nullable = false) private Long version;
 
     protected JpaAppointmentEntity() {}
 
     JpaAppointmentEntity(UUID id, UUID psychologistId, UUID patientId, Instant scheduledAt, AppointmentStatus status,
-                         AppointmentType type, String cancellationReason, Instant createdAt, Instant updatedAt) {
+                         AppointmentType type, String cancellationReason, Instant createdAt, Instant updatedAt,
+                         Long version) {
         this.id = id; this.psychologistId = psychologistId; this.patientId = patientId; this.scheduledAt = scheduledAt;
         this.status = status; this.type = type; this.cancellationReason = cancellationReason; this.createdAt = createdAt; this.updatedAt = updatedAt;
+        this.version = version;
     }
 
     UUID id() { return id; }
@@ -37,4 +41,5 @@ class JpaAppointmentEntity {
     String cancellationReason() { return cancellationReason; }
     Instant createdAt() { return createdAt; }
     Instant updatedAt() { return updatedAt; }
+    Long version() { return version; }
 }

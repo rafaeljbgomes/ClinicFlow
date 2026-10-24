@@ -206,6 +206,44 @@ class AppointmentTest {
         assertThat(thrown).isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    void newAppointmentHasNoVersion() {
+        // Act
+        Appointment appointment = appointment();
+
+        // Assert
+        assertThat(appointment.version()).isEmpty();
+    }
+
+    @Test
+    void newAppointmentIsAtNoVersion() {
+        // Arrange
+        Appointment appointment = appointment();
+
+        // Act
+        boolean atVersion = appointment.isAtVersion(0);
+
+        // Assert
+        assertThat(atVersion).isFalse();
+    }
+
+    @Test
+    void storedAppointmentIsAtItsVersionOnly() {
+        // Arrange
+        Appointment created = appointment();
+        Appointment stored = Appointment.rehydrate(created.id(), created.psychologistId(), created.patientId(),
+                created.scheduledAt(), created.status(), created.type(), null, created.createdAt(),
+                created.updatedAt(), 3L);
+
+        // Act
+        boolean atStoredVersion = stored.isAtVersion(3);
+        boolean atOtherVersion = stored.isAtVersion(2);
+
+        // Assert
+        assertThat(atStoredVersion).isTrue();
+        assertThat(atOtherVersion).isFalse();
+    }
+
     private Appointment appointment() {
         return Appointment.create(new AppointmentId(UUID.randomUUID()), new PsychologistId(UUID.randomUUID()),
                 new PatientId(UUID.randomUUID()), new AppointmentDate(NOW.plusSeconds(3600)),
@@ -222,6 +260,7 @@ class AppointmentTest {
                 (AppointmentType) fields[5],
                 (CancellationReason) fields[6],
                 (Instant) fields[7],
-                (Instant) fields[8]);
+                (Instant) fields[8],
+                null);
     }
 }

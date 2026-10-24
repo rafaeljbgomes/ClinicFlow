@@ -1,6 +1,8 @@
 postgres:
   name: postgres
-  image: postgres:16.15-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+  # ClinicFlow's image from docker/postgres/Dockerfile (target server): the official image without
+  # gosu (ADR-028). scripts/deploy-local-kubernetes.ps1 builds it and pins the tag of its image ID.
+  image: clinicflow/postgres:local
   database: clinicflow
   # Administrator login, used only by PostgreSQL itself and the platform bootstrap (ADR-026).
   # Set password, or existingSecret naming a Secret with POSTGRES_USER and POSTGRES_PASSWORD.

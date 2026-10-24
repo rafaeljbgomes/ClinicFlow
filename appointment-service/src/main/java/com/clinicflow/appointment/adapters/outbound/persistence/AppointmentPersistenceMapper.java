@@ -23,7 +23,8 @@ public abstract class AppointmentPersistenceMapper {
                 appointment.type(),
                 appointment.cancellationReason().map(reason -> reason.value()).orElse(null),
                 appointment.createdAt(),
-                appointment.updatedAt()
+                appointment.updatedAt(),
+                appointment.version().orElse(null)
         );
     }
 
@@ -37,7 +38,8 @@ public abstract class AppointmentPersistenceMapper {
                 entity.type(),
                 entity.cancellationReason() == null ? null : new CancellationReason(entity.cancellationReason()),
                 entity.createdAt(),
-                entity.updatedAt()
+                entity.updatedAt(),
+                entity.version()
         );
     }
 }

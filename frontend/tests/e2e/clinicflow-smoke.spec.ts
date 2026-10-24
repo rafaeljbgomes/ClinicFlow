@@ -11,8 +11,15 @@ import {
 type StorageState = Awaited<ReturnType<APIRequestContext["storageState"]>>;
 type DemoRole = "psychologist" | "patient" | "administrator";
 type Workspace = { fullName: string; storageState: StorageState };
-type Patient = { id: string; fullName: string; email: string };
-type SessionRecord = { id: string; sessionDate: string; modality: string; durationMinutes: number; attendanceStatus: string };
+type Patient = { id: string; fullName: string; email: string; version: number };
+type SessionRecord = {
+  id: string;
+  sessionDate: string;
+  modality: string;
+  durationMinutes: number;
+  attendanceStatus: string;
+  version: number;
+};
 
 const demoPassword = "ClinicFlowDemo!2026";
 const demoAccounts: Record<DemoRole, { email: string; home: string }> = {
@@ -342,6 +349,37 @@ test.describe("patients", () => {
   });
 });
 
+test.describe("concurrent edits", () => {
+  test("a stale patient edit keeps what was typed and explains why nothing was saved", async ({
+    workspacePage: page,
+  }) => {
+    // Arrange
+    const editor = await openStalePatientEditor(page);
+    await editor.getByLabel("Full name").fill("Renamed in this tab");
+
+    // Act
+    await editor.getByRole("button", { name: "Save changes" }).click();
+
+    // Assert
+    await expect(editor.getByText("Changed elsewhere")).toBeVisible();
+    await expect(editor.getByLabel("Full name")).toHaveValue("Renamed in this tab");
+  });
+
+  test("reloading a stale patient edit shows the latest saved details", async ({ workspacePage: page }) => {
+    // Arrange
+    const editor = await openStalePatientEditor(page);
+    await editor.getByLabel("Full name").fill("Renamed in this tab");
+    await editor.getByRole("button", { name: "Save changes" }).click();
+    await expect(editor.getByText("Changed elsewhere")).toBeVisible();
+
+    // Act
+    await editor.getByRole("button", { name: "Reload latest" }).click();
+
+    // Assert
+    await expect(editor.getByLabel("Full name")).toHaveValue("Renamed in another tab");
+  });
+});
+
 test.describe("calendar", () => {
   test("scheduling a session lists it as scheduled", async ({ workspacePage: page }) => {
     // Arrange
@@ -606,7 +644,7 @@ test.describe("session records", () => {
 
     // Act
     const response = await page.request.patch(`/api/session-records/${record.id}`, {
-      headers: { "x-csrf-token": csrf },
+      headers: { "x-csrf-token": csrf, "if-match": `"${record.version}"` },
       data: {
         sessionDate: record.sessionDate,
         modality: record.modality,
@@ -686,10 +724,18 @@ async function csrfToken(page: Page) {
   return csrf;
 }
 
-async function bffPost(page: Page, path: string, data: unknown, expectedStatus: number, step: string, method = "POST") {
+async function bffPost(
+  page: Page,
+  path: string,
+  data: unknown,
+  expectedStatus: number,
+  step: string,
+  method = "POST",
+  headers: Record<string, string> = {}
+) {
   const response = await page.request.fetch(path, {
     method,
-    headers: { "x-csrf-token": await csrfToken(page) },
+    headers: { "x-csrf-token": await csrfToken(page), ...headers },
     data,
   });
   return (await arrangeStep(response, expectedStatus, step)).json();
@@ -710,7 +756,7 @@ async function createPatient(page: Page): Promise<Patient> {
     contactPreference: "EMAIL",
     consentStatus: "GRANTED",
   }, 201, "create patient");
-  return { id: created.id, fullName, email };
+  return { id: created.id, fullName, email, version: created.version };
 }
 
 async function scheduleAppointment(page: Page, patient: Patient) {
@@ -739,7 +785,7 @@ async function putCarePlan(page: Page, caseId: string) {
       { description: "Improve sleep consistency", progressPercentage: 20 },
       { description: "Create a consistent wind-down routine", progressPercentage: 0 },
     ],
-  }, 200, "put care plan", "PUT");
+  }, 200, "put care plan", "PUT", { "if-none-match": "*" });
 }
 
 async function draftRecord(page: Page, options: { withCarePlan?: boolean } = {}) {
@@ -758,8 +804,27 @@ async function draftRecord(page: Page, options: { withCarePlan?: boolean } = {})
 
 async function signedRecord(page: Page, options: { withCarePlan?: boolean } = {}) {
   const arranged = await draftRecord(page, options);
-  await bffPost(page, `/api/session-records/${arranged.record.id}/sign`, undefined, 200, "sign session record");
-  return arranged;
+  const signed: SessionRecord = await bffPost(page, `/api/session-records/${arranged.record.id}/sign`, undefined,
+    200, "sign session record", "POST", { "if-match": `"${arranged.record.version}"` });
+  return { ...arranged, record: signed };
+}
+
+// Opens the edit sheet, then saves a change to the same patient as if from another tab.
+async function openStalePatientEditor(page: Page) {
+  const patient = await createPatient(page);
+  await page.goto("/dashboard/patients");
+  await page.getByPlaceholder("Search patients").fill(patient.email);
+  await page.getByRole("button", { name: "Patient actions" }).filter({ visible: true }).first().click();
+  await page.getByRole("menuitem", { name: "Edit" }).click();
+  const editor = page.getByRole("dialog", { name: "Edit patient" });
+  await expect(editor.getByLabel("Full name")).toHaveValue(patient.fullName);
+  await bffPost(page, `/api/patients/${patient.id}`, {
+    fullName: "Renamed in another tab",
+    phone: "+351912345678",
+    contactPreference: "EMAIL",
+    consentStatus: "REVOKED",
+  }, 200, "edit the patient in another tab", "PUT", { "if-match": `"${patient.version}"` });
+  return editor;
 }
 
 // The newest case is selected by default, so a freshly arranged case opens in the workspace.

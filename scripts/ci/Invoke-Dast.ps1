@@ -17,7 +17,7 @@ Push-Location $SecurityRoot
 try {
     # Per-service and platform administrator credentials (ADR-026); existing files are kept.
     & (Join-Path $SecurityRoot 'scripts/generate-dev-credentials.ps1')
-    Invoke-SecurityTool docker ($Compose + @('build','postgres-bootstrap','gateway','auth-service','patient-service','appointment-service','clinical-service','notification-service','frontend','zap'))
+    Invoke-SecurityTool docker ($Compose + @('build','postgres','postgres-bootstrap','gateway','auth-service','patient-service','appointment-service','clinical-service','notification-service','frontend','zap'))
     Invoke-SecurityTool docker ($Compose + @('up','--detach','--no-build','gateway','auth-service','patient-service','appointment-service','clinical-service','notification-service','frontend'))
     foreach ($Service in @('auth-service','patient-service','appointment-service','clinical-service','notification-service')) {
         $Deadline = [DateTimeOffset]::UtcNow.AddSeconds(240)

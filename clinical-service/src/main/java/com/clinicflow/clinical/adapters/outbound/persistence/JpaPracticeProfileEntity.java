@@ -4,6 +4,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -28,13 +29,17 @@ class JpaPracticeProfileEntity {
     private Instant createdAt;
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
+    // A wrapper type, so Spring Data persists a null version and merges anything else.
+    @Version
+    @Column(nullable = false)
+    private Long version;
 
     protected JpaPracticeProfileEntity() {
     }
 
     JpaPracticeProfileEntity(UUID psychologistId, String professionalRegistration, String timezone,
                              int defaultSessionDurationMinutes, String primaryLocation,
-                             boolean telehealthEnabled, Instant createdAt, Instant updatedAt) {
+                             boolean telehealthEnabled, Instant createdAt, Instant updatedAt, Long version) {
         this.psychologistId = psychologistId;
         this.professionalRegistration = professionalRegistration;
         this.timezone = timezone;
@@ -43,6 +48,7 @@ class JpaPracticeProfileEntity {
         this.telehealthEnabled = telehealthEnabled;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
+        this.version = version;
     }
 
     UUID psychologistId() { return psychologistId; }
@@ -53,4 +59,5 @@ class JpaPracticeProfileEntity {
     boolean telehealthEnabled() { return telehealthEnabled; }
     Instant createdAt() { return createdAt; }
     Instant updatedAt() { return updatedAt; }
+    Long version() { return version; }
 }

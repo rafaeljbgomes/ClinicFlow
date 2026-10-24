@@ -15,15 +15,28 @@ export class ApiClientError extends Error {
 
 type ApiFetchOptions = Omit<RequestInit, "body"> & {
   body?: BodyInit | object | null;
+  // The version a write is based on (ADR-024): a number sends If-Match, null means the record must not
+  // exist yet (If-None-Match: *). Pass the version captured when the form opened, not a refreshed one.
+  expectedVersion?: number | null;
 };
+
+// The record changed elsewhere after it was loaded, so the write was rejected and nothing was saved.
+export function isStaleVersion(error: unknown) {
+  return error instanceof ApiClientError && error.status === 412;
+}
 
 export async function apiFetch<T>(
   path: string,
-  options: ApiFetchOptions = {}
+  { expectedVersion, ...options }: ApiFetchOptions = {}
 ): Promise<T> {
   const method = options.method ?? "GET";
   const headers = new Headers(options.headers);
   headers.set("Accept", "application/json");
+  if (expectedVersion === null) {
+    headers.set("If-None-Match", "*");
+  } else if (expectedVersion !== undefined) {
+    headers.set("If-Match", `"${expectedVersion}"`);
+  }
 
   let body = options.body;
   if (body && typeof body === "object" && !(body instanceof FormData)) {

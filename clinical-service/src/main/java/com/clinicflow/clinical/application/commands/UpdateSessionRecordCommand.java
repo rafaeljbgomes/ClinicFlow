@@ -14,5 +14,5 @@ public record UpdateSessionRecordCommand(PsychologistId psychologistId, SessionR
                                          SessionModality modality, int durationMinutes,
                                          AttendanceStatus attendanceStatus, NoteStatus noteStatus,
                                          String summary, String focusAreas, String interventions,
-                                         String homework, String nextSteps) {
+                                         String homework, String nextSteps, long expectedVersion) {
 }

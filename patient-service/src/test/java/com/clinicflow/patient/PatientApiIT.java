@@ -2,9 +2,14 @@ package com.clinicflow.patient;
 
 import com.clinicflow.patient.application.PatientService;
 import com.clinicflow.patient.application.commands.CreatePatientCommand;
+import com.clinicflow.patient.application.commands.UpdatePatientCommand;
+import com.clinicflow.patient.application.exceptions.StaleResourceVersionException;
+import com.clinicflow.patient.application.ports.PatientRepository;
 import com.clinicflow.patient.domain.ConsentStatus;
+import com.clinicflow.patient.domain.ContactPreference;
 import com.clinicflow.patient.domain.EmailAddress;
 import com.clinicflow.patient.domain.FullName;
+import com.clinicflow.patient.domain.PatientId;
 import com.clinicflow.patient.domain.PsychologistId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,8 +34,16 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
@@ -57,6 +70,7 @@ class PatientApiIT {
     @Autowired private RestTestClient http;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private PatientService patientService;
+    @Autowired private PatientRepository patientRepository;
     @Autowired private TransactionTemplate transactions;
     @MockitoBean private JwtDecoder jwtDecoder;
 
@@ -162,11 +176,116 @@ class PatientApiIT {
         String id = createPatient();
 
         // Act
-        var response = exchange("/patients/" + id, HttpMethod.PUT, updateRequest());
+        var response = exchange("/patients/" + id, HttpMethod.PUT, updateRequest(), "\"0\"");
 
         // Assert
         assertThat(response.getStatus()).isEqualTo(HttpStatus.OK);
         assertThat(response.getResponseBody()).containsEntry("fullName", "Updated Name");
+    }
+
+    @Test
+    void updateReturnsTheNextVersionInBodyAndEntityTag() {
+        // Arrange
+        String id = createPatient();
+
+        // Act
+        var response = exchange("/patients/" + id, HttpMethod.PUT, updateRequest(), "\"0\"");
+
+        // Assert
+        assertThat(response.getResponseBody()).containsEntry("version", 1);
+        assertThat(response.getResponseHeaders().getETag()).isEqualTo("\"1\"");
+    }
+
+    @Test
+    void updateWithoutIfMatchIsPreconditionRequired() {
+        // Arrange
+        String id = createPatient();
+
+        // Act
+        var response = exchange("/patients/" + id, HttpMethod.PUT, updateRequest());
+
+        // Assert
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.PRECONDITION_REQUIRED);
+        assertThat(response.getResponseBody()).containsEntry("code", "precondition_required");
+    }
+
+    @Test
+    void staleUpdateIsPreconditionFailed() {
+        // Arrange
+        String id = createPatient();
+        arrangeStep("first update", exchange("/patients/" + id, HttpMethod.PUT, updateRequest(), "\"0\""),
+                HttpStatus.OK);
+
+        // Act
+        var response = exchange("/patients/" + id, HttpMethod.PUT, updateRequest(), "\"0\"");
+
+        // Assert
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.PRECONDITION_FAILED);
+        assertThat(response.getResponseBody()).containsEntry("code", "stale_resource_version");
+    }
+
+    // A form opened before consent was revoked must not grant it again or rewrite the consent timestamp.
+    @Test
+    void staleFormCannotRevertRevokedConsent() {
+        // Arrange
+        String id = createPatient();
+        arrangeStep("revoke consent", exchange("/patients/" + id, HttpMethod.PUT, consentRequest("REVOKED"),
+                "\"0\""), HttpStatus.OK);
+        var revoked = exchange("/patients/" + id, HttpMethod.GET, null).getResponseBody();
+
+        // Act
+        exchange("/patients/" + id, HttpMethod.PUT, consentRequest("GRANTED"), "\"0\"");
+
+        // Assert
+        var stored = exchange("/patients/" + id, HttpMethod.GET, null).getResponseBody();
+        assertThat(stored).isEqualTo(revoked).containsEntry("consentStatus", "REVOKED");
+    }
+
+    @Test
+    void foreignPatientLooksMissingWhateverTheIfMatch() {
+        // Arrange
+        String id = createPatient();
+        HttpHeaders headers = bearer("other-psychologist-token");
+        headers.setIfMatch("\"0\"");
+
+        // Act
+        var response = exchange("/patients/" + id, HttpMethod.PUT, new HttpEntity<>(updateRequest(), headers),
+                Map.class);
+
+        // Assert
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    void getReturnsTheVersionAsEntityTag() {
+        // Arrange
+        String id = createPatient();
+
+        // Act
+        var response = exchange("/patients/" + id, HttpMethod.GET, null);
+
+        // Assert
+        assertThat(response.getResponseHeaders().getETag()).isEqualTo("\"0\"");
+        assertThat(response.getResponseBody()).containsEntry("version", 0);
+    }
+
+    // Both writers read version 0 before either commits; the database lets exactly one of them win.
+    @Test
+    void concurrentUpdatesFromTheSameVersionLetExactlyOneWin() throws Exception {
+        // Arrange
+        UUID id = UUID.fromString(createPatient());
+        UpdatePatientCommand revoke = updateCommand(id, ConsentStatus.REVOKED);
+        UpdatePatientCommand rename = updateCommand(id, ConsentStatus.GRANTED);
+
+        // Act
+        List<Throwable> outcomes = racingFromTheSameRead(id,
+                () -> patientService.update(revoke), () -> patientService.update(rename));
+
+        // Assert
+        assertThat(outcomes).filteredOn(Objects::isNull).hasSize(1);
+        assertThat(outcomes).filteredOn(Objects::nonNull).singleElement()
+                .isInstanceOf(StaleResourceVersionException.class);
+        assertThat(jdbc.queryForObject("SELECT version FROM patients WHERE id = ?", Long.class, id)).isOne();
     }
 
     @Test
@@ -175,7 +294,8 @@ class PatientApiIT {
         String id = createPatient();
 
         // Act
-        var response = exchange("/patients/" + id + "/status", HttpMethod.PATCH, Map.of("status", "INACTIVE"));
+        var response = exchange("/patients/" + id + "/status", HttpMethod.PATCH, Map.of("status", "INACTIVE"),
+                "\"0\"");
 
         // Assert
         assertThat(response.getStatus()).isEqualTo(HttpStatus.OK);
@@ -186,7 +306,8 @@ class PatientApiIT {
     void findsPersistedPatientProfile() {
         // Arrange
         String id = createPatient();
-        arrangeStep("update patient", exchange("/patients/" + id, HttpMethod.PUT, updateRequest()), HttpStatus.OK);
+        arrangeStep("update patient", exchange("/patients/" + id, HttpMethod.PUT, updateRequest(), "\"0\""),
+                HttpStatus.OK);
 
         // Act
         var response = exchange("/patients/" + id, HttpMethod.GET, null);
@@ -341,12 +462,63 @@ class PatientApiIT {
                 "consentStatus", "GRANTED");
     }
 
+    private Map<String, Object> consentRequest(String consentStatus) {
+        return Map.of(
+                "fullName", "Original Name",
+                "phone", "+351912345678",
+                "contactPreference", "EMAIL",
+                "consentStatus", consentStatus);
+    }
+
+    private UpdatePatientCommand updateCommand(UUID id, ConsentStatus consentStatus) {
+        return new UpdatePatientCommand(new PsychologistId(PSYCHOLOGIST_ID), new PatientId(id),
+                new FullName("Concurrent Name"), null, null, null, null, ContactPreference.EMAIL, consentStatus, 0);
+    }
+
+    // Each writer loads the patient in its own transaction, waits until both have read it, then runs its
+    // command in that transaction, so the service sees the same snapshot and only the database can tell.
+    private List<Throwable> racingFromTheSameRead(UUID id, Runnable first, Runnable second) throws Exception {
+        CyclicBarrier bothLoaded = new CyclicBarrier(2);
+        ExecutorService writers = Executors.newFixedThreadPool(2);
+        try {
+            List<Future<Throwable>> futures = new ArrayList<>();
+            for (Runnable writer : List.of(first, second)) {
+                futures.add(writers.submit(() -> catchThrowable(() -> transactions.executeWithoutResult(status -> {
+                    patientRepository.findById(new PatientId(id)).orElseThrow();
+                    await(bothLoaded);
+                    writer.run();
+                }))));
+            }
+            List<Throwable> outcomes = new ArrayList<>();
+            for (Future<Throwable> future : futures) {
+                outcomes.add(future.get(30, TimeUnit.SECONDS));
+            }
+            return outcomes;
+        } finally {
+            writers.shutdownNow();
+        }
+    }
+
+    private static void await(CyclicBarrier barrier) {
+        try {
+            barrier.await(10, TimeUnit.SECONDS);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Concurrent writers did not meet", ex);
+        }
+    }
+
     private Long outboxEventCount() {
         return jdbc.queryForObject("SELECT count(*) FROM outbox_events", Long.class);
     }
 
     private EntityExchangeResult<Map> exchange(String path, HttpMethod method, Object body) {
         return exchange(path, method, new HttpEntity<>(body, bearer("psychologist-token")), Map.class);
+    }
+
+    private EntityExchangeResult<Map> exchange(String path, HttpMethod method, Object body, String ifMatch) {
+        HttpHeaders headers = bearer("psychologist-token");
+        headers.setIfMatch(ifMatch);
+        return exchange(path, method, new HttpEntity<>(body, headers), Map.class);
     }
 
     private <T> EntityExchangeResult<T> exchange(String path, HttpMethod method, HttpEntity<?> request, Class<T> type) {

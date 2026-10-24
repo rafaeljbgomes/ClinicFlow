@@ -70,14 +70,14 @@ public class DemoDataBootstrap implements ApplicationRunner {
         LocalDate today = LocalDate.now(clock);
 
         seedPracticeProfiles(now);
-        List<ClinicalCase> cases = demoCases(now);
+        List<ClinicalCase> cases = demoCases(now).stream().map(this::atStoredVersion).toList();
         cases.forEach(clinicalCases::save);
         seedCarePlans(cases, today, now);
         seedSessionRecords(cases, now);
     }
 
     private void seedPracticeProfiles(Instant now) {
-        practiceProfiles.save(PracticeProfile.create(
+        savePracticeProfile(PracticeProfile.create(
                 new PsychologistId(PSYCHOLOGIST_SOFIA),
                 "OPP-PT-14523",
                 ZoneId.of("Europe/Lisbon"),
@@ -86,7 +86,7 @@ public class DemoDataBootstrap implements ApplicationRunner {
                 true,
                 now
         ));
-        practiceProfiles.save(PracticeProfile.create(
+        savePracticeProfile(PracticeProfile.create(
                 new PsychologistId(PSYCHOLOGIST_MIGUEL),
                 "OPP-PT-17844",
                 ZoneId.of("Europe/Lisbon"),
@@ -126,7 +126,7 @@ public class DemoDataBootstrap implements ApplicationRunner {
         for (int index = 0; index < cases.size(); index++) {
             ClinicalCase clinicalCase = cases.get(index);
             int suffix = index + 1;
-            carePlans.save(CarePlan.create(
+            CarePlan seed = CarePlan.create(
                     new CarePlanId(uuid("31000000-0000-4000-8000-00000000000" + suffix)),
                     clinicalCase,
                     therapeuticFocus(suffix),
@@ -134,7 +134,11 @@ public class DemoDataBootstrap implements ApplicationRunner {
                     today.plusWeeks(8 + suffix),
                     goalsForCase(suffix, today),
                     now
-            ));
+            );
+            carePlans.save(CarePlan.rehydrate(seed.id(), seed.clinicalCaseId(), seed.psychologistId(),
+                    seed.patientId(), seed.therapeuticFocus(), seed.plannedFrequency(), seed.reviewDate(),
+                    seed.goals(), seed.createdAt(), seed.updatedAt(),
+                    carePlans.findByClinicalCaseId(seed.clinicalCaseId()).flatMap(CarePlan::version).orElse(null)));
         }
     }
 
@@ -173,7 +177,8 @@ public class DemoDataBootstrap implements ApplicationRunner {
                 signedSessionDate,
                 signedAt,
                 signedAt,
-                new PsychologistId(PSYCHOLOGIST_SOFIA)
+                new PsychologistId(PSYCHOLOGIST_SOFIA),
+                null
         ));
         saveIfAbsent(SessionRecord.manual(
                 new SessionRecordId(uuid("33000000-0000-4000-8000-000000000003")),
@@ -220,8 +225,24 @@ public class DemoDataBootstrap implements ApplicationRunner {
                 now.minus(2, ChronoUnit.DAYS),
                 now,
                 null,
+                null,
                 null
         ));
+    }
+
+    // Each start resets the demo rows; carrying the stored version updates them instead of inserting duplicates.
+    private void savePracticeProfile(PracticeProfile seed) {
+        practiceProfiles.save(PracticeProfile.rehydrate(seed.psychologistId(), seed.professionalRegistration(),
+                seed.timezone(), seed.defaultSessionDurationMinutes(), seed.primaryLocation(),
+                seed.telehealthEnabled(), seed.createdAt(), seed.updatedAt(),
+                practiceProfiles.findByPsychologistId(seed.psychologistId()).flatMap(PracticeProfile::version)
+                        .orElse(null)));
+    }
+
+    private ClinicalCase atStoredVersion(ClinicalCase seed) {
+        return ClinicalCase.rehydrate(seed.id(), seed.psychologistId(), seed.patientId(), seed.presentingConcern(),
+                seed.status(), seed.openedAt(), seed.closedAt(), seed.createdAt(), seed.updatedAt(),
+                clinicalCases.findById(seed.id()).flatMap(ClinicalCase::version).orElse(null));
     }
 
     private void saveIfAbsent(SessionRecord sessionRecord) {
@@ -242,7 +263,8 @@ public class DemoDataBootstrap implements ApplicationRunner {
                 openedAt,
                 closedAt,
                 openedAt,
-                now
+                now,
+                null
         );
     }
 

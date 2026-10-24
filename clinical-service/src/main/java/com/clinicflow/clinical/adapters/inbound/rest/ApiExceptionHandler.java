@@ -10,6 +10,7 @@ import com.clinicflow.clinical.application.exceptions.ClinicalCaseNotFoundExcept
 import com.clinicflow.clinical.application.exceptions.OwnershipCheckUnavailableException;
 import com.clinicflow.clinical.application.exceptions.PatientNotFoundException;
 import com.clinicflow.clinical.application.exceptions.SessionRecordNotFoundException;
+import com.clinicflow.clinical.application.exceptions.StaleResourceVersionException;
 import com.clinicflow.clinical.domain.InvalidNoteTransitionException;
 import com.clinicflow.clinical.domain.SessionRecordNotSignableException;
 import com.clinicflow.clinical.domain.SignedSessionRecordException;
@@ -74,6 +75,24 @@ public class ApiExceptionHandler {
     ProblemDetail conflict(ActiveClinicalCaseExistsException ex) {
         return ApiProblems.create(HttpStatus.CONFLICT, "active_clinical_case_exists",
                 "Active clinical case exists", "Patient already has an active clinical case for this psychologist");
+    }
+
+    @ExceptionHandler(StaleResourceVersionException.class)
+    ProblemDetail staleVersion(StaleResourceVersionException ex) {
+        return ApiProblems.create(HttpStatus.PRECONDITION_FAILED, "stale_resource_version", "Stale resource version",
+                "The resource changed since you loaded it. Reload it and try again.");
+    }
+
+    @ExceptionHandler(PreconditionRequiredException.class)
+    ProblemDetail preconditionRequired(PreconditionRequiredException ex) {
+        return ApiProblems.create(HttpStatus.PRECONDITION_REQUIRED, "precondition_required", "Precondition required",
+                "Send If-Match with the version you last loaded");
+    }
+
+    @ExceptionHandler(InvalidPreconditionException.class)
+    ProblemDetail invalidPrecondition(InvalidPreconditionException ex) {
+        return ApiProblems.create(HttpStatus.BAD_REQUEST, "invalid_precondition", "Invalid precondition",
+                "If-Match must be one strong entity tag, such as \"3\"");
     }
 
     @ExceptionHandler(SignedSessionRecordException.class)

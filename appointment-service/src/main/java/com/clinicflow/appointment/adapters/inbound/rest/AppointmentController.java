@@ -8,7 +8,9 @@ import com.clinicflow.appointment.application.AppointmentService;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -31,14 +33,13 @@ public class AppointmentController {
     }
 
     @PostMapping
-    @ResponseStatus(HttpStatus.CREATED)
-    public AppointmentResponse schedule(@AuthenticationPrincipal Jwt jwt,
-                                        @Valid @RequestBody ScheduleAppointmentRequest request) {
+    public ResponseEntity<AppointmentResponse> schedule(@AuthenticationPrincipal Jwt jwt,
+                                                        @Valid @RequestBody ScheduleAppointmentRequest request) {
         AppointmentResponse appointment = mapper.toResponse(
                 appointmentService.schedule(mapper.toCommand(userId(jwt), request)));
         log.info("appointment_scheduled appointmentId={} psychologistId={} patientId={}",
                 appointment.id(), appointment.psychologistId(), appointment.patientId());
-        return appointment;
+        return ResponseEntity.status(HttpStatus.CREATED).eTag(EntityTags.of(appointment.version())).body(appointment);
     }
 
     @GetMapping
@@ -48,25 +49,41 @@ public class AppointmentController {
     }
 
     @GetMapping("/{id}")
-    public AppointmentResponse get(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        return mapper.toResponse(appointmentService.get(mapper.toGetQuery(userId(jwt), id)));
+    public ResponseEntity<AppointmentResponse> get(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        return tagged(mapper.toResponse(appointmentService.get(mapper.toGetQuery(userId(jwt), id))));
     }
 
     @PatchMapping("/{id}/reschedule")
-    public AppointmentResponse reschedule(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
-                                          @Valid @RequestBody RescheduleAppointmentRequest request) {
-        return mapper.toResponse(appointmentService.reschedule(mapper.toCommand(userId(jwt), id, request)));
+    public ResponseEntity<AppointmentResponse> reschedule(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
+                                                          @RequestHeader(name = HttpHeaders.IF_MATCH, required = false)
+                                                          String ifMatch,
+                                                          @Valid @RequestBody RescheduleAppointmentRequest request) {
+        long expectedVersion = EntityTags.requireIfMatch(ifMatch);
+        return tagged(mapper.toResponse(appointmentService.reschedule(
+                mapper.toCommand(userId(jwt), id, request, expectedVersion))));
     }
 
     @PatchMapping("/{id}/cancel")
-    public AppointmentResponse cancel(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
-                                      @Valid @RequestBody CancelAppointmentRequest request) {
-        return mapper.toResponse(appointmentService.cancel(mapper.toCommand(userId(jwt), id, request)));
+    public ResponseEntity<AppointmentResponse> cancel(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
+                                                      @RequestHeader(name = HttpHeaders.IF_MATCH, required = false)
+                                                      String ifMatch,
+                                                      @Valid @RequestBody CancelAppointmentRequest request) {
+        long expectedVersion = EntityTags.requireIfMatch(ifMatch);
+        return tagged(mapper.toResponse(appointmentService.cancel(
+                mapper.toCommand(userId(jwt), id, request, expectedVersion))));
     }
 
     @PatchMapping("/{id}/complete")
-    public AppointmentResponse complete(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        return mapper.toResponse(appointmentService.complete(mapper.toCompleteCommand(userId(jwt), id)));
+    public ResponseEntity<AppointmentResponse> complete(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
+                                                        @RequestHeader(name = HttpHeaders.IF_MATCH, required = false)
+                                                        String ifMatch) {
+        long expectedVersion = EntityTags.requireIfMatch(ifMatch);
+        return tagged(mapper.toResponse(appointmentService.complete(
+                mapper.toCompleteCommand(userId(jwt), id, expectedVersion))));
+    }
+
+    private static ResponseEntity<AppointmentResponse> tagged(AppointmentResponse appointment) {
+        return ResponseEntity.ok().eTag(EntityTags.of(appointment.version())).body(appointment);
     }
 
     private UUID userId(Jwt jwt) {

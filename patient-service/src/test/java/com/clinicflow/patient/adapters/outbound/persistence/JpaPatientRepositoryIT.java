@@ -1,11 +1,13 @@
 package com.clinicflow.patient.adapters.outbound.persistence;
 
+import com.clinicflow.patient.application.exceptions.StaleResourceVersionException;
 import com.clinicflow.patient.domain.ConsentStatus;
 import com.clinicflow.patient.domain.ContactPreference;
 import com.clinicflow.patient.domain.EmailAddress;
 import com.clinicflow.patient.domain.FullName;
 import com.clinicflow.patient.domain.Patient;
 import com.clinicflow.patient.domain.PatientId;
+import com.clinicflow.patient.domain.PatientStatus;
 import com.clinicflow.patient.domain.PhoneNumber;
 import com.clinicflow.patient.domain.PsychologistId;
 import org.junit.jupiter.api.Test;
@@ -77,6 +79,49 @@ class JpaPatientRepositoryIT {
 
         // Assert
         assertThat(found).containsExactly(owned);
+    }
+
+    @Test
+    void newPatientIsStoredAtVersionZero() {
+        // Arrange
+        Patient patient = patient(UUID.randomUUID(), new PsychologistId(UUID.randomUUID()), "new@example.com");
+
+        // Act
+        Patient saved = repository.save(patient);
+
+        // Assert
+        assertThat(saved.version()).contains(0L);
+    }
+
+    @Test
+    void savingAChangedPatientIncrementsItsVersion() {
+        // Arrange
+        Patient stored = repository.save(
+                patient(UUID.randomUUID(), new PsychologistId(UUID.randomUUID()), "changed@example.com"));
+        stored.changeStatus(PatientStatus.INACTIVE, Instant.parse("2026-06-02T10:00:00Z"));
+
+        // Act
+        Patient saved = repository.save(stored);
+
+        // Assert
+        assertThat(saved.version()).contains(1L);
+    }
+
+    @Test
+    void savingAnOlderVersionIsRejected() {
+        // Arrange
+        Patient original = repository.save(
+                patient(UUID.randomUUID(), new PsychologistId(UUID.randomUUID()), "stale@example.com"));
+        Patient current = repository.findById(original.id()).orElseThrow();
+        current.changeStatus(PatientStatus.INACTIVE, Instant.parse("2026-06-02T10:00:00Z"));
+        repository.save(current);
+        original.changeStatus(PatientStatus.ARCHIVED, Instant.parse("2026-06-03T10:00:00Z"));
+
+        // Act
+        Throwable thrown = catchThrowable(() -> repository.save(original));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(StaleResourceVersionException.class);
     }
 
     @Test
