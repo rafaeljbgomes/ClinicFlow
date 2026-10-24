@@ -26,6 +26,7 @@ import com.clinicflow.clinical.application.ports.CarePlanRepository;
 import com.clinicflow.clinical.application.ports.ClinicalCaseRepository;
 import com.clinicflow.clinical.application.ports.PatientDirectory;
 import com.clinicflow.clinical.application.ports.PracticeProfileRepository;
+import com.clinicflow.clinical.application.ports.SessionRecordLinkConflictRepository;
 import com.clinicflow.clinical.application.ports.SessionRecordRepository;
 import com.clinicflow.clinical.application.queries.GetPatientClinicalHistoryQuery;
 import com.clinicflow.clinical.application.queries.GetCarePlanQuery;
@@ -49,6 +50,7 @@ import com.clinicflow.clinical.domain.ClinicalCaseId;
 import com.clinicflow.clinical.domain.DomainEventId;
 import com.clinicflow.clinical.domain.GoalStatus;
 import com.clinicflow.clinical.domain.ClinicalCaseStatus;
+import com.clinicflow.clinical.domain.LinkConflictSource;
 import com.clinicflow.clinical.domain.NoteStatus;
 import com.clinicflow.clinical.domain.PatientId;
 import com.clinicflow.clinical.domain.PracticeProfile;
@@ -56,6 +58,7 @@ import com.clinicflow.clinical.domain.PsychologistId;
 import com.clinicflow.clinical.domain.SessionModality;
 import com.clinicflow.clinical.domain.SessionRecord;
 import com.clinicflow.clinical.domain.SessionRecordId;
+import com.clinicflow.clinical.domain.SessionRecordLinkConflict;
 import com.clinicflow.clinical.domain.SessionRecordNotSignableException;
 import com.clinicflow.clinical.domain.SignedSessionRecordException;
 import ch.qos.logback.classic.Logger;
@@ -64,8 +67,12 @@ import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mapstruct.factory.Mappers;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.slf4j.LoggerFactory;
@@ -76,12 +83,16 @@ import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -93,6 +104,7 @@ class ClinicalServiceTest {
     private static final PsychologistId OTHER_PSYCHOLOGIST = new PsychologistId(UUID.randomUUID());
     private static final PatientId PATIENT_ID =
             new PatientId(UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"));
+    private static final PatientId OTHER_PATIENT = new PatientId(UUID.randomUUID());
     private static final ClinicalCaseId CASE_ID =
             new ClinicalCaseId(UUID.fromString("cccccccc-cccc-cccc-cccc-cccccccccccc"));
     private static final AppointmentId APPOINTMENT_ID =
@@ -104,6 +116,7 @@ class ClinicalServiceTest {
     @Mock private ClinicalCaseRepository clinicalCases;
     @Mock private CarePlanRepository carePlans;
     @Mock private SessionRecordRepository sessionRecords;
+    @Mock private SessionRecordLinkConflictRepository linkConflicts;
     @Mock private PatientDirectory patientDirectory;
     @Mock private AppointmentDirectory appointmentDirectory;
 
@@ -111,7 +124,7 @@ class ClinicalServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new ClinicalService(practiceProfiles, clinicalCases, carePlans, sessionRecords,
+        service = new ClinicalService(practiceProfiles, clinicalCases, carePlans, sessionRecords, linkConflicts,
                 patientDirectory, appointmentDirectory, Mappers.getMapper(ClinicalApplicationMapper.class));
         // Like persistence: a new record gets version 0, every save of a stored one increments it.
         lenient().when(practiceProfiles.save(any(PracticeProfile.class)))
@@ -276,11 +289,95 @@ class ClinicalServiceTest {
     }
 
     @Test
-    void completedAppointmentAlreadyClaimedByAnotherPsychologistIsReported() {
+    void completedAppointmentWithExistingSessionRecordsNoConflict() {
         // Arrange
-        SessionRecord claimed = stored(SessionRecord.fromCompletedAppointment(new SessionRecordId(UUID.randomUUID()),
-                null, OTHER_PSYCHOLOGIST, PATIENT_ID, APPOINTMENT_ID, NOW, SessionModality.ONLINE, 60, NOW));
-        when(sessionRecords.findByAppointmentId(APPOINTMENT_ID)).thenReturn(Optional.of(claimed));
+        SessionRecord existing = SessionRecord.fromCompletedAppointment(new SessionRecordId(UUID.randomUUID()),
+                CASE_ID, PSYCHOLOGIST_ID, PATIENT_ID, APPOINTMENT_ID, NOW, SessionModality.ONLINE, 60, NOW);
+        when(sessionRecords.findByAppointmentId(APPOINTMENT_ID)).thenReturn(Optional.of(existing));
+
+        // Act
+        service.processAppointmentCompleted(appointmentCompleted());
+
+        // Assert
+        verifyNoInteractions(linkConflicts);
+    }
+
+    @ParameterizedTest(name = "claimed by {0}")
+    @MethodSource("claimsOfAnotherPsychologistOrPatient")
+    void completedAppointmentClaimedByAnotherRecordReleasesTheClaim(String claimant, PsychologistId psychologist,
+                                                                    PatientId patient) {
+        // Arrange
+        SessionRecord claimed = claimingRecord(psychologist, patient);
+        arrangeCompletedAppointmentClaimedBy(claimed);
+
+        // Act
+        service.processAppointmentCompleted(appointmentCompleted());
+
+        // Assert
+        assertThat(claimed.appointmentId()).isEmpty();
+        verify(sessionRecords).save(claimed);
+    }
+
+    @Test
+    void completedAppointmentClaimedByAnotherPsychologistCreatesTheOwnersRecord() {
+        // Arrange
+        arrangeCompletedAppointmentClaimedBy(claimingRecord(OTHER_PSYCHOLOGIST, OTHER_PATIENT));
+
+        // Act
+        service.processAppointmentCompleted(appointmentCompleted());
+
+        // Assert
+        ArgumentCaptor<SessionRecord> captor = ArgumentCaptor.forClass(SessionRecord.class);
+        verify(sessionRecords, times(2)).save(captor.capture());
+        assertThat(captor.getAllValues().getLast()).satisfies(created -> {
+            assertThat(created.psychologistId()).isEqualTo(PSYCHOLOGIST_ID);
+            assertThat(created.patientId()).isEqualTo(PATIENT_ID);
+            assertThat(created.appointmentId()).contains(APPOINTMENT_ID);
+        });
+    }
+
+    @Test
+    void completedAppointmentClaimRecordsTheConflictBeforeReleasingAndRelinking() {
+        // Arrange
+        SessionRecord claimed = claimingRecord(OTHER_PSYCHOLOGIST, OTHER_PATIENT);
+        arrangeCompletedAppointmentClaimedBy(claimed);
+
+        // Act
+        service.processAppointmentCompleted(appointmentCompleted());
+
+        // Assert
+        InOrder order = inOrder(linkConflicts, sessionRecords);
+        order.verify(linkConflicts).save(any(SessionRecordLinkConflict.class));
+        order.verify(sessionRecords).save(claimed);
+        order.verify(sessionRecords).save(argThat(record -> !record.equals(claimed)));
+    }
+
+    @Test
+    void completedAppointmentClaimIsAuditedWithTheAppointmentOwner() {
+        // Arrange
+        SessionRecord claimed = claimingRecord(OTHER_PSYCHOLOGIST, OTHER_PATIENT);
+        arrangeCompletedAppointmentClaimedBy(claimed);
+
+        // Act
+        service.processAppointmentCompleted(appointmentCompleted());
+
+        // Assert
+        ArgumentCaptor<SessionRecordLinkConflict> captor = ArgumentCaptor.forClass(SessionRecordLinkConflict.class);
+        verify(linkConflicts).save(captor.capture());
+        assertThat(captor.getValue()).satisfies(conflict -> {
+            assertThat(conflict.sessionRecordId()).isEqualTo(claimed.id());
+            assertThat(conflict.appointmentId()).isEqualTo(APPOINTMENT_ID);
+            assertThat(conflict.appointmentPsychologistId()).isEqualTo(PSYCHOLOGIST_ID);
+            assertThat(conflict.appointmentPatientId()).isEqualTo(PATIENT_ID);
+            assertThat(conflict.source()).isEqualTo(LinkConflictSource.APPOINTMENT_COMPLETED);
+        });
+    }
+
+    @Test
+    void completedAppointmentClaimIsLoggedWithItsResolution() {
+        // Arrange
+        SessionRecord claimed = claimingRecord(OTHER_PSYCHOLOGIST, PATIENT_ID);
+        arrangeCompletedAppointmentClaimedBy(claimed);
         ListAppender<ILoggingEvent> logs = captureServiceLogs();
 
         // Act
@@ -292,7 +389,9 @@ class ClinicalServiceTest {
 
         // Assert
         assertThat(logs.list).singleElement().satisfies(event -> assertThat(event.getFormattedMessage())
-                .startsWith("session_record_appointment_conflict appointmentId=" + APPOINTMENT_ID.value()));
+                .isEqualTo("session_record_appointment_conflict appointmentId=" + APPOINTMENT_ID.value()
+                        + " sessionRecordId=" + claimed.id().value()
+                        + " source=APPOINTMENT_COMPLETED resolution=link_released"));
     }
 
     @Test
@@ -599,6 +698,91 @@ class ClinicalServiceTest {
 
         // Assert
         assertThat(thrown).isInstanceOf(AppointmentAlreadyRecordedException.class);
+    }
+
+    @Test
+    void ownAppointmentAlreadyRecordedReleasesNothing() {
+        // Arrange
+        SessionRecord recorded = SessionRecord.fromCompletedAppointment(new SessionRecordId(UUID.randomUUID()),
+                CASE_ID, PSYCHOLOGIST_ID, PATIENT_ID, APPOINTMENT_ID, NOW, SessionModality.ONLINE, 50, NOW);
+        arrangeVerifiedLinkClaimedBy(recorded);
+
+        // Act
+        catchThrowable(() -> service.createSessionRecord(sessionCommand(APPOINTMENT_ID)));
+
+        // Assert
+        assertThat(recorded.appointmentId()).contains(APPOINTMENT_ID);
+        verifyNoInteractions(linkConflicts);
+    }
+
+    @ParameterizedTest(name = "claimed by {0}")
+    @MethodSource("claimsOfAnotherPsychologistOrPatient")
+    void verifiedLinkCreatesTheOwnersRecordWhenAnotherRecordClaimsTheAppointment(String claimant,
+                                                                                 PsychologistId psychologist,
+                                                                                 PatientId patient) {
+        // Arrange
+        arrangeVerifiedLinkClaimedBy(claimingRecord(psychologist, patient));
+
+        // Act
+        SessionRecordResult created = service.createSessionRecord(sessionCommand(APPOINTMENT_ID));
+
+        // Assert
+        assertThat(created.appointmentId()).isEqualTo(APPOINTMENT_ID.value());
+        assertThat(created.psychologistId()).isEqualTo(PSYCHOLOGIST_ID.value());
+    }
+
+    @Test
+    void verifiedLinkReleasesAnotherPsychologistsClaim() {
+        // Arrange
+        SessionRecord claimed = claimingRecord(OTHER_PSYCHOLOGIST, OTHER_PATIENT);
+        arrangeVerifiedLinkClaimedBy(claimed);
+
+        // Act
+        service.createSessionRecord(sessionCommand(APPOINTMENT_ID));
+
+        // Assert
+        assertThat(claimed.appointmentId()).isEmpty();
+        InOrder order = inOrder(linkConflicts, sessionRecords);
+        order.verify(linkConflicts).save(any(SessionRecordLinkConflict.class));
+        order.verify(sessionRecords).save(claimed);
+        order.verify(sessionRecords).save(argThat(record -> !record.equals(claimed)));
+    }
+
+    @Test
+    void verifiedLinkAuditsTheReleasedClaimAsAManualLink() {
+        // Arrange
+        SessionRecord claimed = claimingRecord(OTHER_PSYCHOLOGIST, OTHER_PATIENT);
+        arrangeVerifiedLinkClaimedBy(claimed);
+
+        // Act
+        service.createSessionRecord(sessionCommand(APPOINTMENT_ID));
+
+        // Assert
+        ArgumentCaptor<SessionRecordLinkConflict> captor = ArgumentCaptor.forClass(SessionRecordLinkConflict.class);
+        verify(linkConflicts).save(captor.capture());
+        assertThat(captor.getValue()).satisfies(conflict -> {
+            assertThat(conflict.sessionRecordId()).isEqualTo(claimed.id());
+            assertThat(conflict.appointmentId()).isEqualTo(APPOINTMENT_ID);
+            assertThat(conflict.appointmentPsychologistId()).isEqualTo(PSYCHOLOGIST_ID);
+            assertThat(conflict.appointmentPatientId()).isEqualTo(PATIENT_ID);
+            assertThat(conflict.source()).isEqualTo(LinkConflictSource.MANUAL_LINK);
+        });
+    }
+
+    @Test
+    void invalidSessionRecordLeavesAnotherPsychologistsClaimInPlace() {
+        // Arrange
+        SessionRecord claimed = claimingRecord(OTHER_PSYCHOLOGIST, OTHER_PATIENT);
+        arrangeVerifiedLinkClaimedBy(claimed);
+        var command = new CreateSessionRecordCommand(PSYCHOLOGIST_ID, CASE_ID, APPOINTMENT_ID, NOW,
+                SessionModality.ONLINE, 481, AttendanceStatus.ATTENDED, "Summary", null, null, null, null);
+
+        // Act
+        catchThrowable(() -> service.createSessionRecord(command));
+
+        // Assert
+        assertThat(claimed.appointmentId()).contains(APPOINTMENT_ID);
+        verifyNoInteractions(linkConflicts);
     }
 
     @Test
@@ -1042,6 +1226,34 @@ class ClinicalServiceTest {
     private CarePlan carePlan(ClinicalCase clinicalCase, CareGoalId goalId) {
         return stored(CarePlan.create(new CarePlanId(UUID.randomUUID()), clinicalCase, "Focus", "Weekly", REVIEW_DATE,
                 List.of(new CareGoal(goalId, "Goal", null, GoalStatus.IN_PROGRESS, 10)), NOW));
+    }
+
+    static Stream<Arguments> claimsOfAnotherPsychologistOrPatient() {
+        return Stream.of(
+                Arguments.of("another psychologist", OTHER_PSYCHOLOGIST, PATIENT_ID),
+                Arguments.of("another patient of the same psychologist", PSYCHOLOGIST_ID, OTHER_PATIENT),
+                Arguments.of("another psychologist and patient", OTHER_PSYCHOLOGIST, OTHER_PATIENT));
+    }
+
+    private void arrangeCompletedAppointmentClaimedBy(SessionRecord claimed) {
+        when(sessionRecords.findByAppointmentId(APPOINTMENT_ID)).thenReturn(Optional.of(claimed));
+        when(clinicalCases.findOpenByPsychologistIdAndPatientId(PSYCHOLOGIST_ID, PATIENT_ID))
+                .thenReturn(Optional.empty());
+        when(practiceProfiles.findByPsychologistId(PSYCHOLOGIST_ID)).thenReturn(Optional.empty());
+    }
+
+    private void arrangeVerifiedLinkClaimedBy(SessionRecord claimed) {
+        when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(clinicalCase()));
+        when(appointmentDirectory.findPatientOfOwnedAppointment(APPOINTMENT_ID, PSYCHOLOGIST_ID))
+                .thenReturn(Optional.of(PATIENT_ID));
+        when(sessionRecords.findByAppointmentId(APPOINTMENT_ID)).thenReturn(Optional.of(claimed));
+    }
+
+    // A record linked before ADR-021 to an appointment that is not its own; signed, so the note itself is final.
+    private SessionRecord claimingRecord(PsychologistId psychologist, PatientId patient) {
+        return SessionRecord.rehydrate(new SessionRecordId(UUID.randomUUID()), null, psychologist, patient,
+                APPOINTMENT_ID, NOW, SessionModality.ONLINE, 50, AttendanceStatus.ATTENDED, NoteStatus.SIGNED,
+                "Signed summary", null, null, null, null, NOW, NOW, NOW, psychologist, 0L);
     }
 
     private CreateSessionRecordCommand sessionCommand(AppointmentId appointmentId) {

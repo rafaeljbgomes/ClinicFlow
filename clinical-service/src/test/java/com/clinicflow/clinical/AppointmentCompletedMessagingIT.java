@@ -21,6 +21,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.nio.charset.StandardCharsets;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -100,6 +101,44 @@ class AppointmentCompletedMessagingIT {
     }
 
     @Test
+    void completedAppointmentClaimedByAnotherPsychologistsSignedNoteGoesToItsOwner() {
+        // Arrange
+        UUID appointmentId = UUID.randomUUID();
+        UUID claimId = legacySignedClaim(appointmentId);
+        Map<String, Object> event = appointmentCompleted(appointmentId);
+
+        // Act
+        rabbit.convertAndSend(EXCHANGE, "appointment.completed", event);
+
+        // Assert
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
+                assertThat(sessions.findByAppointmentId(new AppointmentId(appointmentId)))
+                        .hasValueSatisfying(session -> assertThat(session.psychologistId().value())
+                                .isEqualTo(event.get("psychologistId"))));
+        assertThat(jdbc.queryForMap("SELECT appointment_id, note_status, summary FROM session_records WHERE id = ?",
+                claimId)).containsEntry("appointment_id", null).containsEntry("note_status", "SIGNED")
+                .containsEntry("summary", "Legacy signed note");
+    }
+
+    @Test
+    void releasedClaimIsAuditedOnceWhenTheCompletionIsRedelivered() {
+        // Arrange
+        UUID appointmentId = UUID.randomUUID();
+        UUID claimId = legacySignedClaim(appointmentId);
+        Map<String, Object> event = appointmentCompleted(appointmentId);
+
+        // Act
+        rabbit.convertAndSend(EXCHANGE, "appointment.completed", event);
+        rabbit.convertAndSend(EXCHANGE, "appointment.completed", event);
+
+        // Assert
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
+                verify(clinicalService, times(2)).processAppointmentCompleted(any()));
+        assertThat(jdbc.queryForList("SELECT source FROM session_record_link_conflicts WHERE session_record_id = ?",
+                String.class, claimId)).containsExactly("APPOINTMENT_COMPLETED");
+    }
+
+    @Test
     void failingEventIsAttemptedFourTimes() {
         // Arrange
         failEveryProcessingAttempt();
@@ -149,6 +188,20 @@ class AppointmentCompletedMessagingIT {
                 matches.add(message);
             }
         }
+    }
+
+    // Before ADR-021 a manual record could take any appointment id; this rebuilds such a row, already signed.
+    private UUID legacySignedClaim(UUID appointmentId) {
+        UUID claimId = UUID.randomUUID();
+        UUID claimant = UUID.randomUUID();
+        Timestamp now = Timestamp.from(Instant.now());
+        jdbc.update("""
+                INSERT INTO session_records (id, psychologist_id, patient_id, appointment_id, session_date, modality,
+                    duration_minutes, attendance_status, note_status, summary, created_at, updated_at, signed_at,
+                    signed_by)
+                VALUES (?, ?, ?, ?, ?, 'ONLINE', 50, 'ATTENDED', 'SIGNED', 'Legacy signed note', ?, ?, ?, ?)
+                """, claimId, claimant, UUID.randomUUID(), appointmentId, now, now, now, now, claimant);
+        return claimId;
     }
 
     private Map<String, Object> appointmentCompleted(UUID appointmentId) {

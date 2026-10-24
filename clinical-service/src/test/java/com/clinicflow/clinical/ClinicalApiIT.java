@@ -1,15 +1,18 @@
 package com.clinicflow.clinical;
 
+import com.clinicflow.clinical.application.ports.SessionRecordRepository;
 import com.clinicflow.clinical.support.StubHttpServer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.mockito.InOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -21,12 +24,14 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.client.EntityExchangeResult;
 import org.springframework.test.web.servlet.client.RestTestClient;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -42,6 +47,9 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.when;
 
@@ -86,6 +94,8 @@ class ClinicalApiIT {
     @Autowired private RestTestClient http;
     @Autowired private JdbcTemplate jdbc;
     @MockitoBean private JwtDecoder jwtDecoder;
+    // Calls the real repository unless a test makes one save fail.
+    @MockitoSpyBean private SessionRecordRepository sessionRecords;
 
     @BeforeEach
     void cleanDatabaseAndConfigureSecurity() {
@@ -221,6 +231,102 @@ class ClinicalApiIT {
 
         // Assert
         assertProblem(response, HttpStatus.CONFLICT, "appointment_already_recorded");
+    }
+
+    @Test
+    void appointmentOwnerLinksAnAppointmentClaimedBeforeLinksWereVerified() {
+        // Arrange
+        legacySignedClaim(APPOINTMENT_ID);
+        String caseId = createCase("psychologist-token", PATIENT_ID);
+
+        // Act
+        var response = exchange("/clinical-cases/" + caseId + "/session-records", HttpMethod.POST,
+                linkedSession(APPOINTMENT_ID));
+
+        // Assert
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.CREATED);
+        assertThat(response.getResponseBody()).containsEntry("appointmentId", APPOINTMENT_ID.toString());
+    }
+
+    @Test
+    void ownersLinkReleasesTheLegacyClaimAndKeepsItsSignedNote() {
+        // Arrange
+        UUID claimId = legacySignedClaim(APPOINTMENT_ID);
+        String caseId = createCase("psychologist-token", PATIENT_ID);
+
+        // Act
+        exchange("/clinical-cases/" + caseId + "/session-records", HttpMethod.POST, linkedSession(APPOINTMENT_ID));
+
+        // Assert
+        assertThat(storedSession(claimId.toString()))
+                .containsEntry("appointment_id", null)
+                .containsEntry("note_status", "SIGNED")
+                .containsEntry("summary", "Legacy signed note");
+        assertThat(jdbc.queryForMap("SELECT * FROM session_record_link_conflicts WHERE session_record_id = ?",
+                claimId))
+                .containsEntry("appointment_id", APPOINTMENT_ID)
+                .containsEntry("appointment_psychologist_id", PSYCHOLOGIST_ID)
+                .containsEntry("appointment_patient_id", PATIENT_ID)
+                .containsEntry("source", "MANUAL_LINK");
+    }
+
+    @Test
+    void foreignCallerCannotReleaseALegacyClaim() {
+        // Arrange
+        UUID claimId = legacySignedClaim(APPOINTMENT_ID);
+        String attackerCaseId = createCase("other-psychologist-token", OTHER_PATIENT_ID);
+
+        // Act
+        exchange("/clinical-cases/" + attackerCaseId + "/session-records", HttpMethod.POST,
+                new HttpEntity<>(linkedSession(APPOINTMENT_ID), bearer("other-psychologist-token")), Map.class);
+
+        // Assert
+        assertThat(storedSession(claimId.toString())).containsEntry("appointment_id", APPOINTMENT_ID);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM session_record_link_conflicts", Long.class)).isZero();
+    }
+
+    @Test
+    void ownersFailedRecordFailsOnlyAfterTheLegacyClaimWasReleased() {
+        // Arrange
+        UUID claimId = legacySignedClaim(APPOINTMENT_ID);
+        String caseId = createCase("psychologist-token", PATIENT_ID);
+        failTheOwnersSessionRecord();
+
+        // Act
+        exchange("/clinical-cases/" + caseId + "/session-records", HttpMethod.POST, linkedSession(APPOINTMENT_ID));
+
+        // Assert
+        InOrder order = inOrder(sessionRecords);
+        order.verify(sessionRecords).save(argThat(record -> record.id().value().equals(claimId)));
+        order.verify(sessionRecords).save(argThat(record -> record.psychologistId().value().equals(PSYCHOLOGIST_ID)));
+    }
+
+    @Test
+    void ownersFailedRecordRollsBackTheReleasedLink() {
+        // Arrange
+        UUID claimId = legacySignedClaim(APPOINTMENT_ID);
+        String caseId = createCase("psychologist-token", PATIENT_ID);
+        failTheOwnersSessionRecord();
+
+        // Act
+        exchange("/clinical-cases/" + caseId + "/session-records", HttpMethod.POST, linkedSession(APPOINTMENT_ID));
+
+        // Assert
+        assertThat(storedSession(claimId.toString())).containsEntry("appointment_id", APPOINTMENT_ID);
+    }
+
+    @Test
+    void ownersFailedRecordRollsBackTheConflictAudit() {
+        // Arrange
+        legacySignedClaim(APPOINTMENT_ID);
+        String caseId = createCase("psychologist-token", PATIENT_ID);
+        failTheOwnersSessionRecord();
+
+        // Act
+        exchange("/clinical-cases/" + caseId + "/session-records", HttpMethod.POST, linkedSession(APPOINTMENT_ID));
+
+        // Assert
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM session_record_link_conflicts", Long.class)).isZero();
     }
 
     @Test
@@ -911,6 +1017,27 @@ class ClinicalApiIT {
             body.put("summary", summary);
         }
         return body;
+    }
+
+    // The owner's insert fails after the claim's link was released, as a constraint violation on that row would.
+    private void failTheOwnersSessionRecord() {
+        doThrow(new DataIntegrityViolationException("Forced failure of the owner's session record"))
+                .when(sessionRecords)
+                .save(argThat(record -> record.psychologistId().value().equals(PSYCHOLOGIST_ID)));
+    }
+
+    // Before ADR-021 any psychologist could link any appointment id; this rebuilds such a row, already signed.
+    private UUID legacySignedClaim(UUID appointmentId) {
+        UUID claimId = UUID.randomUUID();
+        Timestamp now = Timestamp.from(Instant.now());
+        jdbc.update("""
+                INSERT INTO session_records (id, psychologist_id, patient_id, appointment_id, session_date, modality,
+                    duration_minutes, attendance_status, note_status, summary, created_at, updated_at, signed_at,
+                    signed_by)
+                VALUES (?, ?, ?, ?, ?, 'ONLINE', 50, 'ATTENDED', 'SIGNED', 'Legacy signed note', ?, ?, ?, ?)
+                """, claimId, OTHER_PSYCHOLOGIST_ID, OTHER_PATIENT_ID, appointmentId, now, now, now, now,
+                OTHER_PSYCHOLOGIST_ID);
+        return claimId;
     }
 
     private Map<String, Object> storedSession(String sessionId) {
