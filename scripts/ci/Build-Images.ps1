@@ -15,7 +15,7 @@ if ($RunId) {
 
 Push-Location $RepositoryRoot
 try {
-    & docker @ComposeArguments build postgres-bootstrap gateway auth-service patient-service appointment-service clinical-service notification-service frontend
+    & docker @ComposeArguments build postgres postgres-bootstrap gateway auth-service patient-service appointment-service clinical-service notification-service frontend
     if ($LASTEXITCODE -ne 0) { throw "Container image build failed." }
 }
 finally { Pop-Location }

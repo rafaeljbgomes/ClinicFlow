@@ -71,6 +71,11 @@ security baseline for a system handling personal and health-related data.
 
 Consequences: local development requires generating development RSA keys.
 
+Status: superseded for token issuance by ADR-027. Keycloak signs the tokens and
+publishes its keys through JWKS. Validating tokens locally in each resource
+server, without a shared signing secret, still holds. This entry describes the
+system until the migration lands (#86 to #90).
+
 ## ADR-007: Structured Logging
 
 Decision: all services use Spring Boot structured ECS JSON logs and propagate a
@@ -466,3 +471,31 @@ Passwords are generated into Git-ignored files. An idempotent bootstrap
 post-start hooks re-apply the administrator passwords to existing volumes. See
 [ADR-026](decisions/ADR-026-per-service-credentials.md) for the privilege table,
 rotation and residual risks.
+
+## ADR-027: Keycloak as the Identity Provider
+
+Decision: Keycloak 26.8.1 (official image, pinned by digest), with the
+`clinicflow` realm defined as code, replaces `auth-service` as the only token
+issuer. The Next.js BFF becomes a confidential client using the
+authorization-code flow with PKCE. Resource servers validate tokens through
+Spring Boot properties only: `jwk-set-uri` on the private network, `issuer-uri`
+for the public issuer, the `clinicflow-api` audience, and authorities from a
+top-level `roles` claim. Existing user UUIDs stay the token `sub`, because the
+realm import and the Admin API `partialImport` keep a user's `id`.
+Self-registration yields only `PATIENT`. Kubernetes uses the codecentric
+`keycloakx` chart as its own release. See
+[ADR-027](decisions/ADR-027-keycloak-identity-provider.md) for the token
+contract, the spike evidence, the issuer and backchannel rule, footprint and
+upgrade cadence. ADR-027 supersedes ADR-006 for token issuance.
+
+## ADR-028: ClinicFlow PostgreSQL Image without gosu
+
+Decision: PostgreSQL and its bootstrap run ClinicFlow's image built from
+`docker/postgres/Dockerfile`: the digest-pinned official image with `gosu`
+removed and `USER 70:70`, in Compose, CI and Kubernetes.
+
+Rationale: `gosu` only drops root to UID 70 at container start, and it carried
+Go 1.24.6 standard-library CVEs with no upstream rebuild. Starting as UID 70
+everywhere makes the binary unnecessary, so it is removed rather than tracked.
+See [ADR-028](decisions/ADR-028-postgres-image-without-gosu.md) for the image
+tags, upgrade path and consequences.
