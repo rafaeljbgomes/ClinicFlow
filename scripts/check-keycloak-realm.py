@@ -98,8 +98,8 @@ def form_action(page, form_id):
 
 
 def feedback(page):
-    match = re.search(r'(?:kc-feedback-text|input-error)[^>]*>\s*([^<]+?)\s*<', page)
-    return match.group(1) if match else ""
+    match = re.search(r'kc-feedback-text[^>]*>\s*([^<]*\S)\s*<', page)
+    return html.unescape(match.group(1)) if match else ""
 
 
 def authorize(public, credentials=None, registration=None):

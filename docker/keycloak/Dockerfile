@@ -14,7 +14,7 @@ FROM quay.io/keycloak/keycloak:26.8.1@sha256:79c623a22abacf3fe6c00a5fb30f5b7843d
 COPY --from=builder /opt/keycloak/ /opt/keycloak/
 COPY --chmod=0555 healthcheck.sh /opt/clinicflow/healthcheck.sh
 # The realm is imported only when it does not exist yet; see docs/development/local-development.md.
-COPY --chmod=0444 realm/clinicflow-realm.json /opt/keycloak/data/import/clinicflow-realm.json
+COPY realm/clinicflow-realm.json /opt/keycloak/data/import/clinicflow-realm.json
 
 USER 1000
 ENTRYPOINT ["/opt/keycloak/bin/kc.sh"]
