@@ -132,6 +132,30 @@
       "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/36",
       "reviewedAt": "2026-10-20",
       "expiresAt": "2026-11-19"
+    },
+    {
+      "component": "platform",
+      "target": "keycloak",
+      "id": "CVE-2026-91403",
+      "package": "java-21-openjdk-headless",
+      "version": "1:21.0.12.1.1-1.2.el9",
+      "owner": "rafaeljbgomes",
+      "reason": "No fixed build exists: the rebuilt quay.io/keycloak/keycloak:26.8.1 digest a78d6b79 still ships this java-21-openjdk-headless and no Keycloak 26.8.2 is published; local synthetic-data identity provider only.",
+      "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/103",
+      "reviewedAt": "2026-10-24",
+      "expiresAt": "2026-11-19"
+    },
+    {
+      "component": "platform",
+      "target": "keycloak",
+      "id": "CVE-2026-91415",
+      "package": "java-21-openjdk-headless",
+      "version": "1:21.0.12.1.1-1.2.el9",
+      "owner": "rafaeljbgomes",
+      "reason": "No fixed build exists: the rebuilt quay.io/keycloak/keycloak:26.8.1 digest a78d6b79 still ships this java-21-openjdk-headless and no Keycloak 26.8.2 is published; local synthetic-data identity provider only.",
+      "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/103",
+      "reviewedAt": "2026-10-24",
+      "expiresAt": "2026-11-19"
     }
   ]
 }
