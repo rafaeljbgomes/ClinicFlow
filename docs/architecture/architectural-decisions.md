@@ -499,3 +499,17 @@ Go 1.24.6 standard-library CVEs with no upstream rebuild. Starting as UID 70
 everywhere makes the binary unnecessary, so it is removed rather than tracked.
 See [ADR-028](decisions/ADR-028-postgres-image-without-gosu.md) for the image
 tags, upgrade path and consequences.
+
+## ADR-030: PR Security Gates Block Only What the PR Adds
+
+Decision: PR Trivy and ZAP scans still run in full, but a High/Critical finding
+that `main`'s latest scan of the same component and target already had (the
+same package version, configuration rule and file, or ZAP alert) is reported as
+`inherited` instead of blocking. `main`, nightly and manual runs keep the full
+gate. Betterleaks scans only the commits under test.
+
+Rationale: findings already on `main`, such as new upstream CVEs, belong to a
+fix on `main`, not to every unrelated PR. The reference comes only from `main`
+runs, and without one the gate blocks as before. See
+[ADR-030](decisions/ADR-030-pr-scoped-security-gates.md) for the trust rules
+and trade-offs.
