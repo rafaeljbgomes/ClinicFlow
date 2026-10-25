@@ -37,6 +37,9 @@ jobs:
     name: Platform and gateway contract
     needs: route
     if: needs.route.outputs.full-system == 'true'
+    permissions:
+      actions: read
+      contents: read
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -57,6 +60,12 @@ jobs:
 
       - name: Prepare security context
         run: node scripts/ci/security-policy.cjs prepare system
+
+      - name: Fetch main security reference
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Get-SecurityReference.ps1 -Artifact "system-platform-evidence"
 
       # Manifest validation loads ajv and yaml from the frontend dependency tree.
       - name: Install frontend dependencies
@@ -87,6 +96,9 @@ jobs:
     name: Composed stack and Playwright
     needs: route
     if: needs.route.outputs.full-system == 'true'
+    permissions:
+      actions: read
+      contents: read
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
@@ -107,6 +119,12 @@ jobs:
 
       - name: Prepare security context
         run: node scripts/ci/security-policy.cjs prepare system
+
+      - name: Fetch main security reference
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Get-SecurityReference.ps1 -Artifact "system-end-to-end-evidence"
 
       - name: System image build
         run: pwsh -NoLogo -NoProfile -File scripts/ci/Build-Images.ps1 -RunId "$RUN_ID"
@@ -159,6 +177,9 @@ jobs:
     name: Authenticated HTTPS DAST
     needs: route
     if: needs.route.outputs.dast == 'true'
+    permissions:
+      actions: read
+      contents: read
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     env:
@@ -174,6 +195,12 @@ jobs:
 
       - name: Prepare security context
         run: node scripts/ci/security-policy.cjs prepare system
+
+      - name: Fetch main security reference
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Get-SecurityReference.ps1 -Artifact "system-dast-evidence"
 
       - name: ZAP scan of the composed stack
         timeout-minutes: 65

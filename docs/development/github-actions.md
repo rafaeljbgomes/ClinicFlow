@@ -45,7 +45,7 @@ workflows, which run those suites in parallel.
 
 | Event | Behaviour |
 | --- | --- |
-| `pull_request` to `main` | Routed from the merge base. PIT is skipped. Superseded runs for the same PR are cancelled. |
+| `pull_request` to `main` | Routed from the merge base. PIT is skipped. Security findings already present in `main`'s latest scan are reported as inherited, not blocking (ADR-030). Betterleaks scans only the PR's commits. Superseded runs for the same PR are cancelled. |
 | `push` to `main` | Routed from `github.event.before`. PIT runs for affected services. Trivy SARIF is uploaded to code scanning. Sonar analyses `main`, which refreshes the PR baseline. |
 | `schedule` (02:15 UTC components, 03:00 UTC system) | Forces every component, PIT, full-system acceptance and the broader ZAP sweep. |
 | `workflow_dispatch` | Same as the schedule, on demand. |
