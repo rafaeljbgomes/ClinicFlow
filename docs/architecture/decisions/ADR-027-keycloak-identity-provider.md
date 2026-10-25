@@ -256,8 +256,12 @@ per-account control behind it.
   start, and the Operator's `KeycloakRealmImport` documents the same rule. Realm
   changes after the first start therefore need a realm reset in development
   (drop the Keycloak volume) or an idempotent applier such as
-  `keycloak-config-cli`. #86 decides which. CI always starts from empty
-  volumes, so it always exercises the committed file.
+  `keycloak-config-cli`. #86 chose the documented reset:
+  `scripts/reset-keycloak-realm.ps1` replaces the realm in place
+  (`kc.sh import --override true`), and `-Full` drops Keycloak's database. An
+  applier would add a second image and JVM run to every start for a realm that
+  changes only through reviewed commits. CI always starts from empty volumes,
+  so it always exercises the committed file.
 - **Secrets.** The realm file holds `${CLINICFLOW_BFF_CLIENT_SECRET}` and
   password placeholders, which Keycloak resolves from the environment at import.
   The spike confirmed this for the client secret and the user credentials. No

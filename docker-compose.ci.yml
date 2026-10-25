@@ -24,6 +24,12 @@ services:
       - ./deploy/helm/platform/files/bootstrap:/platform-bootstrap:ro
       - ./secrets/services:/credentials:ro
 
+  # The realm comes from the built image. Its redirect URIs follow the run's isolated gateway port.
+  keycloak:
+    image: clinicflow/keycloak:ci-${CLINICFLOW_CI_IMAGE_TAG:-local}
+    environment:
+      CLINICFLOW_PUBLIC_URL: http://localhost:${CLINICFLOW_GATEWAY_HTTP_PORT:-3000}
+
   jwt-secrets-bootstrap:
     image: alpine/openssl:3.5.8@sha256:3f25da71f70eba788067daac3f3df03bd1de7a7c52ed89fa93b94ad2c92d986b
     entrypoint: ["/bin/sh", "-ec"]

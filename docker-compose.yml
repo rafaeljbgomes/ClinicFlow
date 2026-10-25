@@ -71,6 +71,9 @@ services:
     env_file:
       - path: ./secrets/platform/postgres.env
         required: false
+      # Keycloak's database login only; its admin and client secrets stay with Keycloak.
+      - path: ./secrets/keycloak/database.env
+        required: false
     environment:
       PGHOST: postgres
       PGDATABASE: clinicflow
@@ -86,6 +89,9 @@ services:
         psql -v ON_ERROR_STOP=1 -f /bootstrap/01-ensure-databases.sql
         psql -v ON_ERROR_STOP=1 -d clinicflow_patient -f /bootstrap/02-sanitize-patient-phone-data.sql
         sh /platform-bootstrap/provision-postgres.sh
+        : "$${KC_DB_PASSWORD:?No Keycloak database login; run scripts/generate-dev-credentials.ps1.}"
+        psql -v ON_ERROR_STOP=1 -q -f /bootstrap/03-ensure-keycloak-database.sql
+        echo "PostgreSQL login ready for keycloak (clinicflow_keycloak)."
     depends_on:
       postgres:
         condition: service_healthy
@@ -134,6 +140,51 @@ services:
       rabbitmq:
         condition: service_healthy
     restart: "no"
+
+  # Identity provider (ADR-027), built from the official image with the clinicflow realm inside.
+  # The realm is imported on the first start only; scripts/reset-keycloak-realm.ps1 applies changes.
+  # Its database login, bootstrap administrator and BFF client secret are generated (ADR-026).
+  keycloak:
+    build:
+      context: ./docker/keycloak
+    image: clinicflow/keycloak:local
+    env_file:
+      - path: ./secrets/keycloak/database.env
+        required: false
+      - path: ./secrets/keycloak/admin.env
+        required: false
+      - path: ./secrets/keycloak/clinicflow-bff.env
+        required: false
+    environment:
+      KC_DB_URL: jdbc:postgresql://postgres:5432/clinicflow_keycloak
+      # One public issuer for the browser, the BFF and the services. Callers on the private network
+      # use http://keycloak:8080 for tokens and keys, and still get the public iss.
+      KC_HOSTNAME: http://localhost:${CLINICFLOW_KEYCLOAK_PORT:-8180}
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HTTP_ENABLED: "true"
+      # Realm placeholders. The demo password is synthetic and documented in local-development.md.
+      CLINICFLOW_PUBLIC_URL: ${CLINICFLOW_PUBLIC_URL:-https://clinicflow.localhost}
+      CLINICFLOW_DEMO_PASSWORD: ${CLINICFLOW_DEMO_PASSWORD:-ClinicFlowDemo!2026}
+    ports:
+      # Public URL and admin console, reachable from this machine only.
+      - "127.0.0.1:${CLINICFLOW_KEYCLOAK_PORT:-8180}:8080"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    # Without a limit the JVM sizes its heap from the whole VM.
+    deploy:
+      resources:
+        limits: {memory: 768M}
+    healthcheck:
+      test: ["CMD", "/opt/clinicflow/healthcheck.sh"]
+      interval: 5s
+      timeout: 5s
+      retries: 6
+      # The first start creates the schema and imports the realm.
+      start_period: 180s
+      start_interval: 2s
+    depends_on:
+      postgres-bootstrap:
+        condition: service_completed_successfully
 
   # Services mount only the JWT files they need, never the whole secrets/ directory.
   auth-service:
