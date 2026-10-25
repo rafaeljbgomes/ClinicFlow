@@ -60,14 +60,55 @@ function normalizeTrivy(report, component, target, kind) {
     return { ...f, component, target: kind === 'misconfiguration' ? target + ':' + f.location.replaceAll('\\', '/') : target };
   }));
 }
-function evaluate(findings, baseline, now = new Date()) {
+function evaluate(findings, baseline, now = new Date(), inherited = () => false) {
   validateBaseline(baseline, now);
   const accepted = new Map(baseline.entries.map(e => [fingerprint(e), e]));
   return findings.map(f => {
     const e = accepted.get(fingerprint(f));
     const valid = e && Date.parse(e.expiresAt) > now.getTime();
-    return { ...f, disposition: !blocking.has(f.severity) ? 'reported' : valid ? 'baselined' : 'blocking', exception: valid ? e : undefined };
+    const disposition = !blocking.has(f.severity) ? 'reported' : valid ? 'baselined' : inherited(f) ? 'inherited' : 'blocking';
+    return { ...f, disposition, exception: valid ? e : undefined };
   });
+}
+// PRs are judged on what they add (ADR-030). A High/Critical finding is inherited when main's latest scan of the same
+// component and target already shipped that package version (vulnerabilities) or raised that finding (configuration, ZAP).
+// The reference comes only from main runs (Get-SecurityReference.ps1); without one, every finding blocks as before.
+function findReference(component, target, root = process.cwd()) {
+  const dir = path.resolve(root, process.env.CLINICFLOW_SECURITY_REFERENCE || 'reports/reference');
+  if (!fs.existsSync(dir)) return undefined;
+  const suffix = '/' + component + '/' + target + '.json';
+  const matches = fs.readdirSync(dir, { recursive: true }).map(f => String(f).replaceAll('\\', '/')).filter(f => ('/' + f).endsWith(suffix));
+  assert(matches.length <= 1, 'Ambiguous main security reference for ' + component + '/' + target);
+  return matches.length ? path.join(dir, matches[0]) : undefined;
+}
+function trivyInheritance(reference, component, target, kind) {
+  if (kind === 'misconfiguration') {
+    const seen = new Set(normalizeTrivy(reference, component, target, kind).map(fingerprint));
+    return f => seen.has(fingerprint(f));
+  }
+  normalizeTrivy(reference, component, target, kind);
+  const shipped = new Set(reference.Results.flatMap(r => [
+    ...(r.Packages || []).map(p => [p.Name, p.Version]),
+    ...(r.Vulnerabilities || []).map(v => [v.PkgName, v.InstalledVersion])
+  ]).map(p => JSON.stringify(p)));
+  return f => shipped.has(JSON.stringify([f.package, f.version]));
+}
+function zapAlerts(report) {
+  assert(report?.schemaVersion === 1 && Array.isArray(report.alerts), 'Malformed ZAP report');
+  return report.alerts.map(a => {
+    assert(/^ZAP-\d+$/.test(a.id) && ['api','ui'].includes(a.origin) && typeof a.path === 'string' && ['High','Medium','Low','Informational'].includes(a.risk), 'Invalid ZAP alert');
+    return { component: 'dast', target: a.origin, id: a.id, package: a.path, version: '-', severity: a.risk.toUpperCase() };
+  });
+}
+function zapInheritance(reference) {
+  const seen = new Set(zapAlerts(reference).map(fingerprint));
+  return f => seen.has(fingerprint(f));
+}
+function loadInheritance(context, file, build) {
+  if (!context.pullRequest) return () => false;
+  if (!file) { console.log('No main security reference; every High/Critical finding is treated as new.'); return () => false; }
+  try { return build(json(file)); }
+  catch (error) { console.log('Ignoring unusable main security reference ' + file + ': ' + error.message); return () => false; }
 }
 function baselineOnly(files) {
   return files.includes('.ci/security-baseline.json') && files.every(f => f === '.ci/security-baseline.json' || f.endsWith('.md'));
@@ -136,10 +177,7 @@ function normalizeZap(report, context, manifest) {
     for (const request of manifest.requests.filter(r => expected.includes(r.component) && r.roles.includes(role)))
       assert(item.verifiedUrls.includes('https://api.clinicflow.localhost:8443' + request.path) && item.verifiedUrls.includes('https://clinicflow.localhost:8443' + request.bff), 'Missing endpoint discovery: ' + request.path);
   }
-  return report.alerts.map(a => {
-    assert(/^ZAP-\d+$/.test(a.id) && ['api','ui'].includes(a.origin) && typeof a.path === 'string' && ['High','Medium','Low','Informational'].includes(a.risk), 'Invalid ZAP alert');
-    return { component: 'dast', target: a.origin, id: a.id, package: a.path, version: '-', severity: a.risk.toUpperCase() };
-  });
+  return zapAlerts(report);
 }
 
 if (require.main === module) {
@@ -156,10 +194,12 @@ if (require.main === module) {
         const previous=exists?JSON.parse(git(['show',context.targetSha+':.ci/security-baseline.json'])):{schemaVersion:1,entries:[]};
         validateAdditions(findings,baseline,previous,component,target);
       }
-      const result = evaluate(findings,baseline);
+      const inherited = loadInheritance(context, findReference(component, target), reference => trivyInheritance(reference, component, target, kind));
+      const result = evaluate(findings,baseline,new Date(),inherited);
       fs.writeFileSync(reportPath + '.gate.json', JSON.stringify(result, null, 2));
       const failed = result.filter(f => f.disposition === 'blocking');
-      console.log(component + '/' + target + ': ' + result.length + ' findings, ' + failed.length + ' new High/Critical');
+      const kept = result.filter(f => f.disposition === 'inherited').length;
+      console.log(component + '/' + target + ': ' + result.length + ' findings, ' + failed.length + ' new High/Critical' + (kept ? ', ' + kept + ' inherited from main' : ''));
       if (failed.length) process.exitCode = 2;
     } else if (command === 'evaluate-zap') {
       const context=json('reports/security/context.json');
@@ -175,10 +215,10 @@ if (require.main === module) {
         const previous=exists?JSON.parse(git(['show',context.targetSha+':.ci/zap-exceptions.json'])):{schemaVersion:1,entries:[]};
         for(const target of ['api','ui']) validateAdditions(findings,baseline,previous,'dast',target);
       }
-      const result=evaluate(findings,baseline);
+      const result=evaluate(findings,baseline,new Date(),loadInheritance(context,findReference('dast','zap'),zapInheritance));
       fs.writeFileSync(args[0]+'.gate.json',JSON.stringify(result,null,2));
       if(result.some(f=>f.disposition==='blocking')) process.exitCode=2;
     } else throw new Error('Unknown security policy command');
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }
-module.exports = { components, routeChanges, validateBaseline, fingerprint, normalizeTrivy, evaluate, baselineOnly, trustedBaseline, prepare, normalizeZap, validateAdditions };
+module.exports = { components, routeChanges, validateBaseline, fingerprint, normalizeTrivy, evaluate, baselineOnly, trustedBaseline, prepare, normalizeZap, validateAdditions, findReference, trivyInheritance, zapInheritance, loadInheritance };

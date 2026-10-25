@@ -131,6 +131,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
+      actions: read
       contents: read
       security-events: write
     steps:
@@ -149,6 +150,12 @@ jobs:
 
       - name: Prepare security context
         run: node scripts/ci/security-policy.cjs prepare "$SERVICE"
+
+      - name: Fetch main security reference
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Get-SecurityReference.ps1 -Artifact "$SERVICE-dependency-security"
 
       - name: SBOM and dependency scan
         run: pwsh -NoLogo -NoProfile -File scripts/ci/Invoke-ComponentSecurity.ps1 -Component "$SERVICE" -Phase Dependencies
@@ -177,6 +184,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
+      actions: read
       contents: read
       security-events: write
     env:
@@ -196,6 +204,12 @@ jobs:
 
       - name: Prepare security context
         run: node scripts/ci/security-policy.cjs prepare "$SERVICE"
+
+      - name: Fetch main security reference
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: pwsh -NoLogo -NoProfile -File scripts/ci/Get-SecurityReference.ps1 -Artifact "$SERVICE-image-security"
 
       - name: Image build
         run: pwsh -NoLogo -NoProfile -File scripts/ci/Build-ComponentImage.ps1 -Component "$SERVICE" -Tag "$IMAGE_TAG"
