@@ -29,7 +29,20 @@ credentials:
   # A digest of the Secret's content; when it changes the pods roll so they pick up rotated passwords.
   checksum: ""
 
+# Token validation (ADR-027). Resource servers trust the Keycloak realm only: iss must equal the public
+# issuer, and signing keys come from the realm JWKS on the cluster network, fetched on the first request.
+oidc:
+  enabled: true
+  issuer: https://auth.clinicflow.localhost/realms/clinicflow
+  jwksUri: http://keycloak:8080/realms/clinicflow/protocol/openid-connect/certs
+  # The in-cluster Keycloak pods (app.kubernetes.io/component) and HTTP port the JWKS egress rule allows.
+  component: keycloak
+  port: 8080
+
+# auth-service only, until it is removed: it signs and checks its own tokens with the PEM key pair.
+# A release enables exactly one of oidc and jwt.
 jwt:
+  enabled: false
   issuer: clinicflow-auth
   secretName: clinicflow-jwt
   publicKeyKey: jwt-public.pem

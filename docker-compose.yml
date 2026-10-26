@@ -186,7 +186,9 @@ services:
       postgres-bootstrap:
         condition: service_completed_successfully
 
-  # Services mount only the JWT files they need, never the whole secrets/ directory.
+  # auth-service and the BFF mount only the JWT files they need, never the whole secrets/ directory.
+  # The other services trust Keycloak only (ADR-027): iss is the public issuer, keys come from the
+  # private-network JWKS, fetched on the first request, so they do not wait for Keycloak to start.
   auth-service:
     build:
       context: .
@@ -218,12 +220,10 @@ services:
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/clinicflow_patient
       SPRING_RABBITMQ_HOST: rabbitmq
-      CLINICFLOW_SECURITY_JWT_PUBLIC_KEY_PATH: /run/secrets/clinicflow/jwt-public.pem
-      CLINICFLOW_SECURITY_JWT_ISSUER: clinicflow-auth
+      CLINICFLOW_OIDC_ISSUER: http://localhost:${CLINICFLOW_KEYCLOAK_PORT:-8180}/realms/clinicflow
+      CLINICFLOW_OIDC_JWKS_URI: http://keycloak:8080/realms/clinicflow/protocol/openid-connect/certs
       CLINICFLOW_DEMO_BOOTSTRAP_ENABLED: "true"
       MANAGEMENT_SERVER_PORT: "9000"
-    volumes:
-      - {type: bind, source: ./secrets/jwt-public.pem, target: /run/secrets/clinicflow/jwt-public.pem, read_only: true}
     depends_on:
       postgres-bootstrap:
         condition: service_completed_successfully
@@ -241,12 +241,10 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/clinicflow_appointment
       CLINICFLOW_SERVICES_PATIENT_BASE_URL: http://patient-service:8082
       SPRING_RABBITMQ_HOST: rabbitmq
-      CLINICFLOW_SECURITY_JWT_PUBLIC_KEY_PATH: /run/secrets/clinicflow/jwt-public.pem
-      CLINICFLOW_SECURITY_JWT_ISSUER: clinicflow-auth
+      CLINICFLOW_OIDC_ISSUER: http://localhost:${CLINICFLOW_KEYCLOAK_PORT:-8180}/realms/clinicflow
+      CLINICFLOW_OIDC_JWKS_URI: http://keycloak:8080/realms/clinicflow/protocol/openid-connect/certs
       CLINICFLOW_DEMO_BOOTSTRAP_ENABLED: "true"
       MANAGEMENT_SERVER_PORT: "9000"
-    volumes:
-      - {type: bind, source: ./secrets/jwt-public.pem, target: /run/secrets/clinicflow/jwt-public.pem, read_only: true}
     depends_on:
       postgres-bootstrap:
         condition: service_completed_successfully
@@ -265,12 +263,10 @@ services:
       CLINICFLOW_SERVICES_PATIENT_BASE_URL: http://patient-service:8082
       CLINICFLOW_SERVICES_APPOINTMENT_BASE_URL: http://appointment-service:8083
       SPRING_RABBITMQ_HOST: rabbitmq
-      CLINICFLOW_SECURITY_JWT_PUBLIC_KEY_PATH: /run/secrets/clinicflow/jwt-public.pem
-      CLINICFLOW_SECURITY_JWT_ISSUER: clinicflow-auth
+      CLINICFLOW_OIDC_ISSUER: http://localhost:${CLINICFLOW_KEYCLOAK_PORT:-8180}/realms/clinicflow
+      CLINICFLOW_OIDC_JWKS_URI: http://keycloak:8080/realms/clinicflow/protocol/openid-connect/certs
       CLINICFLOW_DEMO_BOOTSTRAP_ENABLED: "true"
       MANAGEMENT_SERVER_PORT: "9000"
-    volumes:
-      - {type: bind, source: ./secrets/jwt-public.pem, target: /run/secrets/clinicflow/jwt-public.pem, read_only: true}
     depends_on:
       postgres-bootstrap:
         condition: service_completed_successfully
@@ -287,12 +283,10 @@ services:
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/clinicflow_notification
       SPRING_RABBITMQ_HOST: rabbitmq
-      CLINICFLOW_SECURITY_JWT_PUBLIC_KEY_PATH: /run/secrets/clinicflow/jwt-public.pem
-      CLINICFLOW_SECURITY_JWT_ISSUER: clinicflow-auth
+      CLINICFLOW_OIDC_ISSUER: http://localhost:${CLINICFLOW_KEYCLOAK_PORT:-8180}/realms/clinicflow
+      CLINICFLOW_OIDC_JWKS_URI: http://keycloak:8080/realms/clinicflow/protocol/openid-connect/certs
       CLINICFLOW_DEMO_BOOTSTRAP_ENABLED: "true"
       MANAGEMENT_SERVER_PORT: "9000"
-    volumes:
-      - {type: bind, source: ./secrets/jwt-public.pem, target: /run/secrets/clinicflow/jwt-public.pem, read_only: true}
     depends_on:
       postgres-bootstrap:
         condition: service_completed_successfully
