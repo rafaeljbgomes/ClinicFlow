@@ -5,7 +5,9 @@ import com.clinicflow.notification.application.exceptions.NotificationNotFoundEx
 import com.clinicflow.notification.application.mapping.NotificationApplicationMapper;
 import com.clinicflow.notification.application.ports.NotificationRepository;
 import com.clinicflow.notification.application.queries.GetNotificationQuery;
+import com.clinicflow.notification.application.queries.ListNotificationsQuery;
 import com.clinicflow.notification.application.results.NotificationResult;
+import com.clinicflow.notification.application.results.PageResult;
 import com.clinicflow.notification.domain.Notification;
 import com.clinicflow.notification.domain.NotificationId;
 import com.clinicflow.notification.domain.PsychologistId;
@@ -15,7 +17,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
-import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -57,14 +58,15 @@ public class NotificationService {
     }
 
     @Transactional(readOnly = true)
-    public List<NotificationResult> list() {
-        return notificationRepository.findAll().stream().map(mapper::toResult).toList();
+    public PageResult<NotificationResult> list(ListNotificationsQuery query) {
+        return notificationRepository.findPage(query.statuses(), query.page()).map(mapper::toResult);
     }
 
     @Transactional(readOnly = true)
-    public List<NotificationResult> listForPsychologist(PsychologistId psychologistId) {
-        return notificationRepository.findByPsychologistId(psychologistId).stream()
-                .map(mapper::toResult).toList();
+    public PageResult<NotificationResult> listForPsychologist(ListNotificationsQuery query,
+                                                             PsychologistId psychologistId) {
+        return notificationRepository.findPageByPsychologistId(psychologistId, query.statuses(), query.page())
+                .map(mapper::toResult);
     }
 
     @Transactional(readOnly = true)

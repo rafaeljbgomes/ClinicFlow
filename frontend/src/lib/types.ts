@@ -51,6 +51,12 @@ export type Appointment = {
   version: number;
 };
 
+// One page of a paged list endpoint (ADR-029); page.number counts from 0.
+export type Page<T> = {
+  content: T[];
+  page: { size: number; number: number; totalElements: number; totalPages: number };
+};
+
 export type NotificationStatus = "PENDING" | "SENT" | "FAILED";
 export type NotificationType = "EMAIL" | "SYSTEM";
 

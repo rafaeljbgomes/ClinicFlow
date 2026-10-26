@@ -1,6 +1,7 @@
 package com.clinicflow.notification;
 
 import com.clinicflow.notification.application.ports.NotificationRepository;
+import com.clinicflow.notification.application.queries.PageQuery;
 import com.clinicflow.notification.application.NotificationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,6 +26,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -78,7 +80,7 @@ class NotificationMessagingIT {
 
         // Assert
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
-                assertThat(notifications.findAll()).singleElement().satisfies(notification -> {
+                assertThat(notifications.findPage(Set.of(), new PageQuery(0, 10)).items()).singleElement().satisfies(notification -> {
                     assertThat(notification.eventId().value()).isEqualTo(eventId);
                     assertThat(notification.psychologistId()).hasValueSatisfying(
                             id -> assertThat(id.value()).isEqualTo(psychologistId));
@@ -97,7 +99,7 @@ class NotificationMessagingIT {
         // Assert
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
                 verify(notificationService, times(2)).processEvent(any()));
-        assertThat(notifications.findAll()).hasSize(1);
+        assertThat(notifications.findPage(Set.of(), new PageQuery(0, 10)).items()).hasSize(1);
     }
 
     @Test

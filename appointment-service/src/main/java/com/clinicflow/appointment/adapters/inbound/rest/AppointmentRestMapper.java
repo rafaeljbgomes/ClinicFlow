@@ -11,14 +11,19 @@ import com.clinicflow.appointment.application.commands.ScheduleAppointmentComman
 import com.clinicflow.appointment.application.mapping.MapperConfiguration;
 import com.clinicflow.appointment.application.queries.GetAppointmentQuery;
 import com.clinicflow.appointment.application.queries.ListAppointmentsQuery;
+import com.clinicflow.appointment.application.queries.PageQuery;
+import com.clinicflow.appointment.application.queries.ScheduleOrder;
 import com.clinicflow.appointment.application.results.AppointmentResult;
 import com.clinicflow.appointment.domain.AppointmentDate;
 import com.clinicflow.appointment.domain.AppointmentId;
+import com.clinicflow.appointment.domain.AppointmentStatus;
 import com.clinicflow.appointment.domain.CancellationReason;
 import com.clinicflow.appointment.domain.PatientId;
 import com.clinicflow.appointment.domain.PsychologistId;
 import org.mapstruct.Mapper;
 
+import java.time.Instant;
+import java.util.Set;
 import java.util.UUID;
 
 @Mapper(config = MapperConfiguration.class)
@@ -50,8 +55,11 @@ public abstract class AppointmentRestMapper {
         return new GetAppointmentQuery(new PsychologistId(psychologistId), new AppointmentId(appointmentId));
     }
 
-    public ListAppointmentsQuery toListQuery(UUID psychologistId) {
-        return new ListAppointmentsQuery(new PsychologistId(psychologistId));
+    public ListAppointmentsQuery toListQuery(UUID psychologistId, Instant from, Instant to,
+                                             Set<AppointmentStatus> statuses, ScheduleOrder order,
+                                             int page, int size) {
+        return new ListAppointmentsQuery(new PsychologistId(psychologistId), from, to, statuses, order,
+                new PageQuery(page, size));
     }
 
     public abstract AppointmentResponse toResponse(AppointmentResult result);

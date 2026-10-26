@@ -26,37 +26,61 @@ import {
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { swrFetcher } from "@/lib/api-client";
-import { deriveFollowUps, practiceMetrics, type FollowUp, type PracticeMetric } from "@/lib/dashboard-insights";
+import {
+  ATTENTION_NOTIFICATION_STATUSES,
+  deriveFollowUps,
+  OPEN_APPOINTMENT_STATUSES,
+  practiceMetrics,
+  UPCOMING_WINDOW_MS,
+  type FollowUp,
+  type PracticeMetric,
+} from "@/lib/dashboard-insights";
 import { formatDateTime, formatEnum } from "@/lib/format";
-import type { Appointment, ClinicalCase, Notification, Patient } from "@/lib/types";
+import { listPath } from "@/lib/list-path";
+import type { Appointment, ClinicalCase, Notification, Page, Patient } from "@/lib/types";
+
+const UPCOMING_LIMIT = 8;
+const RECENT_MESSAGE_LIMIT = 3;
 
 export default function DashboardPage() {
   const [renderedAt] = useState(() => Date.now());
   const [todayText] = useState(() => todayLabel());
   const patients = useSWR<Patient[]>("/api/patients", swrFetcher);
-  const appointments = useSWR<Appointment[]>("/api/appointments", swrFetcher);
+  // Each paged request asks the server for exactly what one card shows, so nothing scales with history.
+  const upcoming = useSWR<Page<Appointment>>(listPath("/api/appointments", {
+    from: new Date(renderedAt).toISOString(), status: OPEN_APPOINTMENT_STATUSES, size: UPCOMING_LIMIT,
+  }), swrFetcher);
+  const upcomingThisWeek = useSWR<Page<Appointment>>(listPath("/api/appointments", {
+    from: new Date(renderedAt).toISOString(), to: new Date(renderedAt + UPCOMING_WINDOW_MS).toISOString(),
+    status: OPEN_APPOINTMENT_STATUSES, size: 1,
+  }), swrFetcher);
   const clinicalCases = useSWR<ClinicalCase[]>("/api/clinical-cases", swrFetcher);
-  const notifications = useSWR<Notification[]>("/api/notifications", swrFetcher);
+  const recentMessages = useSWR<Page<Notification>>(listPath("/api/notifications", { size: RECENT_MESSAGE_LIMIT }), swrFetcher);
+  const attentionMessages = useSWR<Page<Notification>>(listPath("/api/notifications", {
+    status: ATTENTION_NOTIFICATION_STATUSES, size: 1,
+  }), swrFetcher);
+  const requests = [patients, upcoming, upcomingThisWeek, clinicalCases, recentMessages, attentionMessages];
 
-  const isLoading = patients.isLoading || appointments.isLoading || clinicalCases.isLoading || notifications.isLoading;
-  const error = patients.error ?? appointments.error ?? clinicalCases.error ?? notifications.error;
+  const isLoading = requests.some((request) => request.isLoading);
+  const error = requests.find((request) => request.error)?.error;
   const patientById = useMemo(
     () => new Map((patients.data ?? []).map((patient) => [patient.id, patient])),
     [patients.data]
   );
-  const upcomingAppointments = useMemo(
-    () => [...(appointments.data ?? [])]
-      .filter((appointment) => appointment.status !== "CANCELLED" && new Date(appointment.scheduledAt).getTime() >= renderedAt)
-      .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime()),
-    [appointments.data, renderedAt]
-  );
+  const upcomingAppointments = upcoming.data?.content ?? [];
   const followUps = useMemo(
     () => deriveFollowUps(patients.data ?? [], clinicalCases.data ?? []),
     [clinicalCases.data, patients.data]
   );
   const metrics = useMemo(
-    () => practiceMetrics(patients.data ?? [], appointments.data ?? [], clinicalCases.data ?? [], notifications.data ?? [], renderedAt),
-    [appointments.data, clinicalCases.data, notifications.data, patients.data, renderedAt]
+    () => practiceMetrics(
+      patients.data ?? [],
+      upcomingThisWeek.data?.page.totalElements ?? 0,
+      clinicalCases.data ?? [],
+      attentionMessages.data?.page.totalElements ?? 0,
+      renderedAt
+    ),
+    [attentionMessages.data, clinicalCases.data, patients.data, renderedAt, upcomingThisWeek.data]
   );
 
   if (isLoading) return <LoadingTable />;
@@ -96,12 +120,12 @@ export default function DashboardPage() {
             {upcomingAppointments.length === 0 ? (
               <EmptyPracticeState />
             ) : (
-              upcomingAppointments.slice(0, 8).map((appointment, index) => (
+              upcomingAppointments.map((appointment, index) => (
                 <AppointmentRow
                   key={appointment.id}
                   appointment={appointment}
                   patient={patientById.get(appointment.patientId)}
-                  showDivider={index < Math.min(upcomingAppointments.length, 8) - 1}
+                  showDivider={index < upcomingAppointments.length - 1}
                 />
               ))
             )}
@@ -127,7 +151,7 @@ export default function DashboardPage() {
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,0.7fr)]">
         <PracticePulse metrics={metrics} />
-        <RecentMessages messages={notifications.data ?? []} />
+        <RecentMessages messages={recentMessages.data?.content ?? []} />
       </div>
     </>
   );
@@ -202,8 +226,8 @@ function PracticePulse({ metrics }: { metrics: PracticeMetric[] }) {
   );
 }
 
-function RecentMessages({ messages }: { messages: Notification[] }) {
-  const recent = [...messages].slice(-3).reverse();
+// The notification service already returns the newest messages first.
+function RecentMessages({ messages: recent }: { messages: Notification[] }) {
   return (
     <Card size="sm" tone="quiet" className="border border-border/60 bg-card">
       <CardHeader>

@@ -1,5 +1,7 @@
 package com.clinicflow.appointment.infrastructure.bootstrap;
 
+import com.clinicflow.appointment.application.queries.ListAppointmentsQuery;
+import com.clinicflow.appointment.application.results.PageResult;
 import com.clinicflow.appointment.application.ports.AppointmentRepository;
 import com.clinicflow.appointment.domain.Appointment;
 import com.clinicflow.appointment.domain.AppointmentId;
@@ -131,10 +133,8 @@ class DemoDataBootstrapTest {
         }
 
         @Override
-        public List<Appointment> findByPsychologistId(PsychologistId psychologistId) {
-            return records.values().stream()
-                    .filter(appointment -> appointment.psychologistId().equals(psychologistId))
-                    .toList();
+        public PageResult<Appointment> findPage(ListAppointmentsQuery query) {
+            throw new UnsupportedOperationException("The bootstrap never lists appointments");
         }
 
         @Override

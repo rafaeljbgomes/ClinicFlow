@@ -11,6 +11,7 @@ import com.clinicflow.appointment.application.commands.ScheduleAppointmentComman
 import com.clinicflow.appointment.application.mapping.AppointmentApplicationMapper;
 import com.clinicflow.appointment.application.queries.GetAppointmentQuery;
 import com.clinicflow.appointment.application.queries.ListAppointmentsQuery;
+import com.clinicflow.appointment.application.queries.ScheduleOrder;
 import com.clinicflow.appointment.application.results.AppointmentResult;
 import com.clinicflow.appointment.domain.Appointment;
 import com.clinicflow.appointment.domain.AppointmentDate;
@@ -97,10 +98,14 @@ class AppointmentMappingTest {
     @Test
     void listQueryTargetsTheAuthenticatedPsychologist() {
         // Act
-        ListAppointmentsQuery query = restMapper.toListQuery(PSYCHOLOGIST_ID);
+        ListAppointmentsQuery query = restMapper.toListQuery(PSYCHOLOGIST_ID, null, null, null, null, 3, 25);
 
         // Assert
         assertThat(query.psychologistId()).isEqualTo(new PsychologistId(PSYCHOLOGIST_ID));
+        assertThat(query.statuses()).isEmpty();
+        assertThat(query.order()).isEqualTo(ScheduleOrder.ASC);
+        assertThat(query.page().number()).isEqualTo(3);
+        assertThat(query.page().size()).isEqualTo(25);
     }
 
     @Test

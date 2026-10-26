@@ -1,17 +1,21 @@
 package com.clinicflow.notification.adapters.inbound.rest;
 
 import com.clinicflow.notification.adapters.inbound.rest.dto.NotificationResponse;
+import com.clinicflow.notification.adapters.inbound.rest.dto.PageResponse;
 import com.clinicflow.notification.application.NotificationService;
+import com.clinicflow.notification.application.queries.PageQuery;
+import com.clinicflow.notification.domain.NotificationStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import com.clinicflow.notification.domain.PsychologistId;
 
-import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @RestController
@@ -27,11 +31,15 @@ public class NotificationController {
     }
 
     @GetMapping
-    public List<NotificationResponse> list(@AuthenticationPrincipal Jwt jwt) {
+    public PageResponse<NotificationResponse> list(@AuthenticationPrincipal Jwt jwt,
+                                                   @RequestParam(defaultValue = "0") int page,
+                                                   @RequestParam(defaultValue = "" + PageQuery.DEFAULT_SIZE) int size,
+                                                   @RequestParam(required = false) Set<NotificationStatus> status) {
+        var query = mapper.toListQuery(page, size, status);
         var notifications = isAdmin(jwt)
-                ? notificationService.list()
-                : notificationService.listForPsychologist(psychologistId(jwt));
-        return notifications.stream().map(mapper::toResponse).toList();
+                ? notificationService.list(query)
+                : notificationService.listForPsychologist(query, psychologistId(jwt));
+        return PageResponse.of(notifications, mapper::toResponse);
     }
 
     @GetMapping("/{id}")

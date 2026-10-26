@@ -1,4 +1,4 @@
-import type { Appointment, ClinicalCase, Notification, Patient } from "@/lib/types";
+import type { ClinicalCase, Patient } from "@/lib/types";
 
 export type PracticeMetric = {
   label: string;
@@ -14,29 +14,31 @@ export type FollowUp = {
   tone: "warning" | "danger" | "info";
 };
 
+// Statuses of appointments that still need to happen; the dashboard counts and lists only these.
+export const OPEN_APPOINTMENT_STATUSES = ["SCHEDULED", "RESCHEDULED"] as const;
+// Messages in these statuses need the psychologist's attention.
+export const ATTENTION_NOTIFICATION_STATUSES = ["PENDING", "FAILED"] as const;
+export const UPCOMING_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+// Appointments and messages are paged (ADR-029), so their metrics arrive as server-side totals
+// rather than being counted from a full list in the browser.
 export function practiceMetrics(
   patients: Patient[],
-  appointments: Appointment[],
+  upcomingThisWeek: number,
   clinicalCases: ClinicalCase[],
-  notifications: Notification[],
+  attentionMessages: number,
   now: number
 ): PracticeMetric[] {
   const startOfMonth = new Date(now);
   startOfMonth.setDate(1);
   startOfMonth.setHours(0, 0, 0, 0);
-  const sevenDays = now + 7 * 24 * 60 * 60 * 1000;
   const newPatients = patients.filter((patient) => new Date(patient.createdAt).getTime() >= startOfMonth.getTime()).length;
-  const upcoming = appointments.filter((appointment) => {
-    const scheduledAt = new Date(appointment.scheduledAt).getTime();
-    return appointment.status !== "CANCELLED" && scheduledAt >= now && scheduledAt <= sevenDays;
-  }).length;
   const activeCases = clinicalCases.filter((clinicalCase) => clinicalCase.status === "ACTIVE").length;
   const intakeCases = clinicalCases.filter((clinicalCase) => clinicalCase.status === "INTAKE").length;
-  const attentionMessages = notifications.filter((notification) => notification.status === "PENDING" || notification.status === "FAILED").length;
 
   return [
     { label: "Patients", value: patients.length, context: newPatients ? `+${newPatients} this month` : "No new patients this month" },
-    { label: "Upcoming", value: upcoming, context: "Next 7 days" },
+    { label: "Upcoming", value: upcomingThisWeek, context: "Next 7 days" },
     { label: "Cases", value: activeCases, context: intakeCases ? `${intakeCases} in intake` : "No cases in intake" },
     { label: "Messages", value: attentionMessages, context: attentionMessages ? "Need attention" : "All clear" },
   ];

@@ -355,10 +355,30 @@ class AppointmentApiIT {
         var request = new HttpEntity<>(bearer("psychologist-token"));
 
         // Act
-        var response = exchange("/appointments", HttpMethod.GET, request, Object[].class);
+        var response = exchange("/appointments", HttpMethod.GET, request, Map.class);
 
         // Assert
-        assertThat(response.getResponseBody()).hasSize(1);
+        assertThat((List<?>) response.getResponseBody().get("content")).hasSize(1);
+    }
+
+    @Test
+    void listsOnlyTheRequestedWindowInScheduleOrder() {
+        // Arrange
+        Instant start = inThreeDays();
+        String later = scheduleAppointment(start.plus(2, ChronoUnit.HOURS));
+        String earlier = scheduleAppointment(start.plus(1, ChronoUnit.HOURS));
+        scheduleAppointment(start.plus(10, ChronoUnit.DAYS));
+        var request = new HttpEntity<>(bearer("psychologist-token"));
+
+        // Act
+        var response = exchange("/appointments?from=" + start + "&to=" + start.plus(1, ChronoUnit.DAYS),
+                HttpMethod.GET, request, Map.class);
+
+        // Assert
+        List<?> content = (List<?>) response.getResponseBody().get("content");
+        assertThat(content.stream().map(item -> (Object) ((Map<?, ?>) item).get("id")).toList())
+                .containsExactly(earlier, later);
+        assertThat(((Map<?, ?>) response.getResponseBody().get("page")).get("totalElements")).isEqualTo(2);
     }
 
     @Test

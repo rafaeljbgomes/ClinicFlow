@@ -1,5 +1,7 @@
 package com.clinicflow.appointment.application;
 
+import com.clinicflow.appointment.application.queries.PageQuery;
+import com.clinicflow.appointment.application.results.PageResult;
 import com.clinicflow.appointment.application.commands.CancelAppointmentCommand;
 import com.clinicflow.appointment.application.commands.CompleteAppointmentCommand;
 import com.clinicflow.appointment.application.commands.RescheduleAppointmentCommand;
@@ -181,15 +183,60 @@ class AppointmentServiceTest {
     }
 
     @Test
-    void listReturnsOwnedAppointments() {
+    void listReturnsTheRequestedPageOfOwnedAppointments() {
         // Arrange
-        when(repository.findByPsychologistId(OWNER)).thenReturn(List.of(appointment()));
+        var query = new ListAppointmentsQuery(OWNER, null, null, null, null, new PageQuery(0, 20));
+        when(repository.findPage(query)).thenReturn(new PageResult<>(List.of(appointment()), 0, 20, 21));
 
         // Act
-        var results = service.listForPsychologist(new ListAppointmentsQuery(OWNER));
+        var results = service.listForPsychologist(query);
 
         // Assert
-        assertThat(results).extracting(result -> result.id()).containsExactly(APPOINTMENT_ID.value());
+        assertThat(results.items()).extracting(result -> result.id()).containsExactly(APPOINTMENT_ID.value());
+        assertThat(results.totalPages()).isEqualTo(2);
+    }
+
+    @Test
+    void listQueryRejectsEmptyOrBackwardWindows() {
+        // Arrange
+        Instant start = Instant.parse("2026-06-01T00:00:00Z");
+        var page = new PageQuery(0, 20);
+
+        // Act
+        Throwable empty = catchThrowable(() -> new ListAppointmentsQuery(OWNER, start, start, null, null, page));
+        Throwable backward = catchThrowable(() ->
+                new ListAppointmentsQuery(OWNER, start.plusSeconds(1), start, null, null, page));
+        Throwable ownerless = catchThrowable(() -> new ListAppointmentsQuery(null, null, null, null, null, page));
+        Throwable pageless = catchThrowable(() -> new ListAppointmentsQuery(OWNER, null, null, null, null, null));
+
+        // Assert
+        assertThat(empty).isInstanceOf(IllegalArgumentException.class);
+        assertThat(backward).isInstanceOf(IllegalArgumentException.class);
+        assertThat(ownerless).isInstanceOf(IllegalArgumentException.class);
+        assertThat(pageless).isInstanceOf(IllegalArgumentException.class);
+        assertThat(new ListAppointmentsQuery(OWNER, start, null, null, null, page).from()).isEqualTo(start);
+    }
+
+    @Test
+    void pageQueryRejectsNegativePagesAndUnboundedSizes() {
+        // Act
+        Throwable negative = catchThrowable(() -> new PageQuery(-1, 20));
+        Throwable empty = catchThrowable(() -> new PageQuery(0, 0));
+        Throwable oversized = catchThrowable(() -> new PageQuery(0, PageQuery.MAX_SIZE + 1));
+
+        // Assert
+        assertThat(negative).isInstanceOf(IllegalArgumentException.class);
+        assertThat(empty).isInstanceOf(IllegalArgumentException.class);
+        assertThat(oversized).isInstanceOf(IllegalArgumentException.class);
+        assertThat(new PageQuery(0, PageQuery.MAX_SIZE).size()).isEqualTo(PageQuery.MAX_SIZE);
+    }
+
+    @Test
+    void pageResultCountsPartialLastPages() {
+        // Assert
+        assertThat(new PageResult<>(List.of(), 0, 20, 0).totalPages()).isZero();
+        assertThat(new PageResult<>(List.of(), 0, 20, 20).totalPages()).isEqualTo(1);
+        assertThat(new PageResult<>(List.of(), 0, 20, 21).totalPages()).isEqualTo(2);
     }
 
     @Test

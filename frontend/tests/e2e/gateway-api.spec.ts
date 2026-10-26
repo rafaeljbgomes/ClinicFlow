@@ -368,7 +368,7 @@ async function ownerNotifications(request: APIRequestContext, owner: string) {
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
     const response = await request.get("/api/v1/notifications", { headers: signed(owner) });
-    const notifications = response.ok() ? ((await response.json()) as Array<{ id: string }>) : [];
+    const notifications = response.ok() ? ((await response.json()) as { content: Array<{ id: string }> }).content : [];
     if (notifications.length > 0) return notifications;
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
