@@ -3,9 +3,9 @@ WORKDIR /workspace
 COPY . .
 RUN mvn -q -pl auth-service -am package -DskipTests
 
-FROM eclipse-temurin:21.0.12.1_1-jre-alpine@sha256:51ab5e3302e7141ce665ca3ea85e8b5cd648eafbc3c0c90dd79d6537684e4555
-# libexpat 2.9.0 fixes CVE-2026-77214; drop this once the pinned base image ships it.
-RUN apk upgrade --no-cache libexpat \
+FROM eclipse-temurin:21.0.12.1_1-jre-alpine@sha256:b48e02e0ea88d7bfb305335df94923bdef394905f4147dccd52e873cf17b1088
+# brotli-libs 1.2.1 fixes CVE-2026-111497; drop this once the pinned base image ships it.
+RUN apk upgrade --no-cache brotli-libs \
     && addgroup -S -g 10001 clinicflow \
     && adduser -S -D -H -u 10001 -G clinicflow clinicflow
 WORKDIR /app

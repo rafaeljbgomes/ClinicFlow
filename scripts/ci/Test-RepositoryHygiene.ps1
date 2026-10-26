@@ -20,7 +20,14 @@ try {
     }
     if ($Forbidden) { throw "Tracked generated or sensitive paths were found: $($Forbidden -join ', ')" }
 
-    & betterleaks git --redact --no-banner .
+    # Scan the history under test, not every fetched branch: another branch's leak must fail its own PR, not this one.
+    $LogOptions = '--full-history HEAD'
+    if ($env:CHANGE_ID) {
+        $Base = & git merge-base HEAD refs/remotes/origin/main
+        if ($LASTEXITCODE -ne 0 -or -not $Base) { throw "Unable to find the merge base with main." }
+        $LogOptions = "$Base..HEAD"
+    }
+    & betterleaks git --redact --no-banner --log-opts $LogOptions .
     if ($LASTEXITCODE -ne 0) { throw "Betterleaks detected an unreviewed potential secret." }
 }
 finally { Pop-Location }

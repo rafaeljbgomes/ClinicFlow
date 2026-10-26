@@ -1,0 +1,151 @@
+{
+  "realm": "clinicflow",
+  "enabled": true,
+  "displayName": "ClinicFlow",
+  "sslRequired": "external",
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "verifyEmail": false,
+  "bruteForceProtected": true,
+  "failureFactor": 5,
+  "waitIncrementSeconds": 60,
+  "maxFailureWaitSeconds": 900,
+  "maxDeltaTimeSeconds": 43200,
+  "permanentLockout": false,
+  "passwordPolicy": "length(12) and maxLength(128) and notUsername and notEmail",
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "revokeRefreshToken": true,
+  "refreshTokenMaxReuse": 0,
+  "roles": {
+    "realm": [
+      { "name": "ADMIN", "description": "Platform administrator" },
+      { "name": "PSYCHOLOGIST", "description": "Practising psychologist" },
+      { "name": "PATIENT", "description": "Patient with limited access" },
+      {
+        "name": "default-roles-clinicflow",
+        "description": "Granted to every new user, including self-registration",
+        "composite": true,
+        "composites": { "realm": ["PATIENT"] }
+      }
+    ]
+  },
+  "defaultRole": { "name": "default-roles-clinicflow" },
+  "clients": [
+    {
+      "clientId": "clinicflow-bff",
+      "name": "ClinicFlow BFF",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${CLINICFLOW_BFF_CLIENT_SECRET}",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": false,
+      "fullScopeAllowed": false,
+      "redirectUris": ["http://localhost:3000/api/auth/callback"],
+      "webOrigins": [],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:3000/login",
+        "client.use.lightweight.access.token.enabled": "false"
+      },
+      "defaultClientScopes": ["basic", "email", "profile"],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "clinicflow-api audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "clinicflow-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "realm roles as top-level roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "config": {
+            "claim.name": "roles",
+            "multivalued": "true",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "scopeMappings": [
+    { "client": "clinicflow-bff", "roles": ["ADMIN", "PSYCHOLOGIST", "PATIENT"] }
+  ],
+  "users": [
+    {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "username": "admin@demo.clinicflow.local",
+      "email": "admin@demo.clinicflow.local",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "ClinicFlow",
+      "lastName": "Admin",
+      "realmRoles": ["ADMIN"],
+      "credentials": [{ "type": "password", "value": "${SPIKE_DEMO_PASSWORD}", "temporary": false }]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000011",
+      "username": "sofia.almeida@demo.clinicflow.local",
+      "email": "sofia.almeida@demo.clinicflow.local",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Sofia",
+      "lastName": "Almeida",
+      "realmRoles": ["PSYCHOLOGIST"],
+      "credentials": [{ "type": "password", "value": "${SPIKE_DEMO_PASSWORD}", "temporary": false }]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000012",
+      "username": "miguel.santos@demo.clinicflow.local",
+      "email": "miguel.santos@demo.clinicflow.local",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Miguel",
+      "lastName": "Santos",
+      "realmRoles": ["PSYCHOLOGIST"],
+      "credentials": [{ "type": "password", "value": "${SPIKE_DEMO_PASSWORD}", "temporary": false }]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000021",
+      "username": "ana.martins@demo.clinicflow.local",
+      "email": "ana.martins@demo.clinicflow.local",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Ana",
+      "lastName": "Martins",
+      "realmRoles": ["PATIENT"],
+      "credentials": [{ "type": "password", "value": "${SPIKE_DEMO_PASSWORD}", "temporary": false }]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000022",
+      "username": "joao.ferreira@demo.clinicflow.local",
+      "email": "joao.ferreira@demo.clinicflow.local",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Joao",
+      "lastName": "Ferreira",
+      "realmRoles": ["PATIENT"],
+      "credentials": [{ "type": "password", "value": "${SPIKE_DEMO_PASSWORD}", "temporary": false }]
+    }
+  ]
+}

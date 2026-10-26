@@ -357,6 +357,7 @@ Important references:
 - [Architecture decisions](docs/architecture/architectural-decisions.md)
 - [Security mapping](docs/security/asvs-l2-mapping.md)
 - [Kubernetes and observability](docs/infrastructure/kubernetes-observability.md)
+- [Session-record link conflicts runbook](docs/infrastructure/session-record-link-conflicts.md)
 - [Frontend notes](frontend/README.md)
 
 ## Contributing

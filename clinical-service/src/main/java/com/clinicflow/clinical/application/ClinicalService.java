@@ -25,6 +25,7 @@ import com.clinicflow.clinical.application.ports.CarePlanRepository;
 import com.clinicflow.clinical.application.ports.ClinicalCaseRepository;
 import com.clinicflow.clinical.application.ports.PatientDirectory;
 import com.clinicflow.clinical.application.ports.PracticeProfileRepository;
+import com.clinicflow.clinical.application.ports.SessionRecordLinkConflictRepository;
 import com.clinicflow.clinical.application.ports.SessionRecordRepository;
 import com.clinicflow.clinical.application.queries.GetCarePlanQuery;
 import com.clinicflow.clinical.application.queries.GetClinicalCaseQuery;
@@ -45,11 +46,14 @@ import com.clinicflow.clinical.domain.CarePlanId;
 import com.clinicflow.clinical.domain.ClinicalCase;
 import com.clinicflow.clinical.domain.ClinicalCaseId;
 import com.clinicflow.clinical.domain.GoalStatus;
+import com.clinicflow.clinical.domain.LinkConflictSource;
 import com.clinicflow.clinical.domain.PatientId;
 import com.clinicflow.clinical.domain.PracticeProfile;
 import com.clinicflow.clinical.domain.PsychologistId;
 import com.clinicflow.clinical.domain.SessionRecord;
 import com.clinicflow.clinical.domain.SessionRecordId;
+import com.clinicflow.clinical.domain.SessionRecordLinkConflict;
+import com.clinicflow.clinical.domain.SessionRecordLinkConflictId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -73,18 +77,20 @@ public class ClinicalService {
     private final ClinicalCaseRepository clinicalCases;
     private final CarePlanRepository carePlans;
     private final SessionRecordRepository sessionRecords;
+    private final SessionRecordLinkConflictRepository linkConflicts;
     private final PatientDirectory patientDirectory;
     private final AppointmentDirectory appointmentDirectory;
     private final ClinicalApplicationMapper mapper;
 
     public ClinicalService(PracticeProfileRepository practiceProfiles, ClinicalCaseRepository clinicalCases,
                            CarePlanRepository carePlans, SessionRecordRepository sessionRecords,
-                           PatientDirectory patientDirectory, AppointmentDirectory appointmentDirectory,
-                           ClinicalApplicationMapper mapper) {
+                           SessionRecordLinkConflictRepository linkConflicts, PatientDirectory patientDirectory,
+                           AppointmentDirectory appointmentDirectory, ClinicalApplicationMapper mapper) {
         this.practiceProfiles = practiceProfiles;
         this.clinicalCases = clinicalCases;
         this.carePlans = carePlans;
         this.sessionRecords = sessionRecords;
+        this.linkConflicts = linkConflicts;
         this.patientDirectory = patientDirectory;
         this.appointmentDirectory = appointmentDirectory;
         this.mapper = mapper;
@@ -183,13 +189,14 @@ public class ClinicalService {
     @Transactional
     public SessionRecordResult createSessionRecord(CreateSessionRecordCommand command) {
         ClinicalCase clinicalCase = requireOwnedCase(command.psychologistId(), command.clinicalCaseId());
-        if (command.appointmentId() != null) {
-            requireLinkableAppointment(command.psychologistId(), command.appointmentId(), clinicalCase);
-        }
+        Optional<SessionRecord> conflictingHolder = command.appointmentId() == null ? Optional.empty()
+                : requireLinkableAppointment(command.psychologistId(), command.appointmentId(), clinicalCase);
         SessionRecord session = SessionRecord.manual(new SessionRecordId(UUID.randomUUID()), clinicalCase,
                 command.appointmentId(), command.sessionDate(), command.modality(), command.durationMinutes(),
                 command.attendanceStatus(), command.summary(), command.focusAreas(), command.interventions(),
                 command.homework(), command.nextSteps(), Instant.now());
+        conflictingHolder.ifPresent(holder -> releaseConflictingLink(holder, clinicalCase.psychologistId(),
+                clinicalCase.patientId(), LinkConflictSource.MANUAL_LINK));
         return mapper.toResult(sessionRecords.save(session));
     }
 
@@ -226,13 +233,7 @@ public class ClinicalService {
     @Transactional
     public void processAppointmentCompleted(ProcessAppointmentCompletedCommand command) {
         Optional<SessionRecord> existing = sessionRecords.findByAppointmentId(command.appointmentId());
-        if (existing.isPresent()) {
-            // Records linked before appointment links were verified may belong to someone else; surface them.
-            if (!existing.get().psychologistId().equals(command.psychologistId())
-                    || !existing.get().patientId().equals(command.patientId())) {
-                log.warn("session_record_appointment_conflict appointmentId={} sessionRecordId={}",
-                        command.appointmentId().value(), existing.get().id().value());
-            }
+        if (existing.isPresent() && existing.get().isRecordOf(command.psychologistId(), command.patientId())) {
             return;
         }
         ClinicalCaseId caseId = clinicalCases.findOpenByPsychologistIdAndPatientId(
@@ -243,6 +244,8 @@ public class ClinicalService {
         SessionRecord session = SessionRecord.fromCompletedAppointment(new SessionRecordId(UUID.randomUUID()),
                 caseId, command.psychologistId(), command.patientId(), command.appointmentId(),
                 command.appointmentDate(), command.modality(), duration, Instant.now());
+        existing.ifPresent(holder -> releaseConflictingLink(holder, command.psychologistId(), command.patientId(),
+                LinkConflictSource.APPOINTMENT_COMPLETED));
         sessionRecords.save(session);
     }
 
@@ -292,16 +295,34 @@ public class ClinicalService {
     }
 
     // Ownership is checked before the local uniqueness check so a foreign appointment id reveals nothing.
-    private void requireLinkableAppointment(PsychologistId psychologistId, AppointmentId appointmentId,
-                                            ClinicalCase clinicalCase) {
+    // Returns a record that holds the verified appointment without belonging to its owner, if there is one.
+    private Optional<SessionRecord> requireLinkableAppointment(PsychologistId psychologistId,
+                                                               AppointmentId appointmentId,
+                                                               ClinicalCase clinicalCase) {
         PatientId appointmentPatient = appointmentDirectory.findPatientOfOwnedAppointment(appointmentId, psychologistId)
                 .orElseThrow(AppointmentNotFoundException::new);
         if (!appointmentPatient.equals(clinicalCase.patientId())) {
             throw new AppointmentPatientMismatchException();
         }
-        if (sessionRecords.findByAppointmentId(appointmentId).isPresent()) {
+        Optional<SessionRecord> holder = sessionRecords.findByAppointmentId(appointmentId);
+        if (holder.isPresent() && holder.get().isRecordOf(psychologistId, appointmentPatient)) {
             throw new AppointmentAlreadyRecordedException();
         }
+        return holder;
+    }
+
+    // Records linked before ADR-021 can hold another practice's appointment. Once appointment-service has named the
+    // real owner, that link is released and audited so the owner's record can take it (ADR-025).
+    private void releaseConflictingLink(SessionRecord holder, PsychologistId appointmentPsychologistId,
+                                        PatientId appointmentPatientId, LinkConflictSource source) {
+        SessionRecordLinkConflict conflict = holder.releaseAppointmentLink(
+                new SessionRecordLinkConflictId(UUID.randomUUID()), appointmentPsychologistId, appointmentPatientId,
+                source, Instant.now());
+        // The audit entry goes first: the database lets a signed record drop a link only when it is recorded.
+        linkConflicts.save(conflict);
+        sessionRecords.save(holder);
+        log.warn("session_record_appointment_conflict appointmentId={} sessionRecordId={} source={} "
+                        + "resolution=link_released", conflict.appointmentId().value(), holder.id().value(), source);
     }
 
     // Goal IDs are only accepted when they already belong to this plan; new goals always get server IDs.

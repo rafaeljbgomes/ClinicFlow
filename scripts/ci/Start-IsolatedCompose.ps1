@@ -88,6 +88,7 @@ try {
         $env:CLINICFLOW_POSTGRES_PORT,
         $env:CLINICFLOW_RABBITMQ_PORT,
         $env:CLINICFLOW_RABBITMQ_MANAGEMENT_PORT,
+        $env:CLINICFLOW_KEYCLOAK_PORT,
         $env:CLINICFLOW_FRONTEND_PORT
     ) | ForEach-Object { [int]$_ }
     Wait-DockerHostPorts -HostName $RuntimeHost -Ports $HostPorts
@@ -104,6 +105,14 @@ try {
         } while ([DateTimeOffset]::UtcNow -lt $Deadline)
         if ($LASTEXITCODE -ne 0) { throw "$Service did not become ready on its private management port." }
     }
+    # Healthy means ready and the clinicflow realm imported from the committed file (ADR-027).
+    $Deadline = [DateTimeOffset]::UtcNow.AddSeconds(240)
+    do {
+        $KeycloakHealth = & docker compose --file docker-compose.yml --file docker-compose.ci.yml --project-name $ProjectName ps --format '{{.Health}}' keycloak
+        if ($KeycloakHealth -eq 'healthy') { break }
+        Start-Sleep -Seconds 2
+    } while ([DateTimeOffset]::UtcNow -lt $Deadline)
+    if ($KeycloakHealth -ne 'healthy') { throw "keycloak did not become healthy with the clinicflow realm." }
     Wait-HttpEndpoint -Name frontend -Uri "http://${RuntimeHost}:$($env:CLINICFLOW_FRONTEND_PORT)/login"
 }
 catch {

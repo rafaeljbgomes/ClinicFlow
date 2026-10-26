@@ -90,3 +90,57 @@ test('baseline additions and renewals must be observed in the current main scan'
   const renewed={...entry,reason:'Renewed after review'};
   assert.throws(()=>policy.validateAdditions([],{schemaVersion:1,entries:[renewed]},{schemaVersion:1,entries:[entry]},'auth-service','dependencies'));
 });
+
+const trivyReport = (packages, vulnerabilities = []) => ({ SchemaVersion: 2, Results: [{ Target: 'bom.json', Packages: packages.map(([Name, Version]) => ({ Name, Version })), Vulnerabilities: vulnerabilities }] });
+test('PR findings already shipped by main are inherited instead of blocking', () => {
+  const inherited = policy.trivyInheritance(trivyReport([['example', '1.0']]), 'auth-service', 'dependencies', 'vulnerability');
+  assert.deepEqual(policy.evaluate([finding, { ...finding, id: 'CVE-TEST-2' }], empty, now, inherited).map(f => f.disposition), ['inherited','inherited']);
+});
+test('a PR that changes a package version cannot inherit main findings', () => {
+  const inherited = policy.trivyInheritance(trivyReport([['example', '1.0']]), 'auth-service', 'dependencies', 'vulnerability');
+  assert.equal(policy.evaluate([{ ...finding, version: '2.0' }], empty, now, inherited)[0].disposition, 'blocking');
+  assert.equal(policy.evaluate([{ ...finding, package: 'other' }], empty, now, inherited)[0].disposition, 'blocking');
+});
+test('reviewed exceptions and low findings keep their dispositions alongside inheritance', () => {
+  const always = () => true;
+  assert.equal(policy.evaluate([finding], { schemaVersion: 1, entries: [entry] }, now, always)[0].disposition, 'baselined');
+  assert.equal(policy.evaluate([{ ...finding, severity: 'LOW' }], empty, now, always)[0].disposition, 'reported');
+});
+test('configuration findings are inherited only for the same rule and file', () => {
+  const report = name => ({ SchemaVersion: 2, Results: [{ Target: name, Type: 'dockerfile', MisconfSummary: { Failures: 1 }, Misconfigurations: [{ ID: 'AVD-1', Severity: 'HIGH' }] }] });
+  const inherited = policy.trivyInheritance(report('Dockerfile'), 'frontend', 'dockerfile', 'misconfiguration');
+  const [same] = policy.normalizeTrivy(report('Dockerfile'), 'frontend', 'dockerfile', 'misconfiguration');
+  const [moved] = policy.normalizeTrivy(report('other/Dockerfile'), 'frontend', 'dockerfile', 'misconfiguration');
+  assert.equal(inherited(same), true);
+  assert.equal(inherited(moved), false);
+});
+test('ZAP alerts are inherited only for the same plugin, origin and path', () => {
+  const alert = { id: 'ZAP-1', origin: 'api', path: '/api/v1/patients', risk: 'High' };
+  const inherited = policy.zapInheritance({ schemaVersion: 1, alerts: [alert] });
+  assert.equal(inherited({ component: 'dast', target: 'api', id: 'ZAP-1', package: '/api/v1/patients', version: '-', severity: 'HIGH' }), true);
+  assert.equal(inherited({ component: 'dast', target: 'ui', id: 'ZAP-1', package: '/api/v1/patients', version: '-', severity: 'HIGH' }), false);
+});
+test('main references are matched by component and target and must be unambiguous', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'clinicflow-reference-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  assert.equal(policy.findReference('frontend', 'image', root), undefined);
+  fs.mkdirSync(path.join(root, 'reports/reference/frontend-image-security/frontend'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'reports/reference/frontend-image-security/frontend/image.json'), '{}');
+  assert.match(policy.findReference('frontend', 'image', root).replaceAll('\\', '/'), /frontend-image-security\/frontend\/image\.json$/);
+  assert.equal(policy.findReference('frontend', 'dockerfile', root), undefined);
+  fs.mkdirSync(path.join(root, 'reports/reference/copy/frontend'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'reports/reference/copy/frontend/image.json'), '{}');
+  assert.throws(() => policy.findReference('frontend', 'image', root), /Ambiguous/);
+});
+test('main runs and unusable references never inherit findings', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'clinicflow-reference-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, 'image.json');
+  fs.writeFileSync(file, JSON.stringify(trivyReport([['example', '1.0']])));
+  const build = reference => policy.trivyInheritance(reference, 'auth-service', 'dependencies', 'vulnerability');
+  assert.equal(policy.loadInheritance({ pullRequest: false }, file, build)(finding), false);
+  assert.equal(policy.loadInheritance({ pullRequest: true }, file, build)(finding), true);
+  assert.equal(policy.loadInheritance({ pullRequest: true }, undefined, build)(finding), false);
+  fs.writeFileSync(file, JSON.stringify({ SchemaVersion: 2, Results: [] }));
+  assert.equal(policy.loadInheritance({ pullRequest: true }, file, build)(finding), false);
+});

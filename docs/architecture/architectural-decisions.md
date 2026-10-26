@@ -71,6 +71,11 @@ security baseline for a system handling personal and health-related data.
 
 Consequences: local development requires generating development RSA keys.
 
+Status: superseded for token issuance by ADR-027. Keycloak signs the tokens and
+publishes its keys through JWKS. Validating tokens locally in each resource
+server, without a shared signing secret, still holds. This entry describes the
+system until the migration lands (#86 to #90).
+
 ## ADR-007: Structured Logging
 
 Decision: all services use Spring Boot structured ECS JSON logs and propagate a
@@ -356,8 +361,8 @@ timeout. Helm declares the new service-to-service NetworkPolicy flows per releas
 (`networkPolicy.serviceIngress` and `serviceEgress`), and Compose sets the base URLs.
 The `appointment.completed` consumer still trusts its producer, because
 appointment-service now verifies patients at scheduling time. Session records that
-were linked to foreign appointments before this decision are not rewritten; the
-consumer logs `session_record_appointment_conflict` when it meets one. Patient
+were linked to foreign appointments before this decision release that link to the
+appointment's owner (ADR-025). Patient
 status (for example `ARCHIVED`) is not part of the check.
 
 ## ADR-022: GitHub Actions as the PR Gate of Record
@@ -402,6 +407,57 @@ on `412`, keeps the user's input and offers to reload the latest version instead
 of merging. See [ADR-024](decisions/ADR-024-optimistic-concurrency.md) for the
 contract, the alternatives considered and the consequences.
 
+## ADR-025: Appointment Owners Reclaim Conflicting Session-Record Links
+
+Decision: a session record may hold an appointment id only when it belongs to that
+appointment's psychologist and patient. Records linked before ADR-021 can break
+this rule. Because `session_records.appointment_id` is unique, they block the real
+owner's completion record. clinical-service releases such a link when
+appointment-service names the owner: either an `appointment.completed` event
+arrives, or the owner links the appointment to a manual record and
+`GET /appointments/{id}` verifies it. In both cases the service writes a row to
+`session_record_link_conflicts` with the record id, the released appointment id, the
+appointment's owner, the source (`APPOINTMENT_COMPLETED` or `MANUAL_LINK`) and the
+time. Then it sets the old record's `appointment_id` to null and stores the
+owner's record in the same transaction. The service logs
+`session_record_appointment_conflict ... resolution=link_released`. A record that
+already belongs to the owner still answers `409 appointment_already_recorded`, and
+a duplicate event is still ignored.
+
+Signed notes: ADR-019 keeps signed rows final, and the conflicting record is often
+signed. The `V4` migration narrows the trigger rather than bypassing it. A signed
+row accepts one change: an `UPDATE` that clears `appointment_id`, when a
+conflict row for that record and appointment already exists. The only other column
+that may change is `version`, which must go up by exactly one (ADR-024), so a form
+opened on the earlier revision gets `412 stale_resource_version`. Note content,
+signature and `updated_at` cannot change in the same statement, and deletes are
+still rejected. The domain models this as
+`SessionRecord.releaseAppointmentLink`, which returns the audit entry and is the
+only change allowed on a signed note.
+
+Rationale: appointment-service is the only authority on appointment ownership
+(ADR-004, ADR-021), so the owner's claim wins once that service has confirmed it.
+The other record keeps everything its author wrote and signed. It loses only an id
+that was never valid, and the audit row keeps that id. Two alternatives were
+rejected. Keeping both links would need a non-unique `appointment_id`, which
+weakens duplicate protection for every record. Deleting or editing the other
+record would break ADR-019.
+
+Existing data: clinical-service cannot find conflicts ahead of time, because
+ownership lives in another database. `scripts/maintenance/Find-SessionRecordLinkConflicts.ps1`
+reads both databases and lists unresolved, missing and released links. With
+`-Replay`, it republishes `appointment.completed` to the clinical queue for
+completed appointments whose event was skipped before this decision. See the
+[runbook](../infrastructure/session-record-link-conflicts.md).
+
+Consequences: the author of the other record is not notified. Their record keeps
+its note but no longer shows an appointment link. The `appointment.completed`
+consumer still trusts its producer (ADR-021), so a forged event on the broker could
+release a link. Since ADR-026 only appointment-service's broker user and the
+administrator may publish `appointment.completed`, and the replay script uses the
+administrator login. A database superuser can still bypass the trigger, as ADR-019
+notes.
+
 ## ADR-026: Per-Service Database and Broker Credentials
 
 Decision: each service has its own PostgreSQL owner role (used only by Flyway), a
@@ -415,6 +471,22 @@ Passwords are generated into Git-ignored files. An idempotent bootstrap
 post-start hooks re-apply the administrator passwords to existing volumes. See
 [ADR-026](decisions/ADR-026-per-service-credentials.md) for the privilege table,
 rotation and residual risks.
+
+## ADR-027: Keycloak as the Identity Provider
+
+Decision: Keycloak 26.8.1 (official image, pinned by digest), with the
+`clinicflow` realm defined as code, replaces `auth-service` as the only token
+issuer. The Next.js BFF becomes a confidential client using the
+authorization-code flow with PKCE. Resource servers validate tokens through
+Spring Boot properties only: `jwk-set-uri` on the private network, `issuer-uri`
+for the public issuer, the `clinicflow-api` audience, and authorities from a
+top-level `roles` claim. Existing user UUIDs stay the token `sub`, because the
+realm import and the Admin API `partialImport` keep a user's `id`.
+Self-registration yields only `PATIENT`. Kubernetes uses the codecentric
+`keycloakx` chart as its own release. See
+[ADR-027](decisions/ADR-027-keycloak-identity-provider.md) for the token
+contract, the spike evidence, the issuer and backchannel rule, footprint and
+upgrade cadence. ADR-027 supersedes ADR-006 for token issuance.
 
 ## ADR-028: ClinicFlow PostgreSQL Image without gosu
 
@@ -448,3 +520,17 @@ fits a practice's data volume and gives totals. Keyset paging stays an option
 behind the same shape. Patients and clinical records follow in later changes.
 See [ADR-029](decisions/ADR-029-paged-list-endpoints.md) for the contract, the
 alternatives considered and what is not paged yet.
+
+## ADR-030: PR Security Gates Block Only What the PR Adds
+
+Decision: PR Trivy and ZAP scans still run in full, but a High/Critical finding
+that `main`'s latest scan of the same component and target already had (the
+same package version, configuration rule and file, or ZAP alert) is reported as
+`inherited` instead of blocking. `main`, nightly and manual runs keep the full
+gate. Betterleaks scans only the commits under test.
+
+Rationale: findings already on `main`, such as new upstream CVEs, belong to a
+fix on `main`, not to every unrelated PR. The reference comes only from `main`
+runs, and without one the gate blocks as before. See
+[ADR-030](decisions/ADR-030-pr-scoped-security-gates.md) for the trust rules
+and trade-offs.

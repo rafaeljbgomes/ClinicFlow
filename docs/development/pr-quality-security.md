@@ -42,6 +42,26 @@ There is no blanket `ignore-unfixed` and no automatically accepted baseline.
 The committed empty baselines are enrollment placeholders, not an assertion that
 the current dependencies are vulnerability-free.
 
+### What counts as new on a PR
+
+A PR is judged on what it adds ([ADR-030](../architecture/decisions/ADR-030-pr-scoped-security-gates.md)).
+Before scanning, each PR security job downloads `main`'s latest evidence
+artifact for the same job into `reports/reference/` with
+`scripts/ci/Get-SecurityReference.ps1`. A High/Critical finding is `inherited`
+instead of `blocking` when that reference already had:
+
+- for vulnerabilities, the same package at the same installed version in the
+  same component and target;
+- for configuration, the same rule on the same file;
+- for ZAP, the same plugin, origin and path.
+
+Only artifacts from `push`, `schedule` or `workflow_dispatch` runs on `main` in
+this repository are trusted. When no reference can be fetched, nothing is
+inherited and every High/Critical finding blocks. `main`, nightly and manual
+runs never inherit, so a new upstream CVE still fails `main` and needs a fix or
+a reviewed exception there. Inherited findings are listed in `*.gate.json` and
+the job log shows how many were inherited.
+
 The Trivy database is restored from a daily cache and refreshed before scans.
 If the refresh fails, a cached vulnerability database is used only while its
 upstream update timestamp is within 24 hours. The Java database, which holds no

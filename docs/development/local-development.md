@@ -32,12 +32,17 @@ local-only passwords before running Docker Compose:
 .\scripts\generate-dev-credentials.ps1
 ```
 
-The script writes `secrets/platform/*.env` (administrators) and
-`secrets/services/<service>.env` (per service). Both are ignored by Git. It
-keeps existing files, so it is safe to rerun. To rotate every password, run it
-with `-Rotate` and then `docker compose up -d`. The bootstrap services apply the
-new service passwords, and PostgreSQL and RabbitMQ re-apply their administrator
-password when they start, so existing volumes keep their data.
+The script writes `secrets/platform/*.env` (administrators),
+`secrets/services/<service>.env` (per service) and `secrets/keycloak/*.env`
+(Keycloak's database login, its bootstrap administrator and the BFF client
+secret). All of them are ignored by Git. It keeps existing files, so it is safe
+to rerun. To rotate every password, run it with `-Rotate` and then
+`docker compose up -d`. The bootstrap services apply the new service passwords,
+and PostgreSQL and RabbitMQ re-apply their administrator password when they
+start, so existing volumes keep their data. Keycloak reads its client secret
+only when it imports the realm, and its bootstrap administrator only when its
+database is new, so also run `./scripts/reset-keycloak-realm.ps1 -Full` after a
+rotation (see [Keycloak](#keycloak)).
 
 To run a service from an IDE against the Compose infrastructure, load the
 variables from its `secrets/services/<service>.env`.
@@ -115,6 +120,114 @@ Backend/frontend application ports and management 9000 are unpublished. Trust th
 local CA manually in the browser; see [gateway setup and acceptance](../infrastructure/gateway.md).
 
 RabbitMQ credentials for local development are `clinicflow` / `clinicflow`.
+
+## Keycloak
+
+Keycloak 26.8.1 is ClinicFlow's identity provider (ADR-027). It runs in Compose
+next to `auth-service`, which keeps issuing the tokens the UI and services use
+until the BFF and the services move to Keycloak (#87, #88) and `auth-service`
+is removed (#90).
+
+| | |
+| --- | --- |
+| Public URL and issuer | `http://localhost:8180`, issuer `http://localhost:8180/realms/clinicflow` |
+| Private-network URL | `http://keycloak:8080` (tokens, keys and discovery for containers) |
+| Admin console | `http://localhost:8180/admin`, bound to 127.0.0.1 only |
+| Console login | The `master` realm's bootstrap administrator from `secrets/keycloak/admin.env` |
+| Database | `clinicflow_keycloak` on the ClinicFlow PostgreSQL, owned by the `clinicflow_keycloak` login from `secrets/keycloak/database.env` |
+
+The bootstrap administrator is Keycloak's own administrator, not a ClinicFlow
+user. `admin@demo.clinicflow.local` is a ClinicFlow user with the `ADMIN` role
+and cannot open the console.
+
+### Realm as code
+
+The `clinicflow` realm is defined only in
+[`docker/keycloak/realm/clinicflow-realm.json`](../../docker/keycloak/realm/clinicflow-realm.json),
+which is built into the `clinicflow/keycloak` image. Do not change the realm in
+the admin console: those changes are lost on the next reset and never reach CI.
+Secrets are `${...}` placeholders that Keycloak resolves from the environment
+when it imports the realm, so the file holds no client secret or password.
+
+Keycloak imports the realm only when it does not exist yet. The first
+`docker compose up` imports it, and later starts log
+`Realm 'clinicflow' already exists. Import skipped`, so restarting is safe and
+keeps the users. After you change the realm file, apply it with:
+
+```powershell
+./scripts/reset-keycloak-realm.ps1
+```
+
+The script rebuilds the image, then deletes the `clinicflow` realm and imports
+it again. Anything that is not in the file is lost, such as self-registered
+users, and the demo users come back with their fixed ids. `-Full` drops
+Keycloak's whole database instead, including the `master` realm, so the next
+start also applies a rotated bootstrap administrator. Both leave the other
+services' data alone. CI always starts from empty volumes, so it always tests
+the committed file.
+
+An idempotent applier such as `keycloak-config-cli` was considered and not
+adopted. It would add a second image and JVM run to every `docker compose up`
+for a realm that only changes through reviewed commits, and the reset gives the
+same end state for a local, synthetic-data stack.
+
+### Demo accounts and checks
+
+The realm holds the same demo users as `auth-service`, with the same ids, roles
+and synthetic password, so the seeded patients, appointments and notes keep
+their owners. Each has exactly one ClinicFlow role and no default role.
+
+To check a running stack against the ADR-027 token contract, run:
+
+```powershell
+py -I scripts/check-keycloak-realm.py
+```
+
+The script signs in as every demo user with the authorization-code flow and
+PKCE, verifies each access token's signature, `iss`, `sub`, `aud` and `roles`,
+and checks refresh-token rotation and that the BFF client is refused the
+password grant. It also registers a throwaway user, confirms it gets only
+`PATIENT`, and deletes it again.
+
+### Self-registration and provisioning
+
+Keycloak's "Register" page creates `PATIENT` accounts only: the realm's default
+role contains `PATIENT` and nothing else. `PSYCHOLOGIST` and `ADMIN` are granted
+by an administrator. The Admin API's `POST /users` ignores the `id` you send and
+adds the default role, which would give a psychologist two ClinicFlow roles.
+Provision through `partialImport` with explicit roles instead. It keeps the `id`
+and adds no default role:
+
+```powershell
+$admin = Get-Content secrets/keycloak/admin.env | ConvertFrom-StringData
+$login = @{ grant_type = 'password'; client_id = 'admin-cli'; username = $admin.KC_BOOTSTRAP_ADMIN_USERNAME }
+$login['password'] = $admin.KC_BOOTSTRAP_ADMIN_PASSWORD
+$token = (Invoke-RestMethod -Method Post -Body $login `
+  http://localhost:8180/realms/master/protocol/openid-connect/token).access_token
+$user = @{
+  id = [guid]::NewGuid().ToString()   # or the person's existing auth-service id
+  username = 'new.psychologist@example.test'; email = 'new.psychologist@example.test'
+  firstName = 'New'; lastName = 'Psychologist'; enabled = $true; emailVerified = $true
+  realmRoles = @('PSYCHOLOGIST'); requiredActions = @('UPDATE_PASSWORD')
+  credentials = @(@{ type = 'password'; value = (Read-Host 'Temporary password'); temporary = $true })
+}
+Invoke-RestMethod -Method Post -Headers @{ Authorization = "Bearer $token" } `
+  -ContentType 'application/json' -Body (@{ ifResourceExists = 'FAIL'; users = @($user) } | ConvertTo-Json -Depth 5) `
+  http://localhost:8180/admin/realms/clinicflow/partialImport
+```
+
+The user sets their own password at the first sign-in. To promote an existing
+account in the admin console instead, open the user's **Role mapping**, assign
+`PSYCHOLOGIST` (or `ADMIN`), and unassign `default-roles-clinicflow`.
+
+Registration email enumeration (#79) is not solved by the move. Keycloak's
+registration form answers an existing email with "This email is already
+associated with an existing account.", next to the field, while a new email
+creates the account. The login form stays generic and password reset is
+disabled, so registration is the only enumeration path. The realm has no
+built-in option to hide it. Hiding it would need a custom registration flow, so
+the practical control is the rate limit on the login-action paths planned for
+the gateway (#89). #79 stays open.
 
 ## Frontend Development
 

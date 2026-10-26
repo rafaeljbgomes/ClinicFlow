@@ -51,6 +51,7 @@ updates:
       - /deploy/jenkins/agent
       - /deploy/jenkins/controller
       - /docker/postgres
+      - /docker/keycloak
     schedule:
       interval: weekly
       day: monday

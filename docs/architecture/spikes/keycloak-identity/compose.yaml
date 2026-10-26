@@ -1,0 +1,74 @@
+# Throwaway spike for issue #85 (ADR-027). Not part of the ClinicFlow stack.
+# Run through Run-Spike.ps1, which generates the Git-ignored .env first.
+name: clinicflow-keycloak-spike
+
+services:
+  keycloak-db:
+    image: postgres:16.15-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KC_DB_PASSWORD:?run Run-Spike.ps1}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - keycloak-db:/var/lib/postgresql/data
+
+  keycloak:
+    image: ${KC_IMAGE:-clinicflow-spike/keycloak:26.8.1}
+    build: .
+    command: ${KC_COMMAND:-start --optimized --import-realm}
+    # The JVM sizes its heap from this limit (MaxRAMPercentage), so footprint
+    # numbers are only meaningful with a limit set.
+    mem_limit: ${KC_MEM_LIMIT:-1g}
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KC_DB_PASSWORD:?run Run-Spike.ps1}
+      KC_BOOTSTRAP_ADMIN_USERNAME: spike-admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:?run Run-Spike.ps1}
+      # One public issuer for browser, BFF and services; backchannel calls on the
+      # private network keep their own host name (hostname v2).
+      KC_HOSTNAME: http://localhost:8180
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+      # Single node: no JGroups discovery (build option, repeated for auto-build).
+      KC_CACHE: local
+      # Placeholders resolved by the realm import; nothing secret is in the JSON.
+      CLINICFLOW_BFF_CLIENT_SECRET: ${CLINICFLOW_BFF_CLIENT_SECRET:?run Run-Spike.ps1}
+      SPIKE_DEMO_PASSWORD: ${SPIKE_DEMO_PASSWORD:?run Run-Spike.ps1}
+    ports:
+      - "127.0.0.1:8180:8080"
+    healthcheck:
+      # The image has no curl; probe the management port with bash. Match the
+      # status line: a DOWN body still contains "UP" for its passing sub-checks.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && head -n 1 <&3 | grep -q ' 200 '"]
+      interval: 2s
+      timeout: 3s
+      retries: 90
+    volumes:
+      - ./realm:/opt/keycloak/data/import:ro
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+
+  # Plays the BFF on the private network: code exchange, JWKS and discovery
+  # go to http://keycloak:8080, never to the public host name.
+  probe:
+    image: python:3.14-alpine@sha256:601e99e090cb08c2784a42395487709500bc39930307fe72f3f11a8f3c430762
+    profiles: ["probe"]
+    working_dir: /spike
+    environment:
+      CLINICFLOW_BFF_CLIENT_SECRET: ${CLINICFLOW_BFF_CLIENT_SECRET:?run Run-Spike.ps1}
+    volumes:
+      - ./probe.py:/spike/probe.py:ro
+      - ./out:/spike/out
+
+volumes:
+  keycloak-db:
