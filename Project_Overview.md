@@ -224,7 +224,7 @@ Responsible for appointment management.
 
 ```http
 POST /appointments
-GET /appointments
+GET /appointments?from=&to=&status=&order=ASC|DESC&page=0&size=20
 GET /appointments/{id}
 PATCH /appointments/{id}/reschedule
 PATCH /appointments/{id}/cancel
@@ -314,7 +314,7 @@ Responsible for consuming RabbitMQ events and simulating notifications.
 ### Example Endpoints
 
 ```http
-GET /notifications
+GET /notifications?status=&page=0&size=20
 GET /notifications/{id}
 ```
 

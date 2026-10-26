@@ -121,9 +121,9 @@ flowchart LR
 | --- | --- | --- |
 | `auth-service` | Registration, password authentication, user profiles, roles, and JWT issuance | `POST /auth/login`, `GET /users/me` |
 | `patient-service` | Psychologist-owned patient records and patient lifecycle events | `POST /patients`, `GET /patients` |
-| `appointment-service` | Appointment lifecycle and appointment events | `POST /appointments`, `PATCH /appointments/{id}/reschedule` |
+| `appointment-service` | Appointment lifecycle and appointment events | `POST /appointments`, paged `GET /appointments`, `PATCH /appointments/{id}/reschedule` |
 | `clinical-service` | Practice profiles, clinical cases, care plans, and session records | `POST /clinical-cases`, `POST /clinical-cases/{id}/session-records` |
-| `notification-service` | RabbitMQ consumers, simulated delivery, history, and event metrics | `GET /notifications` |
+| `notification-service` | RabbitMQ consumers, simulated delivery, history, and event metrics | paged `GET /notifications` |
 | `gateway` | Traefik TLS, routing, local rate limits, and edge telemetry | Separate UI/API hosts plus private BFF listener |
 | `frontend` | Next.js App Router application and same-origin BFF | Browser-facing `/api/*` routes |
 | `event-contracts` | Shared, explicit event payload contracts and examples | Patient and appointment events |
