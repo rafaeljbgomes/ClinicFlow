@@ -381,7 +381,7 @@ class AppointmentControllerTest {
 
     private org.springframework.test.web.servlet.request.RequestPostProcessor jwtFor(String authority) {
         return jwt()
-                .jwt(token -> token.claim("userId", PSYCHOLOGIST_ID.toString()))
+                .jwt(token -> token.subject(PSYCHOLOGIST_ID.toString()))
                 .authorities(new SimpleGrantedAuthority(authority));
     }
 

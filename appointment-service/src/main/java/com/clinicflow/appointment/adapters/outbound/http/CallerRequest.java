@@ -25,7 +25,7 @@ final class CallerRequest {
     static Consumer<HttpHeaders> headersFor(PsychologistId psychologistId) {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (!(authentication instanceof JwtAuthenticationToken jwtAuthentication)
-                || !psychologistId.value().toString().equals(jwtAuthentication.getToken().getClaimAsString("userId"))) {
+                || !psychologistId.value().toString().equals(jwtAuthentication.getToken().getSubject())) {
             throw new OwnershipCheckUnavailableException("No caller token matches the psychologist being checked");
         }
         String token = jwtAuthentication.getToken().getTokenValue();
