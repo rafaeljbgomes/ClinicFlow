@@ -123,10 +123,13 @@ RabbitMQ credentials for local development are `clinicflow` / `clinicflow`.
 
 ## Keycloak
 
-Keycloak 26.8.1 is ClinicFlow's identity provider (ADR-027). It runs in Compose
-next to `auth-service`, which keeps issuing the tokens the UI and services use
-until the BFF and the services move to Keycloak (#87, #88) and `auth-service`
-is removed (#90).
+Keycloak 26.8.1 is ClinicFlow's identity provider (ADR-027). The patient,
+appointment, clinical and notification services accept only Keycloak access
+tokens (see [Resource servers](#resource-servers)). It still runs in Compose
+next to `auth-service`, which keeps issuing the BFF's tokens until the BFF moves
+to the authorization-code flow (#88) and `auth-service` is removed (#90). Until
+#88 lands, a UI session from `auth-service` is rejected by the services, so the
+two changes ship together.
 
 | | |
 | --- | --- |
@@ -188,6 +191,42 @@ PKCE, verifies each access token's signature, `iss`, `sub`, `aud` and `roles`,
 and checks refresh-token rotation and that the BFF client is refused the
 password grant. It also registers a throwaway user, confirms it gets only
 `PATIENT`, and deletes it again.
+
+### Resource servers
+
+The four business services validate access tokens with Spring Boot's
+resource-server properties only (`spring.security.oauth2.resourceserver.jwt.*`).
+There is no token-decoding or key-loading code in them. Two variables locate the
+realm:
+
+| Variable | Compose | Default for a service run on the host |
+| --- | --- | --- |
+| `CLINICFLOW_OIDC_ISSUER` | `http://localhost:${CLINICFLOW_KEYCLOAK_PORT:-8180}/realms/clinicflow` | `http://localhost:8180/realms/clinicflow` |
+| `CLINICFLOW_OIDC_JWKS_URI` | `http://keycloak:8080/realms/clinicflow/protocol/openid-connect/certs` | `http://localhost:8180/realms/clinicflow/protocol/openid-connect/certs` |
+
+The issuer is the public one, because that is the `iss` Keycloak puts in every
+token, while the keys come from the private-network JWKS. With `jwk-set-uri` set,
+Spring Boot does not fetch discovery, and it reads the JWKS on the first
+authenticated request rather than at startup, so the services start without
+waiting for Keycloak. Each `application.yml` fixes the rest of the contract:
+audience `clinicflow-api`, authorities from the top-level `roles` claim with the
+`ROLE_` prefix, and the caller id from `sub`. A token with another `iss` or
+`aud`, an expired token or a bad signature gets `401`. A valid token without a
+ClinicFlow role gets `403`. Roles under `realm_access` are ignored.
+
+`TokenValidationTest` in each service runs the decoder that Spring Boot builds
+from these properties against a stand-in realm JWKS, with tokens in the ADR-027
+shape. To check by hand against the running stack, get a demo user's access
+token with the authorization-code flow that `scripts/check-keycloak-realm.py`
+uses, and call a service on the private network from the gateway container:
+
+```powershell
+docker compose exec gateway wget -S -q -O - `
+  --header "Authorization: Bearer $token" http://patient-service:8082/patients
+```
+
+The same call with an ID token, an `auth-service` token or a token older than
+five minutes answers `401`.
 
 ### Self-registration and provisioning
 
@@ -355,7 +394,9 @@ docker build -t "clinicflow/frontend:$imageTag" -f frontend/Dockerfile frontend
 docker build --target server -t "clinicflow/postgres:$imageTag" docker/postgres
 ```
 
-Create the JWT Secret from the local development keys:
+Create the JWT Secret from the local development keys. Only `auth-service` and
+the BFF still mount it; the other services trust the Keycloak realm, which
+arrives on Kubernetes with #89 (`oidc.*` in the service chart):
 
 ```powershell
 kubectl create namespace clinicflow
