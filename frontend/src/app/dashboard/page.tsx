@@ -29,6 +29,7 @@ import { swrFetcher } from "@/lib/api-client";
 import {
   ATTENTION_NOTIFICATION_STATUSES,
   deriveFollowUps,
+  FOLLOW_UP_LIMIT,
   OPEN_APPOINTMENT_STATUSES,
   practiceMetrics,
   UPCOMING_WINDOW_MS,
@@ -54,12 +55,16 @@ export default function DashboardPage() {
     from: new Date(renderedAt).toISOString(), to: new Date(renderedAt + UPCOMING_WINDOW_MS).toISOString(),
     status: OPEN_APPOINTMENT_STATUSES, size: 1,
   }), swrFetcher);
-  const clinicalCases = useSWR<ClinicalCase[]>("/api/clinical-cases", swrFetcher);
+  // One page of intake cases feeds both the follow-ups and the intake count.
+  const intakeCases = useSWR<Page<ClinicalCase>>(listPath("/api/clinical-cases", {
+    status: "INTAKE", size: FOLLOW_UP_LIMIT,
+  }), swrFetcher);
+  const activeCases = useSWR<Page<ClinicalCase>>(listPath("/api/clinical-cases", { status: "ACTIVE", size: 1 }), swrFetcher);
   const recentMessages = useSWR<Page<Notification>>(listPath("/api/notifications", { size: RECENT_MESSAGE_LIMIT }), swrFetcher);
   const attentionMessages = useSWR<Page<Notification>>(listPath("/api/notifications", {
     status: ATTENTION_NOTIFICATION_STATUSES, size: 1,
   }), swrFetcher);
-  const requests = [patients, upcoming, upcomingThisWeek, clinicalCases, recentMessages, attentionMessages];
+  const requests = [patients, upcoming, upcomingThisWeek, intakeCases, activeCases, recentMessages, attentionMessages];
 
   const isLoading = requests.some((request) => request.isLoading);
   const error = requests.find((request) => request.error)?.error;
@@ -69,18 +74,19 @@ export default function DashboardPage() {
   );
   const upcomingAppointments = upcoming.data?.content ?? [];
   const followUps = useMemo(
-    () => deriveFollowUps(patients.data ?? [], clinicalCases.data ?? []),
-    [clinicalCases.data, patients.data]
+    () => deriveFollowUps(patients.data ?? [], intakeCases.data?.content ?? []),
+    [intakeCases.data, patients.data]
   );
   const metrics = useMemo(
     () => practiceMetrics(
       patients.data ?? [],
       upcomingThisWeek.data?.page.totalElements ?? 0,
-      clinicalCases.data ?? [],
+      activeCases.data?.page.totalElements ?? 0,
+      intakeCases.data?.page.totalElements ?? 0,
       attentionMessages.data?.page.totalElements ?? 0,
       renderedAt
     ),
-    [attentionMessages.data, clinicalCases.data, patients.data, renderedAt, upcomingThisWeek.data]
+    [activeCases.data, attentionMessages.data, intakeCases.data, patients.data, renderedAt, upcomingThisWeek.data]
   );
 
   if (isLoading) return <LoadingTable />;

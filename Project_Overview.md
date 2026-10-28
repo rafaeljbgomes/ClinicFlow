@@ -268,12 +268,12 @@ Responsible for clinical workflow records owned by the psychologist.
 GET /practice-profile
 PUT /practice-profile
 POST /clinical-cases
-GET /clinical-cases
+GET /clinical-cases?patientId=&status=&page=0&size=20
 GET /clinical-cases/{id}
 PATCH /clinical-cases/{id}/status
 GET /clinical-cases/{id}/care-plan
 PUT /clinical-cases/{id}/care-plan
-GET /clinical-cases/{id}/session-records
+GET /clinical-cases/{id}/session-records?page=0&size=20
 POST /clinical-cases/{id}/session-records
 PATCH /session-records/{id}
 POST /session-records/{id}/sign

@@ -4,6 +4,9 @@ import com.clinicflow.clinical.application.ports.CarePlanRepository;
 import com.clinicflow.clinical.application.ports.ClinicalCaseRepository;
 import com.clinicflow.clinical.application.ports.PracticeProfileRepository;
 import com.clinicflow.clinical.application.ports.SessionRecordRepository;
+import com.clinicflow.clinical.application.queries.ListClinicalCasesQuery;
+import com.clinicflow.clinical.application.queries.PageQuery;
+import com.clinicflow.clinical.application.results.PageResult;
 import com.clinicflow.clinical.domain.AppointmentId;
 import com.clinicflow.clinical.domain.CarePlan;
 import com.clinicflow.clinical.domain.ClinicalCase;
@@ -251,10 +254,8 @@ class DemoDataBootstrapTest {
         }
 
         @Override
-        public List<ClinicalCase> findByPsychologistId(PsychologistId psychologistId) {
-            return records.values().stream()
-                    .filter(clinicalCase -> clinicalCase.psychologistId().equals(psychologistId))
-                    .toList();
+        public PageResult<ClinicalCase> findPage(ListClinicalCasesQuery query) {
+            throw new UnsupportedOperationException("The bootstrap never lists clinical cases");
         }
 
         @Override
@@ -262,15 +263,6 @@ class DemoDataBootstrapTest {
             return records.values().stream()
                     .filter(clinicalCase -> clinicalCase.psychologistId().equals(psychologistId))
                     .filter(clinicalCase -> clinicalCase.patientId().equals(patientId))
-                    .toList();
-        }
-
-        @Override
-        public List<ClinicalCase> findByPsychologistIdAndStatus(PsychologistId psychologistId,
-                                                                ClinicalCaseStatus status) {
-            return records.values().stream()
-                    .filter(clinicalCase -> clinicalCase.psychologistId().equals(psychologistId))
-                    .filter(clinicalCase -> clinicalCase.status() == status)
                     .toList();
         }
 
@@ -346,10 +338,8 @@ class DemoDataBootstrapTest {
         }
 
         @Override
-        public List<SessionRecord> findByClinicalCaseId(ClinicalCaseId clinicalCaseId) {
-            return records.values().stream()
-                    .filter(record -> record.clinicalCaseId().filter(clinicalCaseId::equals).isPresent())
-                    .toList();
+        public PageResult<SessionRecord> findPageByClinicalCaseId(ClinicalCaseId clinicalCaseId, PageQuery page) {
+            throw new UnsupportedOperationException("The bootstrap never lists session records");
         }
 
         @Override

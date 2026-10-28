@@ -1,5 +1,7 @@
 package com.clinicflow.clinical.application.ports;
 
+import com.clinicflow.clinical.application.queries.PageQuery;
+import com.clinicflow.clinical.application.results.PageResult;
 import com.clinicflow.clinical.domain.AppointmentId;
 import com.clinicflow.clinical.domain.ClinicalCaseId;
 import com.clinicflow.clinical.domain.PatientId;
@@ -13,7 +15,8 @@ import java.util.Optional;
 public interface SessionRecordRepository {
     Optional<SessionRecord> findById(SessionRecordId id);
     Optional<SessionRecord> findByAppointmentId(AppointmentId appointmentId);
-    List<SessionRecord> findByClinicalCaseId(ClinicalCaseId clinicalCaseId);
+    // Pages list the latest session first.
+    PageResult<SessionRecord> findPageByClinicalCaseId(ClinicalCaseId clinicalCaseId, PageQuery page);
     List<SessionRecord> findByPsychologistIdAndPatientId(PsychologistId psychologistId, PatientId patientId);
     // Returns the stored record, including the version persistence assigned.
     SessionRecord save(SessionRecord sessionRecord);

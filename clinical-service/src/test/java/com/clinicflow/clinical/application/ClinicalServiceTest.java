@@ -34,8 +34,10 @@ import com.clinicflow.clinical.application.queries.GetClinicalCaseQuery;
 import com.clinicflow.clinical.application.queries.GetPracticeProfileQuery;
 import com.clinicflow.clinical.application.queries.ListClinicalCasesQuery;
 import com.clinicflow.clinical.application.queries.ListSessionRecordsQuery;
+import com.clinicflow.clinical.application.queries.PageQuery;
 import com.clinicflow.clinical.application.results.CarePlanResult;
 import com.clinicflow.clinical.application.results.ClinicalCaseResult;
+import com.clinicflow.clinical.application.results.PageResult;
 import com.clinicflow.clinical.application.results.PatientClinicalHistoryResult;
 import com.clinicflow.clinical.application.results.PracticeProfileResult;
 import com.clinicflow.clinical.application.results.SessionRecordResult;
@@ -82,6 +84,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -460,58 +463,64 @@ class ClinicalServiceTest {
     }
 
     @Test
-    void listsAllCasesOfThePsychologist() {
+    void listsTheRequestedPageOfCases() {
         // Arrange
-        when(clinicalCases.findByPsychologistId(PSYCHOLOGIST_ID)).thenReturn(List.of(clinicalCase()));
-        var query = new ListClinicalCasesQuery(PSYCHOLOGIST_ID, null, null);
+        var query = new ListClinicalCasesQuery(PSYCHOLOGIST_ID, PATIENT_ID, Set.of(ClinicalCaseStatus.ACTIVE),
+                new PageQuery(0, 20));
+        when(clinicalCases.findPage(query)).thenReturn(new PageResult<>(List.of(clinicalCase()), 0, 20, 21));
 
         // Act
-        List<ClinicalCaseResult> cases = service.listClinicalCases(query);
+        PageResult<ClinicalCaseResult> cases = service.listClinicalCases(query);
 
         // Assert
-        assertThat(cases).hasSize(1);
+        assertThat(cases.items()).extracting(ClinicalCaseResult::id).containsExactly(CASE_ID.value());
+        assertThat(cases.totalPages()).isEqualTo(2);
     }
 
     @Test
-    void listsCasesByStatus() {
+    void listCasesQueryRequiresAnOwnerAndAPage() {
         // Arrange
-        when(clinicalCases.findByPsychologistIdAndStatus(PSYCHOLOGIST_ID, ClinicalCaseStatus.ACTIVE))
-                .thenReturn(List.of(clinicalCase()));
-        var query = new ListClinicalCasesQuery(PSYCHOLOGIST_ID, null, ClinicalCaseStatus.ACTIVE);
+        var page = new PageQuery(0, 20);
 
         // Act
-        List<ClinicalCaseResult> cases = service.listClinicalCases(query);
+        Throwable ownerless = catchThrowable(() -> new ListClinicalCasesQuery(null, null, null, page));
+        Throwable pageless = catchThrowable(() -> new ListClinicalCasesQuery(PSYCHOLOGIST_ID, null, null, null));
 
         // Assert
-        assertThat(cases).hasSize(1);
+        assertThat(ownerless).isInstanceOf(IllegalArgumentException.class);
+        assertThat(pageless).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
-    void listsCasesByPatient() {
-        // Arrange
-        when(clinicalCases.findByPsychologistIdAndPatientId(PSYCHOLOGIST_ID, PATIENT_ID))
-                .thenReturn(List.of(clinicalCase()));
-        var query = new ListClinicalCasesQuery(PSYCHOLOGIST_ID, PATIENT_ID, null);
-
+    void listCasesQueryReadsMissingStatusesAsEveryStatus() {
         // Act
-        List<ClinicalCaseResult> cases = service.listClinicalCases(query);
+        var query = new ListClinicalCasesQuery(PSYCHOLOGIST_ID, null, null, new PageQuery(0, 20));
 
         // Assert
-        assertThat(cases).hasSize(1);
+        assertThat(query.statuses()).isEmpty();
     }
 
     @Test
-    void listsPatientCasesFilteredByStatus() {
-        // Arrange
-        when(clinicalCases.findByPsychologistIdAndPatientId(PSYCHOLOGIST_ID, PATIENT_ID))
-                .thenReturn(List.of(clinicalCase()));
-        var query = new ListClinicalCasesQuery(PSYCHOLOGIST_ID, PATIENT_ID, ClinicalCaseStatus.DISCHARGED);
-
+    void pageQueryRejectsNegativePagesAndUnboundedSizes() {
         // Act
-        List<ClinicalCaseResult> cases = service.listClinicalCases(query);
+        Throwable negative = catchThrowable(() -> new PageQuery(-1, 20));
+        Throwable empty = catchThrowable(() -> new PageQuery(0, 0));
+        Throwable oversized = catchThrowable(() -> new PageQuery(0, PageQuery.MAX_SIZE + 1));
 
         // Assert
-        assertThat(cases).isEmpty();
+        assertThat(negative).isInstanceOf(IllegalArgumentException.class);
+        assertThat(empty).isInstanceOf(IllegalArgumentException.class);
+        assertThat(oversized).isInstanceOf(IllegalArgumentException.class);
+        assertThat(new PageQuery(0, 1).size()).isEqualTo(1);
+        assertThat(new PageQuery(0, PageQuery.MAX_SIZE).size()).isEqualTo(PageQuery.MAX_SIZE);
+    }
+
+    @Test
+    void pageResultCountsPartialLastPages() {
+        // Assert
+        assertThat(new PageResult<>(List.of(), 0, 20, 0).totalPages()).isZero();
+        assertThat(new PageResult<>(List.of(), 0, 20, 20).totalPages()).isEqualTo(1);
+        assertThat(new PageResult<>(List.of(), 0, 20, 21).totalPages()).isEqualTo(2);
     }
 
     @Test
@@ -800,17 +809,51 @@ class ClinicalServiceTest {
     }
 
     @Test
-    void listsSessionRecordsOfOwnedCase() {
+    void listsTheRequestedPageOfSessionRecordsOfOwnedCase() {
         // Arrange
+        var page = new PageQuery(1, 10);
         when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(clinicalCase()));
-        when(sessionRecords.findByClinicalCaseId(CASE_ID)).thenReturn(List.of(draftSession(PSYCHOLOGIST_ID, "Summary")));
-        var query = new ListSessionRecordsQuery(PSYCHOLOGIST_ID, CASE_ID);
+        when(sessionRecords.findPageByClinicalCaseId(CASE_ID, page))
+                .thenReturn(new PageResult<>(List.of(draftSession(PSYCHOLOGIST_ID, "Summary")), 1, 10, 11));
+        var query = new ListSessionRecordsQuery(PSYCHOLOGIST_ID, CASE_ID, page);
 
         // Act
-        List<SessionRecordResult> sessions = service.listSessionRecords(query);
+        PageResult<SessionRecordResult> sessions = service.listSessionRecords(query);
 
         // Assert
-        assertThat(sessions).hasSize(1);
+        assertThat(sessions.items()).hasSize(1);
+        assertThat(sessions.number()).isEqualTo(1);
+        assertThat(sessions.totalElements()).isEqualTo(11);
+    }
+
+    @Test
+    void doesNotListSessionRecordsOfAnotherPsychologistsCase() {
+        // Arrange
+        when(clinicalCases.findById(CASE_ID)).thenReturn(Optional.of(clinicalCase()));
+        var query = new ListSessionRecordsQuery(OTHER_PSYCHOLOGIST, CASE_ID, new PageQuery(0, 20));
+
+        // Act
+        Throwable failure = catchThrowable(() -> service.listSessionRecords(query));
+
+        // Assert
+        assertThat(failure).isInstanceOf(ClinicalCaseNotFoundException.class);
+        verify(sessionRecords, never()).findPageByClinicalCaseId(any(), any());
+    }
+
+    @Test
+    void listSessionRecordsQueryRequiresAnOwnerACaseAndAPage() {
+        // Arrange
+        var page = new PageQuery(0, 20);
+
+        // Act
+        Throwable ownerless = catchThrowable(() -> new ListSessionRecordsQuery(null, CASE_ID, page));
+        Throwable caseless = catchThrowable(() -> new ListSessionRecordsQuery(PSYCHOLOGIST_ID, null, page));
+        Throwable pageless = catchThrowable(() -> new ListSessionRecordsQuery(PSYCHOLOGIST_ID, CASE_ID, null));
+
+        // Assert
+        assertThat(ownerless).isInstanceOf(IllegalArgumentException.class);
+        assertThat(caseless).isInstanceOf(IllegalArgumentException.class);
+        assertThat(pageless).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

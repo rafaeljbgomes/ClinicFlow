@@ -44,26 +44,25 @@ function clinicalCase(overrides: Partial<ClinicalCase> = {}): ClinicalCase {
 }
 
 describe("dashboard insights", () => {
-  it("combines server-side totals with patient and case context", () => {
+  it("combines server-side totals with patient context", () => {
     // Arrange
     const patients = [patient()];
-    const cases = [clinicalCase(), clinicalCase({ id: "intake", status: "INTAKE" })];
 
     // Act
-    const metrics = practiceMetrics(patients, 1, cases, 1, now);
+    const metrics = practiceMetrics(patients, 1, 4, 2, 1, now);
 
     // Assert
     expect(metrics).toEqual([
       { label: "Patients", value: 1, context: "+1 this month" },
       { label: "Upcoming", value: 1, context: "Next 7 days" },
-      { label: "Cases", value: 1, context: "1 in intake" },
+      { label: "Cases", value: 4, context: "2 in intake" },
       { label: "Messages", value: 1, context: "Need attention" },
     ]);
   });
 
   it("reports quiet states when the server totals are zero", () => {
     // Act
-    const metrics = practiceMetrics([], 0, [], 0, now);
+    const metrics = practiceMetrics([], 0, 0, 0, 0, now);
 
     // Assert
     expect(metrics).toEqual([
@@ -87,5 +86,23 @@ describe("dashboard insights", () => {
       expect.objectContaining({ title: "Consent pending", href: "/dashboard/patients", tone: "warning" }),
       expect.objectContaining({ title: "Complete case intake", href: "/dashboard/clinical", tone: "info" }),
     ]);
+  });
+
+  it("keeps consent follow-ups ahead of intake cases within the card limit", () => {
+    // Arrange
+    const patients = [
+      patient({ id: "pending", consentStatus: "PENDING" }),
+      patient({ id: "revoked", consentStatus: "REVOKED" }),
+    ];
+    const intakeCases = [
+      clinicalCase({ id: "intake-1", status: "INTAKE" }),
+      clinicalCase({ id: "intake-2", status: "INTAKE" }),
+    ];
+
+    // Act
+    const followUps = deriveFollowUps(patients, intakeCases);
+
+    // Assert
+    expect(followUps.map((item) => item.id)).toEqual(["consent-pending", "consent-revoked", "case-intake-1"]);
   });
 });

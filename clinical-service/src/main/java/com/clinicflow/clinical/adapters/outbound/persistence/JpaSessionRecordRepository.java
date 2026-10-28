@@ -2,6 +2,8 @@ package com.clinicflow.clinical.adapters.outbound.persistence;
 
 import com.clinicflow.clinical.application.exceptions.StaleResourceVersionException;
 import com.clinicflow.clinical.application.ports.SessionRecordRepository;
+import com.clinicflow.clinical.application.queries.PageQuery;
+import com.clinicflow.clinical.application.results.PageResult;
 import com.clinicflow.clinical.domain.AppointmentId;
 import com.clinicflow.clinical.domain.ClinicalCaseId;
 import com.clinicflow.clinical.domain.PatientId;
@@ -11,6 +13,9 @@ import com.clinicflow.clinical.domain.SessionRecordId;
 import com.clinicflow.clinical.domain.SignedSessionRecordException;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Repository;
 
 import java.sql.SQLException;
@@ -21,6 +26,8 @@ import java.util.Optional;
 public class JpaSessionRecordRepository implements SessionRecordRepository {
     // Raised by the session_records trigger in V2__lock_signed_session_records.sql.
     static final String SIGNED_RECORD_LOCKED_SQL_STATE = "23L01";
+    // The id breaks sessionDate ties so rows never repeat or vanish between pages.
+    private static final Sort SESSION_ORDER = Sort.by(Sort.Direction.DESC, "sessionDate", "id");
 
     private final SpringDataSessionRecordJpaRepository delegate;
     private final ClinicalPersistenceMapper mapper;
@@ -41,8 +48,11 @@ public class JpaSessionRecordRepository implements SessionRecordRepository {
     }
 
     @Override
-    public List<SessionRecord> findByClinicalCaseId(ClinicalCaseId clinicalCaseId) {
-        return delegate.findByClinicalCaseId(clinicalCaseId.value()).stream().map(mapper::toDomain).toList();
+    public PageResult<SessionRecord> findPageByClinicalCaseId(ClinicalCaseId clinicalCaseId, PageQuery query) {
+        Page<JpaSessionRecordEntity> page = delegate.findByClinicalCaseId(clinicalCaseId.value(),
+                PageRequest.of(query.number(), query.size(), SESSION_ORDER));
+        return new PageResult<>(page.getContent().stream().map(mapper::toDomain).toList(),
+                page.getNumber(), page.getSize(), page.getTotalElements());
     }
 
     @Override
