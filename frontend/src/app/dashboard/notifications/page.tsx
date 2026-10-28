@@ -4,6 +4,7 @@ import { useState } from "react";
 import useSWR from "swr";
 import { BellIcon, RefreshCwIcon } from "lucide-react";
 import { ErrorAlert } from "@/components/error-alert";
+import { ListPager } from "@/components/list-pager";
 import { LoadingTable } from "@/components/loading-table";
 import { SectionHeader } from "@/components/section-header";
 import { StatusBadge } from "@/components/status-badge";
@@ -27,16 +28,22 @@ import {
 } from "@/components/ui/table";
 import { swrFetcher } from "@/lib/api-client";
 import { formatDateTime, formatEnum } from "@/lib/format";
-import type { Notification, UserView } from "@/lib/types";
+import { listPath } from "@/lib/list-path";
+import type { Notification, Page, UserView } from "@/lib/types";
+
+const PAGE_SIZE = 20;
 
 export default function NotificationsPage() {
   const [selected, setSelected] = useState<Notification | null>(null);
   const currentUser = useSWR<UserView>("/api/auth/me", swrFetcher);
-  const { data, error, isLoading, isValidating, mutate } = useSWR<Notification[]>(
-    "/api/notifications",
+  const [pageNumber, setPageNumber] = useState(0);
+  const notifications = useSWR<Page<Notification>>(
+    listPath("/api/notifications", { page: pageNumber, size: PAGE_SIZE }),
     swrFetcher,
-    { refreshInterval: 10000 }
+    { refreshInterval: 10000, keepPreviousData: true }
   );
+  const { error, isLoading, isValidating, mutate } = notifications;
+  const data = notifications.data?.content;
   const isAdmin = currentUser.data?.role === "ADMIN";
 
   return (
@@ -85,6 +92,7 @@ export default function NotificationsPage() {
             {(data ?? []).length === 0 ? (
               <p className="text-sm text-muted-foreground">No messages yet.</p>
             ) : null}
+            <ListPager page={notifications.data?.page} noun="messages" onPageChange={setPageNumber} disabled={isValidating} />
           </CardContent>
         </Card>
       ) : (
@@ -141,6 +149,7 @@ export default function NotificationsPage() {
                 ) : null}
               </TableBody>
             </Table>
+            <ListPager page={notifications.data?.page} noun="events" onPageChange={setPageNumber} disabled={isValidating} />
           </CardContent>
         </Card>
       )}

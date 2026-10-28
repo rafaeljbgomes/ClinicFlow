@@ -1,5 +1,11 @@
 package com.clinicflow.appointment.adapters.outbound.persistence;
 
+import com.clinicflow.appointment.application.queries.ListAppointmentsQuery;
+import com.clinicflow.appointment.application.queries.PageQuery;
+import com.clinicflow.appointment.application.queries.ScheduleOrder;
+import com.clinicflow.appointment.application.results.PageResult;
+import com.clinicflow.appointment.domain.AppointmentStatus;
+import com.clinicflow.appointment.domain.CancellationReason;
 import com.clinicflow.appointment.domain.Appointment;
 import com.clinicflow.appointment.domain.AppointmentDate;
 import com.clinicflow.appointment.domain.AppointmentId;
@@ -19,6 +25,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -57,17 +64,75 @@ class JpaAppointmentRepositoryIT {
     }
 
     @Test
-    void findByPsychologistIdReturnsOnlyOwnedAppointments() {
+    void findPageReturnsOnlyOwnedAppointmentsInScheduleOrder() {
         // Arrange
         PsychologistId owner = new PsychologistId(UUID.randomUUID());
-        Appointment expected = appointment(owner, new PatientId(UUID.randomUUID()));
-        persist(expected, unrelatedAppointment());
+        Appointment later = appointment(owner, at(2));
+        Appointment earlier = appointment(owner, at(1));
+        persist(later, earlier, unrelatedAppointment());
 
         // Act
-        List<Appointment> found = repository.findByPsychologistId(owner);
+        PageResult<Appointment> found = repository.findPage(query(owner, null, null, Set.of(), 0, 20));
 
         // Assert
-        assertThat(found).containsExactly(expected);
+        assertThat(found.items()).containsExactly(earlier, later);
+        assertThat(found.totalElements()).isEqualTo(2);
+    }
+
+    @Test
+    void findPageAppliesTheHalfOpenWindowAndStatusFilter() {
+        // Arrange
+        PsychologistId owner = new PsychologistId(UUID.randomUUID());
+        Appointment before = appointment(owner, at(0));
+        Appointment atStart = appointment(owner, at(1));
+        Appointment cancelled = appointment(owner, at(2))
+                .cancel(new CancellationReason("Patient asked to cancel"), Instant.parse("2026-06-02T10:00:00Z"));
+        Appointment atEnd = appointment(owner, at(3));
+        persist(before, atStart, cancelled, atEnd);
+
+        // Act
+        PageResult<Appointment> window = repository.findPage(query(owner, at(1), at(3), Set.of(), 0, 20));
+        PageResult<Appointment> active = repository.findPage(query(owner, at(1), at(3),
+                Set.of(AppointmentStatus.SCHEDULED, AppointmentStatus.RESCHEDULED), 0, 20));
+
+        // Assert
+        assertThat(window.items()).extracting(Appointment::id).containsExactly(atStart.id(), cancelled.id());
+        assertThat(active.items()).extracting(Appointment::id).containsExactly(atStart.id());
+    }
+
+    @Test
+    void findPageSplitsResultsAcrossPagesWithoutOverlap() {
+        // Arrange
+        PsychologistId owner = new PsychologistId(UUID.randomUUID());
+        Appointment first = appointment(owner, at(1));
+        Appointment second = appointment(owner, at(2));
+        Appointment third = appointment(owner, at(3));
+        persist(third, first, second);
+
+        // Act
+        PageResult<Appointment> page0 = repository.findPage(query(owner, null, null, Set.of(), 0, 2));
+        PageResult<Appointment> page1 = repository.findPage(query(owner, null, null, Set.of(), 1, 2));
+
+        // Assert
+        assertThat(page0.items()).containsExactly(first, second);
+        assertThat(page1.items()).containsExactly(third);
+        assertThat(page0.totalPages()).isEqualTo(2);
+    }
+
+    @Test
+    void findPageListsLatestFirstWhenAskedForDescendingOrder() {
+        // Arrange
+        PsychologistId owner = new PsychologistId(UUID.randomUUID());
+        Appointment earlier = appointment(owner, at(1));
+        Appointment later = appointment(owner, at(2));
+        persist(earlier, later);
+
+        // Act
+        PageResult<Appointment> found = repository.findPage(new ListAppointmentsQuery(owner, null, null, Set.of(),
+                ScheduleOrder.DESC, new PageQuery(0, 20)));
+
+        // Assert
+        assertThat(found.items()).containsExactly(later, earlier);
     }
 
     @Test
@@ -93,6 +158,20 @@ class JpaAppointmentRepositoryIT {
 
     private Appointment unrelatedAppointment() {
         return appointment(new PsychologistId(UUID.randomUUID()), new PatientId(UUID.randomUUID()));
+    }
+
+    private Appointment appointment(PsychologistId owner, Instant scheduledAt) {
+        return Appointment.create(new AppointmentId(UUID.randomUUID()), owner, new PatientId(UUID.randomUUID()),
+                new AppointmentDate(scheduledAt), AppointmentType.ONLINE, Instant.parse("2026-06-01T10:00:00Z"));
+    }
+
+    private static Instant at(int days) {
+        return Instant.parse("2099-07-01T10:00:00Z").plusSeconds(86_400L * days);
+    }
+
+    private static ListAppointmentsQuery query(PsychologistId owner, Instant from, Instant to,
+                                               Set<AppointmentStatus> statuses, int page, int size) {
+        return new ListAppointmentsQuery(owner, from, to, statuses, ScheduleOrder.ASC, new PageQuery(page, size));
     }
 
     private Appointment appointment(PsychologistId owner, PatientId patientId) {

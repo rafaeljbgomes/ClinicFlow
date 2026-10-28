@@ -5,11 +5,15 @@ import com.clinicflow.notification.application.exceptions.NotificationNotFoundEx
 import com.clinicflow.notification.application.mapping.NotificationApplicationMapper;
 import com.clinicflow.notification.application.ports.NotificationRepository;
 import com.clinicflow.notification.application.queries.GetNotificationQuery;
+import com.clinicflow.notification.application.queries.ListNotificationsQuery;
+import com.clinicflow.notification.application.queries.PageQuery;
+import com.clinicflow.notification.application.results.PageResult;
 import com.clinicflow.notification.domain.EventId;
 import com.clinicflow.notification.domain.EventType;
 import com.clinicflow.notification.domain.Notification;
 import com.clinicflow.notification.domain.NotificationId;
 import com.clinicflow.notification.domain.NotificationMessage;
+import com.clinicflow.notification.domain.NotificationStatus;
 import com.clinicflow.notification.domain.NotificationSubject;
 import com.clinicflow.notification.domain.PsychologistId;
 import com.clinicflow.notification.domain.RecipientAddress;
@@ -24,6 +28,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -91,15 +96,64 @@ class NotificationServiceTest {
     }
 
     @Test
-    void listReturnsEveryNotification() {
+    void listReturnsTheRequestedPageOfEveryNotification() {
         // Arrange
-        when(repository.findAll()).thenReturn(List.of(notification()));
+        var page = new PageQuery(2, 5);
+        when(repository.findPage(Set.of(NotificationStatus.FAILED), page))
+                .thenReturn(new PageResult<>(List.of(notification()), 2, 5, 11));
 
         // Act
-        var results = service.list();
+        var results = service.list(new ListNotificationsQuery(Set.of(NotificationStatus.FAILED), page));
 
         // Assert
-        assertThat(results).extracting(result -> result.id()).containsExactly(NOTIFICATION_ID.value());
+        assertThat(results.items()).extracting(result -> result.id()).containsExactly(NOTIFICATION_ID.value());
+        assertThat(results.totalElements()).isEqualTo(11);
+        assertThat(results.totalPages()).isEqualTo(3);
+    }
+
+    @Test
+    void listForPsychologistReadsOnlyThatPsychologistsPage() {
+        // Arrange
+        var page = new PageQuery(0, 20);
+        when(repository.findPageByPsychologistId(PSYCHOLOGIST_ID, Set.of(), page))
+                .thenReturn(new PageResult<>(List.of(notification()), 0, 20, 1));
+
+        // Act
+        var results = service.listForPsychologist(new ListNotificationsQuery(null, page), PSYCHOLOGIST_ID);
+
+        // Assert
+        assertThat(results.items()).extracting(result -> result.id()).containsExactly(NOTIFICATION_ID.value());
+    }
+
+    @Test
+    void pageQueryRejectsNegativePagesAndUnboundedSizes() {
+        // Act
+        Throwable negative = catchThrowable(() -> new PageQuery(-1, 20));
+        Throwable empty = catchThrowable(() -> new PageQuery(0, 0));
+        Throwable oversized = catchThrowable(() -> new PageQuery(0, PageQuery.MAX_SIZE + 1));
+
+        // Assert
+        assertThat(negative).isInstanceOf(IllegalArgumentException.class);
+        assertThat(empty).isInstanceOf(IllegalArgumentException.class);
+        assertThat(oversized).isInstanceOf(IllegalArgumentException.class);
+        assertThat(new PageQuery(0, PageQuery.MAX_SIZE).size()).isEqualTo(PageQuery.MAX_SIZE);
+    }
+
+    @Test
+    void listQueryRequiresAPage() {
+        // Act
+        Throwable thrown = catchThrowable(() -> new ListNotificationsQuery(Set.of(), null));
+
+        // Assert
+        assertThat(thrown).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void pageResultCountsPartialLastPages() {
+        // Assert
+        assertThat(new PageResult<>(List.of(), 0, 20, 0).totalPages()).isZero();
+        assertThat(new PageResult<>(List.of(), 0, 20, 20).totalPages()).isEqualTo(1);
+        assertThat(new PageResult<>(List.of(), 0, 20, 21).totalPages()).isEqualTo(2);
     }
 
     @Test

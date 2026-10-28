@@ -8,6 +8,7 @@ import { z } from "zod";
 import { MoreHorizontalIcon, PlusIcon } from "lucide-react";
 import { toast } from "sonner";
 import { ErrorAlert } from "@/components/error-alert";
+import { ListPager } from "@/components/list-pager";
 import { LoadingTable } from "@/components/loading-table";
 import { SectionHeader } from "@/components/section-header";
 import { STALE_VERSION_MESSAGE, StaleVersionAlert } from "@/components/stale-version-alert";
@@ -55,7 +56,12 @@ import {
 } from "@/components/ui/select";
 import { apiFetch, isStaleVersion, swrFetcher } from "@/lib/api-client";
 import { formatDateTime, formatEnum } from "@/lib/format";
-import type { Appointment, AppointmentStatus, AppointmentType, Patient } from "@/lib/types";
+import { listPath } from "@/lib/list-path";
+import type { Appointment, AppointmentStatus, AppointmentType, Page, Patient } from "@/lib/types";
+
+const PAGE_SIZE = 20;
+
+type ScheduleView = "UPCOMING" | "PAST";
 
 const scheduleSchema = z.object({
   patientId: z.string().uuid("Select a patient"),
@@ -76,21 +82,34 @@ type RescheduleValues = z.infer<typeof rescheduleSchema>;
 type CancelValues = z.infer<typeof cancelSchema>;
 
 export default function AppointmentsPage() {
-  const appointments = useSWR<Appointment[]>("/api/appointments", swrFetcher);
-  const patients = useSWR<Patient[]>("/api/patients", swrFetcher);
   const [createOpen, setCreateOpen] = useState(false);
   const [rescheduling, setRescheduling] = useState<Appointment | null>(null);
   const [cancelling, setCancelling] = useState<Appointment | null>(null);
   const [statusFilter, setStatusFilter] = useState<AppointmentStatus | "ALL">("ALL");
+  const [view, setView] = useState<ScheduleView>("UPCOMING");
+  const [pageNumber, setPageNumber] = useState(0);
+  const [startOfToday] = useState(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return today.toISOString();
+  });
+  // The service filters, orders and pages the schedule (ADR-029); upcoming runs forward from today,
+  // past runs backward from it.
+  const appointments = useSWR<Page<Appointment>>(listPath("/api/appointments", {
+    from: view === "UPCOMING" ? startOfToday : undefined,
+    to: view === "PAST" ? startOfToday : undefined,
+    order: view === "PAST" ? "DESC" : "ASC",
+    status: statusFilter === "ALL" ? undefined : statusFilter,
+    page: pageNumber,
+    size: PAGE_SIZE,
+  }), swrFetcher, { keepPreviousData: true });
+  const patients = useSWR<Patient[]>("/api/patients", swrFetcher);
 
   const patientById = useMemo(
     () => new Map((patients.data ?? []).map((patient) => [patient.id, patient])),
     [patients.data]
   );
-  const visibleAppointments = useMemo(
-    () => (appointments.data ?? []).filter((item) => statusFilter === "ALL" || item.status === statusFilter),
-    [appointments.data, statusFilter]
-  );
+  const visibleAppointments = appointments.data?.content ?? [];
 
   async function schedule(values: ScheduleValues) {
     await apiFetch<Appointment>("/api/appointments", {
@@ -152,15 +171,23 @@ export default function AppointmentsPage() {
         />
       ) : null}
 
-      {appointments.isLoading || patients.isLoading ? (
+      {(appointments.isLoading && !appointments.data) || patients.isLoading ? (
         <LoadingTable />
       ) : (
         <Card>
           <CardHeader>
             <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-              <div><CardTitle>Session schedule</CardTitle><CardDescription>A continuous view of upcoming and past appointments.</CardDescription></div>
-              <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as AppointmentStatus | "ALL")}>
-                <SelectTrigger className="w-full sm:w-48"><SelectValue>{statusFilter === "ALL" ? "All sessions" : formatEnum(statusFilter)}</SelectValue></SelectTrigger>
+              <div><CardTitle>Session schedule</CardTitle><CardDescription>{view === "UPCOMING" ? "Sessions from today onward, earliest first." : "Sessions before today, most recent first."}</CardDescription></div>
+              <div className="flex flex-col gap-2 sm:flex-row">
+              <Select value={view} onValueChange={(value) => { setView(value as ScheduleView); setPageNumber(0); }}>
+                <SelectTrigger className="w-full sm:w-40" aria-label="Schedule view"><SelectValue>{view === "UPCOMING" ? "Upcoming" : "Past"}</SelectValue></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="UPCOMING">Upcoming</SelectItem>
+                  <SelectItem value="PAST">Past</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={statusFilter} onValueChange={(value) => { setStatusFilter(value as AppointmentStatus | "ALL"); setPageNumber(0); }}>
+                <SelectTrigger className="w-full sm:w-48" aria-label="Session status"><SelectValue>{statusFilter === "ALL" ? "All sessions" : formatEnum(statusFilter)}</SelectValue></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="ALL">All sessions</SelectItem>
                   <SelectItem value="SCHEDULED">Scheduled</SelectItem>
@@ -169,6 +196,7 @@ export default function AppointmentsPage() {
                   <SelectItem value="CANCELLED">Cancelled</SelectItem>
                 </SelectContent>
               </Select>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="flex flex-col">
@@ -177,23 +205,24 @@ export default function AppointmentsPage() {
                 No sessions match this view.
               </div>
             ) : (
-              [...visibleAppointments]
-                .sort(
-                  (a, b) =>
-                    new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime()
-                )
-                .map((appointment, index, sorted) => (
-                  <SessionRow
-                    key={appointment.id}
-                    appointment={appointment}
-                    patient={patientById.get(appointment.patientId)}
-                    showDivider={index < sorted.length - 1}
-                    onCancel={() => setCancelling(appointment)}
-                    onComplete={() => complete(appointment)}
-                    onReschedule={() => setRescheduling(appointment)}
-                  />
-                ))
+              visibleAppointments.map((appointment, index) => (
+                <SessionRow
+                  key={appointment.id}
+                  appointment={appointment}
+                  patient={patientById.get(appointment.patientId)}
+                  showDivider={index < visibleAppointments.length - 1}
+                  onCancel={() => setCancelling(appointment)}
+                  onComplete={() => complete(appointment)}
+                  onReschedule={() => setRescheduling(appointment)}
+                />
+              ))
             )}
+            <ListPager
+              page={appointments.data?.page}
+              noun="sessions"
+              onPageChange={setPageNumber}
+              disabled={appointments.isValidating}
+            />
           </CardContent>
         </Card>
       )}

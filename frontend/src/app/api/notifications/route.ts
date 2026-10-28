@@ -1,21 +1,14 @@
 import { NextRequest } from "next/server";
 import { proxyRequest } from "@/lib/server/bff";
+import { forwardedQuery } from "@/lib/server/list-query";
+import { projectNotifications } from "@/lib/server/notification-projection";
+
+const LIST_PARAMETERS = ["page", "size", "status"] as const;
 
 export async function GET(request: NextRequest) {
-  return proxyRequest(request, "notification", "/notifications", {
+  return proxyRequest(request, "notification", `/notifications${forwardedQuery(request, LIST_PARAMETERS)}`, {
     csrf: false,
     roles: ["ADMIN", "PSYCHOLOGIST"],
     project: projectNotifications,
   });
-}
-
-function projectNotifications(payload: unknown, user: { role: string } | null) {
-  if (user?.role === "ADMIN" || !Array.isArray(payload)) return payload;
-  return payload.map(projectPracticeMessage);
-}
-
-function projectPracticeMessage(value: unknown) {
-  if (!value || typeof value !== "object") return value;
-  const item = value as Record<string, unknown>;
-  return { id: item.id, eventType: item.eventType, type: item.type, status: item.status, subject: item.subject, createdAt: item.createdAt, sentAt: item.sentAt };
 }

@@ -30,6 +30,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -76,11 +77,12 @@ class NotificationApiIT {
 
         // Act
         var response = exchange("/notifications", HttpMethod.GET,
-                new HttpEntity<>(bearer("psychologist-token")), Object[].class);
+                new HttpEntity<>(bearer("psychologist-token")), Map.class);
 
         // Assert
         assertThat(response.getStatus()).isEqualTo(HttpStatus.OK);
-        assertThat(response.getResponseBody()).hasSize(1);
+        assertThat((List<?>) response.getResponseBody().get("content")).hasSize(1);
+        assertThat(pageOf(response.getResponseBody())).containsEntry("totalElements", 1);
     }
 
     @Test
@@ -105,10 +107,29 @@ class NotificationApiIT {
 
         // Act
         var response = exchange("/notifications", HttpMethod.GET,
-                new HttpEntity<>(bearer("admin-token")), Object[].class);
+                new HttpEntity<>(bearer("admin-token")), Map.class);
 
         // Assert
-        assertThat(response.getResponseBody()).hasSize(2);
+        assertThat((List<?>) response.getResponseBody().get("content")).hasSize(2);
+    }
+
+    @Test
+    void listPagesNewestFirstAndReportsTotals() {
+        // Arrange
+        UUID older = save(PSYCHOLOGIST_ID, Instant.parse("2026-06-01T10:00:00Z"));
+        UUID newer = save(PSYCHOLOGIST_ID, Instant.parse("2026-06-01T11:00:00Z"));
+
+        // Act
+        var first = exchange("/notifications?size=1", HttpMethod.GET,
+                new HttpEntity<>(bearer("psychologist-token")), Map.class);
+        var second = exchange("/notifications?size=1&page=1", HttpMethod.GET,
+                new HttpEntity<>(bearer("psychologist-token")), Map.class);
+
+        // Assert
+        assertThat(ids(first.getResponseBody())).containsExactly(newer.toString());
+        assertThat(ids(second.getResponseBody())).containsExactly(older.toString());
+        assertThat(pageOf(first.getResponseBody()))
+                .containsEntry("totalElements", 2).containsEntry("totalPages", 2);
     }
 
     @Test
@@ -146,12 +167,25 @@ class NotificationApiIT {
     }
 
     private UUID save(UUID psychologistId) {
+        return save(psychologistId, Instant.now());
+    }
+
+    private static List<Object> ids(Map<?, ?> page) {
+        return ((List<?>) page.get("content")).stream().<Object>map(item -> ((Map<?, ?>) item).get("id")).toList();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> pageOf(Map<?, ?> body) {
+        return (Map<String, Object>) body.get("page");
+    }
+
+    private UUID save(UUID psychologistId, Instant createdAt) {
         UUID id = UUID.randomUUID();
         repository.save(Notification.sent(new NotificationId(id), new EventId(UUID.randomUUID()),
                 new EventType("PatientCreated"), new PsychologistId(psychologistId),
                 new RecipientAddress("patient@example.com"),
                 new NotificationSubject("Patient profile created"),
-                new NotificationMessage("A patient profile was created"), Instant.now()));
+                new NotificationMessage("A patient profile was created"), createdAt));
         return id;
     }
 

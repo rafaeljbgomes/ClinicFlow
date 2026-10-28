@@ -2,7 +2,10 @@ package com.clinicflow.notification.adapters.inbound.rest;
 
 import com.clinicflow.notification.application.NotificationService;
 import com.clinicflow.notification.application.exceptions.NotificationNotFoundException;
+import com.clinicflow.notification.application.queries.ListNotificationsQuery;
+import com.clinicflow.notification.application.queries.PageQuery;
 import com.clinicflow.notification.application.results.NotificationResult;
+import com.clinicflow.notification.application.results.PageResult;
 import com.clinicflow.notification.domain.NotificationStatus;
 import com.clinicflow.notification.domain.NotificationType;
 import com.clinicflow.notification.infrastructure.security.SecurityConfig;
@@ -18,9 +21,12 @@ import org.springframework.test.web.servlet.ResultActions;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -69,9 +75,11 @@ class NotificationControllerTest {
     }
 
     @Test
-    void listReturnsNotificationsForPsychologist() throws Exception {
+    void listReturnsTheFirstPageForPsychologistByDefault() throws Exception {
         // Arrange
-        when(notificationService.listForPsychologist(any())).thenReturn(List.of(result()));
+        var query = new ListNotificationsQuery(Set.of(), new PageQuery(0, PageQuery.DEFAULT_SIZE));
+        when(notificationService.listForPsychologist(eq(query), any()))
+                .thenReturn(new PageResult<>(List.of(result()), 0, PageQuery.DEFAULT_SIZE, 41));
         var request = get("/notifications").with(jwtFor("ROLE_PSYCHOLOGIST"));
 
         // Act
@@ -79,7 +87,57 @@ class NotificationControllerTest {
 
         // Assert
         response.andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value(NOTIFICATION_ID.toString()));
+                .andExpect(jsonPath("$.content[0].id").value(NOTIFICATION_ID.toString()))
+                .andExpect(jsonPath("$.page.number").value(0))
+                .andExpect(jsonPath("$.page.size").value(PageQuery.DEFAULT_SIZE))
+                .andExpect(jsonPath("$.page.totalElements").value(41))
+                .andExpect(jsonPath("$.page.totalPages").value(3));
+    }
+
+    @Test
+    void listPassesPageSizeAndStatusFilterForAdministrator() throws Exception {
+        // Arrange
+        var query = new ListNotificationsQuery(Set.of(NotificationStatus.PENDING, NotificationStatus.FAILED),
+                new PageQuery(2, 50));
+        when(notificationService.list(query)).thenReturn(new PageResult<>(List.of(), 2, 50, 0));
+        var request = get("/notifications").param("page", "2").param("size", "50")
+                .param("status", "PENDING", "FAILED").with(jwtFor("ROLE_ADMIN"));
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isEmpty())
+                .andExpect(jsonPath("$.page.number").value(2));
+    }
+
+    @Test
+    void listRejectsPageSizesAboveTheLimit() throws Exception {
+        // Arrange
+        var request = get("/notifications").param("size", String.valueOf(PageQuery.MAX_SIZE + 1))
+                .with(jwtFor("ROLE_PSYCHOLOGIST"));
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("invalid_request"));
+        verifyNoInteractions(notificationService);
+    }
+
+    @Test
+    void listRejectsUnknownStatusFilters() throws Exception {
+        // Arrange
+        var request = get("/notifications").param("status", "DELIVERED").with(jwtFor("ROLE_PSYCHOLOGIST"));
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("invalid_parameter"));
     }
 
     @Test

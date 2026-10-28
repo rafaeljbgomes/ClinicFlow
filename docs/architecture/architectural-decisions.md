@@ -500,6 +500,27 @@ everywhere makes the binary unnecessary, so it is removed rather than tracked.
 See [ADR-028](decisions/ADR-028-postgres-image-without-gosu.md) for the image
 tags, upgrade path and consequences.
 
+## ADR-029: Paged List Endpoints
+
+Decision: list endpoints return one bounded page, `{ "content": [...], "page":
+{ size, number, totalElements, totalPages } }` (the Spring Data `PagedModel`
+shape). `page` counts from 0, and `size` defaults to 20 with a maximum of 100;
+there is no unpaged mode. Each resource has one fixed, index-backed order with
+the id as tie-breaker, and it filters on the server. Notifications are newest
+first, with a repeatable `status` filter. Appointments are in schedule order
+(`order=ASC|DESC`), with a half-open `from`/`to` window and a repeatable
+`status` filter. The BFF forwards only allowlisted query parameters. The
+dashboard reads its counts from `totalElements` instead of downloading full
+lists.
+
+Rationale: every list read loaded the caller's whole history, and appointments
+and notifications grow with every session, so response size and latency grew
+until they would reach the BFF and gateway timeouts. Offset paging with an index
+fits a practice's data volume and gives totals. Keyset paging stays an option
+behind the same shape. Patients and clinical records follow in later changes.
+See [ADR-029](decisions/ADR-029-paged-list-endpoints.md) for the contract, the
+alternatives considered and what is not paged yet.
+
 ## ADR-030: PR Security Gates Block Only What the PR Adds
 
 Decision: PR Trivy and ZAP scans still run in full, but a High/Critical finding

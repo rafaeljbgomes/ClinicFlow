@@ -14,6 +14,7 @@ import com.clinicflow.appointment.application.ports.PatientDirectory;
 import com.clinicflow.appointment.application.queries.GetAppointmentQuery;
 import com.clinicflow.appointment.application.queries.ListAppointmentsQuery;
 import com.clinicflow.appointment.application.results.AppointmentResult;
+import com.clinicflow.appointment.application.results.PageResult;
 import com.clinicflow.appointment.domain.Appointment;
 import com.clinicflow.appointment.domain.AppointmentDate;
 import com.clinicflow.appointment.domain.AppointmentId;
@@ -29,7 +30,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
-import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -64,9 +64,8 @@ public class AppointmentService {
     }
 
     @Transactional(readOnly = true)
-    public List<AppointmentResult> listForPsychologist(ListAppointmentsQuery query) {
-        return appointmentRepository.findByPsychologistId(query.psychologistId()).stream()
-                .map(mapper::toResult).toList();
+    public PageResult<AppointmentResult> listForPsychologist(ListAppointmentsQuery query) {
+        return appointmentRepository.findPage(query).map(mapper::toResult);
     }
 
     @Transactional(readOnly = true)

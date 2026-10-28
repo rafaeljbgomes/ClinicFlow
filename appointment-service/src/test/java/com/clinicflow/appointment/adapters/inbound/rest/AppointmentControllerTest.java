@@ -1,5 +1,10 @@
 package com.clinicflow.appointment.adapters.inbound.rest;
 
+import com.clinicflow.appointment.application.queries.ListAppointmentsQuery;
+import com.clinicflow.appointment.application.queries.PageQuery;
+import com.clinicflow.appointment.application.queries.ScheduleOrder;
+import com.clinicflow.appointment.application.results.PageResult;
+import com.clinicflow.appointment.domain.PsychologistId;
 import com.clinicflow.appointment.application.AppointmentService;
 import com.clinicflow.appointment.application.exceptions.AppointmentNotFoundException;
 import com.clinicflow.appointment.application.exceptions.OwnershipCheckUnavailableException;
@@ -22,6 +27,7 @@ import org.springframework.test.web.servlet.ResultActions;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -129,9 +135,12 @@ class AppointmentControllerTest {
     }
 
     @Test
-    void listReturnsPsychologistAppointments() throws Exception {
+    void listReturnsTheFirstPageOfPsychologistAppointmentsByDefault() throws Exception {
         // Arrange
-        when(appointmentService.listForPsychologist(any())).thenReturn(List.of(result()));
+        var query = new ListAppointmentsQuery(new PsychologistId(PSYCHOLOGIST_ID), null, null, Set.of(),
+                ScheduleOrder.ASC, new PageQuery(0, PageQuery.DEFAULT_SIZE));
+        when(appointmentService.listForPsychologist(query))
+                .thenReturn(new PageResult<>(List.of(result()), 0, PageQuery.DEFAULT_SIZE, 1));
         var request = get("/appointments").with(jwtFor("ROLE_PSYCHOLOGIST"));
 
         // Act
@@ -139,7 +148,59 @@ class AppointmentControllerTest {
 
         // Assert
         response.andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value(APPOINTMENT_ID.toString()));
+                .andExpect(jsonPath("$.content[0].id").value(APPOINTMENT_ID.toString()))
+                .andExpect(jsonPath("$.page.totalElements").value(1))
+                .andExpect(jsonPath("$.page.totalPages").value(1));
+    }
+
+    @Test
+    void listPassesTheWindowStatusesAndPage() throws Exception {
+        // Arrange
+        Instant from = Instant.parse("2026-06-01T00:00:00Z");
+        Instant to = Instant.parse("2026-06-08T00:00:00Z");
+        var query = new ListAppointmentsQuery(new PsychologistId(PSYCHOLOGIST_ID), from, to,
+                Set.of(AppointmentStatus.SCHEDULED, AppointmentStatus.RESCHEDULED), ScheduleOrder.DESC,
+                new PageQuery(1, 10));
+        when(appointmentService.listForPsychologist(query)).thenReturn(new PageResult<>(List.of(), 1, 10, 4));
+        var request = get("/appointments").param("from", from.toString()).param("to", to.toString())
+                .param("status", "SCHEDULED", "RESCHEDULED").param("order", "DESC").param("page", "1").param("size", "10")
+                .with(jwtFor("ROLE_PSYCHOLOGIST"));
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isOk())
+                .andExpect(jsonPath("$.page.number").value(1))
+                .andExpect(jsonPath("$.page.totalElements").value(4));
+    }
+
+    @Test
+    void listRejectsAWindowThatEndsBeforeItStarts() throws Exception {
+        // Arrange
+        var request = get("/appointments").param("from", "2026-06-08T00:00:00Z")
+                .param("to", "2026-06-01T00:00:00Z").with(jwtFor("ROLE_PSYCHOLOGIST"));
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isBadRequest());
+        verifyNoInteractions(appointmentService);
+    }
+
+    @Test
+    void listRejectsMalformedWindowsAndOversizedPages() throws Exception {
+        // Act
+        ResultActions malformed = mvc.perform(get("/appointments").param("from", "tomorrow")
+                .with(jwtFor("ROLE_PSYCHOLOGIST")));
+        ResultActions oversized = mvc.perform(get("/appointments")
+                .param("size", String.valueOf(PageQuery.MAX_SIZE + 1)).with(jwtFor("ROLE_PSYCHOLOGIST")));
+
+        // Assert
+        malformed.andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("invalid_parameter"));
+        oversized.andExpect(status().isBadRequest());
+        verifyNoInteractions(appointmentService);
     }
 
     @Test

@@ -1,6 +1,8 @@
 package com.clinicflow.notification.infrastructure.bootstrap;
 
 import com.clinicflow.notification.application.ports.NotificationRepository;
+import com.clinicflow.notification.application.queries.PageQuery;
+import com.clinicflow.notification.application.results.PageResult;
 import com.clinicflow.notification.domain.EventId;
 import com.clinicflow.notification.domain.Notification;
 import com.clinicflow.notification.domain.NotificationId;
@@ -18,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -116,16 +119,14 @@ class DemoDataBootstrapTest {
         }
 
         @Override
-        public List<Notification> findByPsychologistId(PsychologistId psychologistId) {
-            return records.values().stream()
-                    .filter(notification -> notification.psychologistId()
-                            .filter(psychologistId::equals).isPresent())
-                    .toList();
+        public PageResult<Notification> findPageByPsychologistId(PsychologistId psychologistId,
+                                                                 Set<NotificationStatus> statuses, PageQuery page) {
+            throw new UnsupportedOperationException("The bootstrap never lists notifications");
         }
 
         @Override
-        public List<Notification> findAll() {
-            return List.copyOf(records.values());
+        public PageResult<Notification> findPage(Set<NotificationStatus> statuses, PageQuery page) {
+            throw new UnsupportedOperationException("The bootstrap never lists notifications");
         }
 
         Map<NotificationId, Notification> records() {
