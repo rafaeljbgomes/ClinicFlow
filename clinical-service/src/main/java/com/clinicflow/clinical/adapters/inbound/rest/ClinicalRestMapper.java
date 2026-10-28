@@ -28,6 +28,7 @@ import com.clinicflow.clinical.application.queries.GetPatientClinicalHistoryQuer
 import com.clinicflow.clinical.application.queries.GetPracticeProfileQuery;
 import com.clinicflow.clinical.application.queries.ListClinicalCasesQuery;
 import com.clinicflow.clinical.application.queries.ListSessionRecordsQuery;
+import com.clinicflow.clinical.application.queries.PageQuery;
 import com.clinicflow.clinical.application.results.CareGoalResult;
 import com.clinicflow.clinical.application.results.CarePlanResult;
 import com.clinicflow.clinical.application.results.ClinicalCaseResult;
@@ -44,6 +45,7 @@ import org.mapstruct.Mapper;
 
 import java.time.ZoneId;
 import java.time.DateTimeException;
+import java.util.Set;
 import java.util.UUID;
 
 @Mapper(config = MapperConfiguration.class)
@@ -65,9 +67,10 @@ public abstract class ClinicalRestMapper {
                 new PatientId(request.patientId()), request.presentingConcern());
     }
 
-    public ListClinicalCasesQuery toListQuery(UUID psychologistId, UUID patientId, ClinicalCaseStatus status) {
+    public ListClinicalCasesQuery toListQuery(UUID psychologistId, UUID patientId,
+                                              Set<ClinicalCaseStatus> statuses, int page, int size) {
         return new ListClinicalCasesQuery(new PsychologistId(psychologistId),
-                patientId == null ? null : new PatientId(patientId), status);
+                patientId == null ? null : new PatientId(patientId), statuses, new PageQuery(page, size));
     }
 
     public GetClinicalCaseQuery toGetCaseQuery(UUID psychologistId, UUID clinicalCaseId) {
@@ -92,8 +95,10 @@ public abstract class ClinicalRestMapper {
         return new GetCarePlanQuery(new PsychologistId(psychologistId), new ClinicalCaseId(clinicalCaseId));
     }
 
-    public ListSessionRecordsQuery toListSessionsQuery(UUID psychologistId, UUID clinicalCaseId) {
-        return new ListSessionRecordsQuery(new PsychologistId(psychologistId), new ClinicalCaseId(clinicalCaseId));
+    public ListSessionRecordsQuery toListSessionsQuery(UUID psychologistId, UUID clinicalCaseId, int page,
+                                                       int size) {
+        return new ListSessionRecordsQuery(new PsychologistId(psychologistId), new ClinicalCaseId(clinicalCaseId),
+                new PageQuery(page, size));
     }
 
     public CreateSessionRecordCommand toCommand(UUID psychologistId, UUID clinicalCaseId,

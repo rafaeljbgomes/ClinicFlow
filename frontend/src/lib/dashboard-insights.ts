@@ -19,13 +19,16 @@ export const OPEN_APPOINTMENT_STATUSES = ["SCHEDULED", "RESCHEDULED"] as const;
 // Messages in these statuses need the psychologist's attention.
 export const ATTENTION_NOTIFICATION_STATUSES = ["PENDING", "FAILED"] as const;
 export const UPCOMING_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+// The follow-up card shows at most this many items, so it never needs more intake cases than this.
+export const FOLLOW_UP_LIMIT = 3;
 
-// Appointments and messages are paged (ADR-029), so their metrics arrive as server-side totals
-// rather than being counted from a full list in the browser.
+// Appointments, messages and clinical cases are paged (ADR-029), so their metrics arrive as server-side
+// totals rather than being counted from a full list in the browser.
 export function practiceMetrics(
   patients: Patient[],
   upcomingThisWeek: number,
-  clinicalCases: ClinicalCase[],
+  activeCases: number,
+  intakeCases: number,
   attentionMessages: number,
   now: number
 ): PracticeMetric[] {
@@ -33,8 +36,6 @@ export function practiceMetrics(
   startOfMonth.setDate(1);
   startOfMonth.setHours(0, 0, 0, 0);
   const newPatients = patients.filter((patient) => new Date(patient.createdAt).getTime() >= startOfMonth.getTime()).length;
-  const activeCases = clinicalCases.filter((clinicalCase) => clinicalCase.status === "ACTIVE").length;
-  const intakeCases = clinicalCases.filter((clinicalCase) => clinicalCase.status === "INTAKE").length;
 
   return [
     { label: "Patients", value: patients.length, context: newPatients ? `+${newPatients} this month` : "No new patients this month" },
@@ -44,9 +45,10 @@ export function practiceMetrics(
   ];
 }
 
+// `intakeCases` is the server-filtered first page of INTAKE cases, most recently opened first.
 export function deriveFollowUps(
   patients: Patient[],
-  clinicalCases: ClinicalCase[]
+  intakeCases: ClinicalCase[]
 ): FollowUp[] {
   const consent = patients
     .filter((patient) => patient.consentStatus === "PENDING" || patient.consentStatus === "REVOKED")
@@ -57,15 +59,13 @@ export function deriveFollowUps(
       href: "/dashboard/patients",
       tone: patient.consentStatus === "REVOKED" ? "danger" as const : "warning" as const,
     }));
-  const intake = clinicalCases
-    .filter((clinicalCase) => clinicalCase.status === "INTAKE")
-    .map((clinicalCase) => ({
-      id: `case-${clinicalCase.id}`,
-      title: "Complete case intake",
-      description: patients.find((patient) => patient.id === clinicalCase.patientId)?.fullName ?? "Patient",
-      href: "/dashboard/clinical",
-      tone: "info" as const,
-    }));
+  const intake = intakeCases.map((clinicalCase) => ({
+    id: `case-${clinicalCase.id}`,
+    title: "Complete case intake",
+    description: patients.find((patient) => patient.id === clinicalCase.patientId)?.fullName ?? "Patient",
+    href: "/dashboard/clinical",
+    tone: "info" as const,
+  }));
 
-  return [...consent, ...intake].slice(0, 3);
+  return [...consent, ...intake].slice(0, FOLLOW_UP_LIMIT);
 }

@@ -6,10 +6,12 @@ import com.clinicflow.clinical.adapters.inbound.rest.dto.ChangeClinicalCaseStatu
 import com.clinicflow.clinical.adapters.inbound.rest.dto.ClinicalCaseResponse;
 import com.clinicflow.clinical.adapters.inbound.rest.dto.CreateClinicalCaseRequest;
 import com.clinicflow.clinical.adapters.inbound.rest.dto.CreateSessionRecordRequest;
+import com.clinicflow.clinical.adapters.inbound.rest.dto.PageResponse;
 import com.clinicflow.clinical.adapters.inbound.rest.dto.PatientClinicalHistoryResponse;
 import com.clinicflow.clinical.adapters.inbound.rest.dto.SessionRecordResponse;
 import com.clinicflow.clinical.adapters.inbound.rest.dto.UpdateSessionRecordRequest;
 import com.clinicflow.clinical.application.ClinicalService;
+import com.clinicflow.clinical.application.queries.PageQuery;
 import com.clinicflow.clinical.domain.ClinicalCaseStatus;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
@@ -29,7 +31,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @RestController
@@ -52,12 +54,15 @@ public class ClinicalCaseController {
                 .body(clinicalCase);
     }
 
+    // Cases list the most recently opened first; status is repeatable.
     @GetMapping("/clinical-cases")
-    public List<ClinicalCaseResponse> list(@AuthenticationPrincipal Jwt jwt,
-                                           @RequestParam(required = false) UUID patientId,
-                                           @RequestParam(required = false) ClinicalCaseStatus status) {
-        return clinicalService.listClinicalCases(mapper.toListQuery(userId(jwt), patientId, status))
-                .stream().map(mapper::toResponse).toList();
+    public PageResponse<ClinicalCaseResponse> list(@AuthenticationPrincipal Jwt jwt,
+                                                   @RequestParam(required = false) UUID patientId,
+                                                   @RequestParam(required = false) Set<ClinicalCaseStatus> status,
+                                                   @RequestParam(defaultValue = "0") int page,
+                                                   @RequestParam(defaultValue = "" + PageQuery.DEFAULT_SIZE) int size) {
+        return PageResponse.of(clinicalService.listClinicalCases(
+                mapper.toListQuery(userId(jwt), patientId, status, page, size)), mapper::toResponse);
     }
 
     @GetMapping("/clinical-cases/{id}")
@@ -99,10 +104,14 @@ public class ClinicalCaseController {
         return ResponseEntity.ok().eTag(EntityTags.of(carePlan.version())).body(carePlan);
     }
 
+    // Session records list the latest session first.
     @GetMapping("/clinical-cases/{id}/session-records")
-    public List<SessionRecordResponse> listSessions(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        return clinicalService.listSessionRecords(mapper.toListSessionsQuery(userId(jwt), id))
-                .stream().map(mapper::toResponse).toList();
+    public PageResponse<SessionRecordResponse> listSessions(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
+                                                            @RequestParam(defaultValue = "0") int page,
+                                                            @RequestParam(defaultValue = "" + PageQuery.DEFAULT_SIZE)
+                                                            int size) {
+        return PageResponse.of(clinicalService.listSessionRecords(
+                mapper.toListSessionsQuery(userId(jwt), id, page, size)), mapper::toResponse);
     }
 
     @PostMapping("/clinical-cases/{id}/session-records")

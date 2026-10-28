@@ -22,6 +22,7 @@ import {
   type SessionRecordFormValues,
 } from "@/components/clinical-forms";
 import { ErrorAlert } from "@/components/error-alert";
+import { ListPager } from "@/components/list-pager";
 import { LoadingTable } from "@/components/loading-table";
 import { SectionHeader } from "@/components/section-header";
 import { STALE_VERSION_MESSAGE, StaleVersionAlert } from "@/components/stale-version-alert";
@@ -81,10 +82,12 @@ import {
 } from "@/components/ui/select";
 import { ApiClientError, apiFetch, isStaleVersion, swrFetcher } from "@/lib/api-client";
 import { formatDateTime, formatEnum } from "@/lib/format";
+import { listPath } from "@/lib/list-path";
 import type {
   CarePlan,
   ClinicalCase,
   ClinicalCaseStatus,
+  Page,
   Patient,
   PracticeProfile,
   SessionRecord,
@@ -99,8 +102,12 @@ const caseStatuses: ClinicalCaseStatus[] = [
   "DISCHARGED",
 ];
 
+const CASE_PAGE_SIZE = 20;
+const SESSION_PAGE_SIZE = 20;
+
 export default function ClinicalPage() {
-  const cases = useSWR<ClinicalCase[]>("/api/clinical-cases", swrFetcher);
+  // The switcher offers the most recently opened cases; older ones are reached through the case browser.
+  const cases = useSWR<Page<ClinicalCase>>(listPath("/api/clinical-cases", { size: CASE_PAGE_SIZE }), swrFetcher);
   const patients = useSWR<Patient[]>("/api/patients", swrFetcher);
   const profile = useSWR<PracticeProfile>("/api/practice-profile", swrFetcher);
   const currentUser = useSWR<UserView>("/api/auth/me", swrFetcher);
@@ -114,54 +121,81 @@ export default function ClinicalPage() {
   const [sessionConflict, setSessionConflict] = useState(false);
   const [signingSession, setSigningSession] = useState<SessionRecord | null>(null);
   const [viewingSession, setViewingSession] = useState<SessionRecord | null>(null);
-  const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
+  // The case the psychologist picked, as it was when picked; null means the most recently opened case.
+  const [pickedCase, setPickedCase] = useState<ClinicalCase | null>(null);
   const [caseBrowserOpen, setCaseBrowserOpen] = useState(false);
   const [goalsOpen, setGoalsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<ClinicalCaseStatus | "ALL">("ALL");
+  const [browsePage, setBrowsePage] = useState(0);
+  const [sessionPage, setSessionPage] = useState({ caseId: "", number: 0 });
+
+  // The browser filters by status on the server and pages through every case, not just the recent ones.
+  const browsedCases = useSWR<Page<ClinicalCase>>(
+    caseBrowserOpen
+      ? listPath("/api/clinical-cases", {
+        status: statusFilter === "ALL" ? undefined : statusFilter,
+        page: browsePage,
+        size: CASE_PAGE_SIZE,
+      })
+      : null,
+    swrFetcher
+  );
 
   const patientById = useMemo(
     () => new Map((patients.data ?? []).map((patient) => [patient.id, patient])),
     [patients.data]
   );
 
-  const sortedCases = useMemo(
-    () =>
-      [...(cases.data ?? [])].sort(
-        (a, b) => new Date(b.openedAt).getTime() - new Date(a.openedAt).getTime()
-      ),
-    [cases.data]
-  );
+  const recentCases = useMemo(() => cases.data?.content ?? [], [cases.data]);
 
+  // Patient names live in the patient service, so the text search narrows the page on screen.
   const visibleCases = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    return sortedCases.filter((clinicalCase) => {
+    return (browsedCases.data?.content ?? []).filter((clinicalCase) => {
       const patient = patientById.get(clinicalCase.patientId);
-      const matchesQuery = !normalized || [patient?.fullName, patient?.preferredName, clinicalCase.presentingConcern]
+      return !normalized || [patient?.fullName, patient?.preferredName, clinicalCase.presentingConcern]
         .filter(Boolean)
         .join(" ")
         .toLowerCase()
         .includes(normalized);
-      return matchesQuery && (statusFilter === "ALL" || clinicalCase.status === statusFilter);
     });
-  }, [patientById, query, sortedCases, statusFilter]);
+  }, [browsedCases.data, patientById, query]);
 
-  const selectedCase =
-    sortedCases.find((clinicalCase) => clinicalCase.id === selectedCaseId) ??
-    sortedCases[0];
+  // A picked case that is on neither loaded page (an older case after a status change, say) is read on its own.
+  const listedCase = pickedCase
+    ? [...recentCases, ...(browsedCases.data?.content ?? [])].find((clinicalCase) => clinicalCase.id === pickedCase.id)
+    : undefined;
+  const pickedCaseDetail = useSWR<ClinicalCase>(
+    pickedCase && !listedCase ? `/api/clinical-cases/${pickedCase.id}` : null,
+    swrFetcher
+  );
+  const selectedCase = pickedCase
+    ? listedCase ?? pickedCaseDetail.data ?? pickedCase
+    : recentCases[0];
 
+  const sessionPageNumber = sessionPage.caseId === selectedCase?.id ? sessionPage.number : 0;
   const carePlan = useSWR<CarePlan>(
     selectedCase ? `/api/clinical-cases/${selectedCase.id}/care-plan` : null,
     swrFetcher,
     { shouldRetryOnError: false }
   );
-  const sessions = useSWR<SessionRecord[]>(
-    selectedCase ? `/api/clinical-cases/${selectedCase.id}/session-records` : null,
+  const sessions = useSWR<Page<SessionRecord>>(
+    selectedCase
+      ? listPath(`/api/clinical-cases/${selectedCase.id}/session-records`, {
+        page: sessionPageNumber,
+        size: SESSION_PAGE_SIZE,
+      })
+      : null,
     swrFetcher
   );
 
   const isLoading = cases.isLoading || patients.isLoading || profile.isLoading;
   const error = cases.error ?? patients.error ?? profile.error;
+
+  async function refreshCases() {
+    await Promise.all([cases.mutate(), browsedCases.mutate(), pickedCaseDetail.mutate()]);
+  }
 
   async function createCase(values: ClinicalCaseFormValues) {
     const created = await apiFetch<ClinicalCase>("/api/clinical-cases", {
@@ -169,15 +203,16 @@ export default function ClinicalPage() {
       body: values,
     });
     toast.success("Clinical case created");
-    setSelectedCaseId(created.id);
+    setPickedCase(created);
     setCreateCaseOpen(false);
-    await cases.mutate();
+    await refreshCases();
   }
 
   async function changeStatus(status: ClinicalCaseStatus) {
     if (!selectedCase) return;
+    let updated: ClinicalCase;
     try {
-      await apiFetch<ClinicalCase>(`/api/clinical-cases/${selectedCase.id}/status`, {
+      updated = await apiFetch<ClinicalCase>(`/api/clinical-cases/${selectedCase.id}/status`, {
         method: "PATCH",
         body: { status },
         expectedVersion: selectedCase.version,
@@ -185,11 +220,13 @@ export default function ClinicalPage() {
     } catch (failure) {
       if (!isStaleVersion(failure)) throw failure;
       toast.error(`${STALE_VERSION_MESSAGE} Check the latest case status and try again.`);
-      await cases.mutate();
+      await refreshCases();
       return;
     }
     toast.success("Case status updated");
-    await cases.mutate();
+    // Keeps the workspace on this case even if the new status moves it off the loaded pages.
+    setPickedCase(updated);
+    await refreshCases();
   }
 
   function openCarePlan() {
@@ -259,7 +296,7 @@ export default function ClinicalPage() {
   }
 
   async function reloadEditedSession() {
-    const latest = (await sessions.mutate())?.find((record) => record.id === editingSession?.id);
+    const latest = (await sessions.mutate())?.content.find((record) => record.id === editingSession?.id);
     setEditingSession(latest ?? null);
     setSessionConflict(false);
   }
@@ -322,11 +359,12 @@ export default function ClinicalPage() {
       {selectedCase ? (
         <div className="flex flex-col gap-6">
           <CaseWorkspaceToolbar
-            cases={sortedCases}
+            cases={recentCases}
+            totalCases={cases.data?.page.totalElements ?? recentCases.length}
             patientById={patientById}
             selectedCase={selectedCase}
             onBrowseCases={() => setCaseBrowserOpen(true)}
-            onSelectCase={setSelectedCaseId}
+            onSelectCase={setPickedCase}
           />
           <CaseDetail
             carePlan={carePlan.data}
@@ -335,9 +373,11 @@ export default function ClinicalPage() {
             defaultDuration={profile.data?.defaultSessionDurationMinutes}
             isCarePlanLoading={carePlan.isLoading}
             isSessionsLoading={sessions.isLoading}
+            isSessionsValidating={sessions.isValidating}
             patient={patientById.get(selectedCase.patientId)}
-            sessions={sessions.data ?? []}
+            sessions={sessions.data}
             sessionsError={sessions.error}
+            onSessionPageChange={(number) => setSessionPage({ caseId: selectedCase.id, number })}
             onChangeStatus={changeStatus}
             onCreateSession={() => setNewSessionOpen(true)}
             onEditCarePlan={openCarePlan}
@@ -363,10 +403,16 @@ export default function ClinicalPage() {
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-8 pb-8">
             <label className="relative">
               <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search cases or patients" className="pl-9" />
-              <span className="sr-only">Search clinical cases</span>
+              <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search this page by patient or concern" className="pl-9" />
+              <span className="sr-only">Search clinical cases on this page</span>
             </label>
-            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as ClinicalCaseStatus | "ALL")}>
+            <Select
+              value={statusFilter}
+              onValueChange={(value) => {
+                setStatusFilter(value as ClinicalCaseStatus | "ALL");
+                setBrowsePage(0);
+              }}
+            >
               <SelectTrigger aria-label="Filter clinical cases by status" className="w-full">
                 <SelectValue>{statusFilter === "ALL" ? "All case statuses" : formatEnum(statusFilter)}</SelectValue>
               </SelectTrigger>
@@ -377,10 +423,18 @@ export default function ClinicalPage() {
             </Select>
             <div className="flex items-center justify-between border-b border-border/70 pb-3">
               <p className="type-label text-muted-foreground">Cases</p>
-              <p className="text-xs text-muted-foreground">{visibleCases.length} shown</p>
+              <p className="text-xs text-muted-foreground">
+                {visibleCases.length} shown
+                {browsedCases.data ? ` of ${browsedCases.data.page.totalElements}` : ""}
+              </p>
             </div>
-            {visibleCases.length === 0 ? (
-              <p className="py-8 text-center text-sm text-muted-foreground">No clinical cases match this view.</p>
+            {browsedCases.error ? <ErrorAlert message={browsedCases.error.message} /> : null}
+            {browsedCases.isLoading ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">Loading clinical cases…</p>
+            ) : visibleCases.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                {query.trim() ? "No cases on this page match your search." : "No clinical cases match this view."}
+              </p>
             ) : (
               <div className="flex flex-col">
                 {visibleCases.map((clinicalCase, index) => (
@@ -388,7 +442,7 @@ export default function ClinicalPage() {
                     <button
                       type="button"
                       onClick={() => {
-                        setSelectedCaseId(clinicalCase.id);
+                        setPickedCase(clinicalCase);
                         setCaseBrowserOpen(false);
                       }}
                       aria-pressed={selectedCase.id === clinicalCase.id}
@@ -410,6 +464,12 @@ export default function ClinicalPage() {
                 ))}
               </div>
             )}
+            <ListPager
+              page={browsedCases.data?.page}
+              noun="cases"
+              onPageChange={setBrowsePage}
+              disabled={browsedCases.isValidating}
+            />
           </div>
         </SheetContent>
       </Sheet>
@@ -535,16 +595,18 @@ export default function ClinicalPage() {
 
 function CaseWorkspaceToolbar({
   cases,
+  totalCases,
   patientById,
   selectedCase,
   onBrowseCases,
   onSelectCase,
 }: {
   cases: ClinicalCase[];
+  totalCases: number;
   patientById: Map<string, Patient>;
   selectedCase: ClinicalCase;
   onBrowseCases: () => void;
-  onSelectCase: (caseId: string) => void;
+  onSelectCase: (clinicalCase: ClinicalCase) => void;
 }) {
   return (
     <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
@@ -568,12 +630,14 @@ function CaseWorkspaceToolbar({
           <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-[min(25rem,calc(100vw-2rem))]">
-          <DropdownMenuLabel>Select clinical case</DropdownMenuLabel>
+          <DropdownMenuLabel>
+            {totalCases > cases.length ? "Recently opened cases" : "Select clinical case"}
+          </DropdownMenuLabel>
           <DropdownMenuGroup>
             {cases.map((clinicalCase) => (
               <DropdownMenuItem
                 key={clinicalCase.id}
-                onClick={() => onSelectCase(clinicalCase.id)}
+                onClick={() => onSelectCase(clinicalCase)}
                 className="flex items-center justify-between gap-3"
               >
                 <span className="truncate">
@@ -583,6 +647,11 @@ function CaseWorkspaceToolbar({
               </DropdownMenuItem>
             ))}
           </DropdownMenuGroup>
+          {totalCases > cases.length ? (
+            <DropdownMenuGroup>
+              <DropdownMenuItem onClick={onBrowseCases}>Browse all {totalCases} cases</DropdownMenuItem>
+            </DropdownMenuGroup>
+          ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -593,7 +662,7 @@ function CaseWorkspaceToolbar({
         </Button>
         <Separator orientation="vertical" className="hidden h-6 lg:block" />
         <p className="text-sm text-muted-foreground">
-          {cases.length} {cases.length === 1 ? "case" : "cases"}
+          {totalCases} {totalCases === 1 ? "case" : "cases"}
         </p>
       </div>
     </div>
@@ -607,9 +676,11 @@ function CaseDetail({
   defaultDuration,
   isCarePlanLoading,
   isSessionsLoading,
+  isSessionsValidating,
   patient,
   sessions,
   sessionsError,
+  onSessionPageChange,
   onChangeStatus,
   onCreateSession,
   onEditCarePlan,
@@ -625,9 +696,11 @@ function CaseDetail({
   defaultDuration?: number;
   isCarePlanLoading: boolean;
   isSessionsLoading: boolean;
+  isSessionsValidating: boolean;
   patient?: Patient;
-  sessions: SessionRecord[];
+  sessions?: Page<SessionRecord>;
   sessionsError?: Error;
+  onSessionPageChange: (number: number) => void;
   onChangeStatus: (status: ClinicalCaseStatus) => Promise<void>;
   onCreateSession: () => void;
   onEditCarePlan: () => void;
@@ -638,14 +711,8 @@ function CaseDetail({
   onViewAllGoals: () => void;
 }) {
   const [activeTab, setActiveTab] = useState("sessions");
-  const orderedSessions = useMemo(
-    () =>
-      [...sessions].sort(
-        (a, b) =>
-          new Date(b.sessionDate).getTime() - new Date(a.sessionDate).getTime()
-      ),
-    [sessions]
-  );
+  // The clinical service already returns the latest session first.
+  const orderedSessions = sessions?.content ?? [];
 
   return (
     <div className="flex flex-col gap-6">
@@ -755,7 +822,7 @@ function CaseDetail({
                 <p className="mt-2 text-sm leading-6">{clinicalCase.presentingConcern}</p>
               </div>
               <div className="grid overflow-hidden rounded-xl border border-border/70 bg-surface-subtle sm:grid-cols-2 sm:divide-x sm:divide-border/70">
-                <CaseMetadata label="Session records" value={`${orderedSessions.length}`} />
+                <CaseMetadata label="Session records" value={`${sessions?.page.totalElements ?? 0}`} />
                 <CaseMetadata label="Care plan" value={carePlan ? "In place" : "Not created"} />
               </div>
             </CardContent>
@@ -802,6 +869,12 @@ function CaseDetail({
                       onView={() => onViewSession(record)}
                     />
                   ))}
+                  <ListPager
+                    page={sessions?.page}
+                    noun="session records"
+                    onPageChange={onSessionPageChange}
+                    disabled={isSessionsValidating}
+                  />
                 </>
               )}
             </CardContent>

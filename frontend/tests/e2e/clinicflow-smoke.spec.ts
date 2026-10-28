@@ -426,7 +426,7 @@ test.describe("clinical cases", () => {
     await page.getByRole("button", { name: "Browse cases" }).click();
 
     // Act
-    await page.getByPlaceholder("Search cases or patients").fill(patient.fullName);
+    await page.getByPlaceholder("Search this page by patient or concern").fill(patient.fullName);
 
     // Assert
     await expect(page.getByText(clinicalCase.presentingConcern).filter({ visible: true }).first()).toBeVisible();

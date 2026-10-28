@@ -10,17 +10,24 @@ import com.clinicflow.clinical.application.commands.SignSessionRecordCommand;
 import com.clinicflow.clinical.application.commands.UpdatePracticeProfileCommand;
 import com.clinicflow.clinical.application.exceptions.PatientNotFoundException;
 import com.clinicflow.clinical.application.exceptions.StaleResourceVersionException;
+import com.clinicflow.clinical.application.queries.ListClinicalCasesQuery;
+import com.clinicflow.clinical.application.queries.ListSessionRecordsQuery;
+import com.clinicflow.clinical.application.queries.PageQuery;
 import com.clinicflow.clinical.application.results.CareGoalResult;
 import com.clinicflow.clinical.application.results.CarePlanResult;
 import com.clinicflow.clinical.application.results.ClinicalCaseResult;
+import com.clinicflow.clinical.application.results.PageResult;
 import com.clinicflow.clinical.application.results.PatientClinicalHistoryResult;
 import com.clinicflow.clinical.application.results.PracticeProfileResult;
 import com.clinicflow.clinical.application.results.SessionRecordResult;
 import com.clinicflow.clinical.domain.AttendanceStatus;
+import com.clinicflow.clinical.domain.ClinicalCaseId;
 import com.clinicflow.clinical.domain.ClinicalCaseStatus;
 import com.clinicflow.clinical.domain.GoalStatus;
 import com.clinicflow.clinical.domain.InvalidNoteTransitionException;
 import com.clinicflow.clinical.domain.NoteStatus;
+import com.clinicflow.clinical.domain.PatientId;
+import com.clinicflow.clinical.domain.PsychologistId;
 import com.clinicflow.clinical.domain.SessionModality;
 import com.clinicflow.clinical.domain.SessionRecordNotSignableException;
 import com.clinicflow.clinical.domain.SignedSessionRecordException;
@@ -28,6 +35,7 @@ import com.clinicflow.clinical.infrastructure.security.SecurityConfig;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
@@ -46,6 +54,7 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -195,9 +204,12 @@ class ClinicalControllerTest {
     }
 
     @Test
-    void listClinicalCasesReturnsPsychologistCases() throws Exception {
+    void listClinicalCasesReturnsTheFirstPageOfPsychologistCasesByDefault() throws Exception {
         // Arrange
-        when(clinicalService.listClinicalCases(any())).thenReturn(List.of(clinicalCase()));
+        var query = new ListClinicalCasesQuery(new PsychologistId(PSYCHOLOGIST_ID), null, Set.of(),
+                new PageQuery(0, PageQuery.DEFAULT_SIZE));
+        when(clinicalService.listClinicalCases(query))
+                .thenReturn(new PageResult<>(List.of(clinicalCase()), 0, PageQuery.DEFAULT_SIZE, 1));
         var request = get("/clinical-cases").with(psychologist());
 
         // Act
@@ -205,7 +217,58 @@ class ClinicalControllerTest {
 
         // Assert
         response.andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].patientId").value(PATIENT_ID.toString()));
+                .andExpect(jsonPath("$.content[0].patientId").value(PATIENT_ID.toString()))
+                .andExpect(jsonPath("$.page.size").value(PageQuery.DEFAULT_SIZE))
+                .andExpect(jsonPath("$.page.totalElements").value(1))
+                .andExpect(jsonPath("$.page.totalPages").value(1));
+    }
+
+    @Test
+    void listClinicalCasesPassesThePatientStatusesAndPage() throws Exception {
+        // Arrange
+        var query = new ListClinicalCasesQuery(new PsychologistId(PSYCHOLOGIST_ID), new PatientId(PATIENT_ID),
+                Set.of(ClinicalCaseStatus.INTAKE, ClinicalCaseStatus.ACTIVE), new PageQuery(2, 5));
+        when(clinicalService.listClinicalCases(query)).thenReturn(new PageResult<>(List.of(), 2, 5, 11));
+        var request = get("/clinical-cases").param("patientId", PATIENT_ID.toString())
+                .param("status", "INTAKE", "ACTIVE").param("page", "2").param("size", "5").with(psychologist());
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isEmpty())
+                .andExpect(jsonPath("$.page.number").value(2))
+                .andExpect(jsonPath("$.page.totalElements").value(11))
+                .andExpect(jsonPath("$.page.totalPages").value(3));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"page, -1", "size, 0", "size, 101"})
+    void listClinicalCasesRejectsPagesOutsideTheBounds(String parameter, String value) throws Exception {
+        // Arrange
+        var request = get("/clinical-cases").param(parameter, value).with(psychologist());
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("invalid_request"));
+        verifyNoInteractions(clinicalService);
+    }
+
+    @Test
+    void listClinicalCasesRejectsUnknownStatusesAndMalformedPages() throws Exception {
+        // Act
+        ResultActions unknownStatus = mvc.perform(get("/clinical-cases").param("status", "OPEN")
+                .with(psychologist()));
+        ResultActions malformedPage = mvc.perform(get("/clinical-cases").param("page", "first")
+                .with(psychologist()));
+
+        // Assert
+        unknownStatus.andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("invalid_parameter"));
+        malformedPage.andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("invalid_parameter"));
+        verifyNoInteractions(clinicalService);
     }
 
     @Test
@@ -296,9 +359,12 @@ class ClinicalControllerTest {
     }
 
     @Test
-    void listSessionRecordsReturnsCaseSessions() throws Exception {
+    void listSessionRecordsReturnsTheFirstPageOfCaseSessionsByDefault() throws Exception {
         // Arrange
-        when(clinicalService.listSessionRecords(any())).thenReturn(List.of(session()));
+        var query = new ListSessionRecordsQuery(new PsychologistId(PSYCHOLOGIST_ID), new ClinicalCaseId(CASE_ID),
+                new PageQuery(0, PageQuery.DEFAULT_SIZE));
+        when(clinicalService.listSessionRecords(query))
+                .thenReturn(new PageResult<>(List.of(session()), 0, PageQuery.DEFAULT_SIZE, 1));
         var request = get("/clinical-cases/{id}/session-records", CASE_ID).with(psychologist());
 
         // Act
@@ -306,7 +372,40 @@ class ClinicalControllerTest {
 
         // Assert
         response.andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value(SESSION_ID.toString()));
+                .andExpect(jsonPath("$.content[0].id").value(SESSION_ID.toString()))
+                .andExpect(jsonPath("$.page.totalElements").value(1));
+    }
+
+    @Test
+    void listSessionRecordsPassesTheRequestedPage() throws Exception {
+        // Arrange
+        var query = new ListSessionRecordsQuery(new PsychologistId(PSYCHOLOGIST_ID), new ClinicalCaseId(CASE_ID),
+                new PageQuery(1, 10));
+        when(clinicalService.listSessionRecords(query)).thenReturn(new PageResult<>(List.of(), 1, 10, 12));
+        var request = get("/clinical-cases/{id}/session-records", CASE_ID).param("page", "1").param("size", "10")
+                .with(psychologist());
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isOk())
+                .andExpect(jsonPath("$.page.number").value(1))
+                .andExpect(jsonPath("$.page.totalPages").value(2));
+    }
+
+    @Test
+    void listSessionRecordsRejectsOversizedPages() throws Exception {
+        // Arrange
+        var request = get("/clinical-cases/{id}/session-records", CASE_ID)
+                .param("size", String.valueOf(PageQuery.MAX_SIZE + 1)).with(psychologist());
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("invalid_request"));
+        verifyNoInteractions(clinicalService);
     }
 
     @Test

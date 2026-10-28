@@ -35,6 +35,7 @@ import com.clinicflow.clinical.application.queries.ListClinicalCasesQuery;
 import com.clinicflow.clinical.application.queries.ListSessionRecordsQuery;
 import com.clinicflow.clinical.application.results.CarePlanResult;
 import com.clinicflow.clinical.application.results.ClinicalCaseResult;
+import com.clinicflow.clinical.application.results.PageResult;
 import com.clinicflow.clinical.application.results.PatientClinicalHistoryResult;
 import com.clinicflow.clinical.application.results.PracticeProfileResult;
 import com.clinicflow.clinical.application.results.SessionRecordResult;
@@ -133,19 +134,8 @@ public class ClinicalService {
     }
 
     @Transactional(readOnly = true)
-    public List<ClinicalCaseResult> listClinicalCases(ListClinicalCasesQuery query) {
-        List<ClinicalCase> cases;
-        if (query.patientId() != null) {
-            cases = clinicalCases.findByPsychologistIdAndPatientId(query.psychologistId(), query.patientId());
-            if (query.status() != null) {
-                cases = cases.stream().filter(clinicalCase -> clinicalCase.status() == query.status()).toList();
-            }
-        } else if (query.status() != null) {
-            cases = clinicalCases.findByPsychologistIdAndStatus(query.psychologistId(), query.status());
-        } else {
-            cases = clinicalCases.findByPsychologistId(query.psychologistId());
-        }
-        return cases.stream().map(mapper::toResult).toList();
+    public PageResult<ClinicalCaseResult> listClinicalCases(ListClinicalCasesQuery query) {
+        return clinicalCases.findPage(query).map(mapper::toResult);
     }
 
     @Transactional(readOnly = true)
@@ -201,9 +191,9 @@ public class ClinicalService {
     }
 
     @Transactional(readOnly = true)
-    public List<SessionRecordResult> listSessionRecords(ListSessionRecordsQuery query) {
+    public PageResult<SessionRecordResult> listSessionRecords(ListSessionRecordsQuery query) {
         ClinicalCase clinicalCase = requireOwnedCase(query.psychologistId(), query.clinicalCaseId());
-        return sessionRecords.findByClinicalCaseId(clinicalCase.id()).stream().map(mapper::toResult).toList();
+        return sessionRecords.findPageByClinicalCaseId(clinicalCase.id(), query.page()).map(mapper::toResult);
     }
 
     @Transactional

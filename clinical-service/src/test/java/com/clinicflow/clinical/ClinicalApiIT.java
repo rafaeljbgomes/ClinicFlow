@@ -568,6 +568,39 @@ class ClinicalApiIT {
     }
 
     @Test
+    void listsOneFilteredPageOfOwnCasesMostRecentlyOpenedFirst() {
+        // Arrange
+        createCase("psychologist-token", PATIENT_ID);
+        String newest = createCase("psychologist-token", SECOND_PATIENT_ID);
+        createCase("other-psychologist-token", OTHER_PATIENT_ID);
+        var request = new HttpEntity<>(bearer("psychologist-token"));
+
+        // Act
+        var response = exchange("/clinical-cases?status=INTAKE&status=ACTIVE&size=1", HttpMethod.GET, request,
+                Map.class);
+
+        // Assert
+        List<?> content = (List<?>) response.getResponseBody().get("content");
+        assertThat(content).singleElement().satisfies(item -> assertThat(((Map<?, ?>) item).get("id"))
+                .isEqualTo(newest));
+        Map<?, ?> page = (Map<?, ?>) response.getResponseBody().get("page");
+        assertThat(List.of(page.get("size"), page.get("number"), page.get("totalElements"), page.get("totalPages")))
+                .containsExactly(1, 0, 2, 2);
+    }
+
+    @Test
+    void rejectsAnOversizedCasePage() {
+        // Arrange
+        var request = new HttpEntity<>(bearer("psychologist-token"));
+
+        // Act
+        var response = exchange("/clinical-cases?size=101", HttpMethod.GET, request, Map.class);
+
+        // Assert
+        assertProblem(response, HttpStatus.BAD_REQUEST, "invalid_request");
+    }
+
+    @Test
     void rejectsMissingAuthentication() {
         // Act
         var response = exchange("/clinical-cases", HttpMethod.GET, HttpEntity.EMPTY, Map.class);
