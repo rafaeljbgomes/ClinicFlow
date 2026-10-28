@@ -229,7 +229,8 @@ def main():
                             urls += [API + "/api/v1/patients/" + patient_id,
                                      API + "/api/v1/clinical/patients/" + patient_id + "/clinical-history"] if "clinical-service" in selected else [API + "/api/v1/patients/" + patient_id]
                         if role == "psychologist" and item.get("fixture") == "cases":
-                            cases = json.loads(raw)
+                            # The case list is paged (ADR-029); the first page is enough to pick a fixture.
+                            cases = json.loads(raw).get("content")
                             require(isinstance(cases, list) and cases, "Synthetic clinical discovery is empty")
                             case_id = cases[0]["id"]
                             urls += [API + "/api/v1/clinical/clinical-cases/" + case_id,
