@@ -156,6 +156,30 @@
       "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/103",
       "reviewedAt": "2026-10-24",
       "expiresAt": "2026-11-19"
+    },
+    {
+      "component": "platform",
+      "target": "gateway",
+      "id": "CVE-2026-116587",
+      "package": "github.com/go-jose/go-jose/v4",
+      "version": "v4.1.5",
+      "owner": "rafaeljbgomes",
+      "reason": "No fixed release exists: go-jose 4.1.6 is merged on Traefik's v3.7 branch but v3.7.16 is still the latest release; local synthetic-data gateway without ACME or JWT middleware. Short expiry until v3.7.17 ships.",
+      "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/110",
+      "reviewedAt": "2026-10-28",
+      "expiresAt": "2026-11-07"
+    },
+    {
+      "component": "platform",
+      "target": "keycloak",
+      "id": "CVE-2026-102554",
+      "package": "com.google.guava:guava",
+      "version": "33.6.0-jre",
+      "owner": "rafaeljbgomes",
+      "reason": "No fixed build exists: quay.io/keycloak/keycloak:26.8.1 digest a78d6b79 ships Guava 33.6.0-jre, upstream keycloak/keycloak#54110 is blocked-external and no Keycloak 26.8.2 is published; local synthetic-data identity provider only.",
+      "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/111",
+      "reviewedAt": "2026-10-28",
+      "expiresAt": "2026-11-19"
     }
   ]
 }
