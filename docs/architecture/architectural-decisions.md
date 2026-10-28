@@ -509,15 +509,17 @@ there is no unpaged mode. Each resource has one fixed, index-backed order with
 the id as tie-breaker, and it filters on the server. Notifications are newest
 first, with a repeatable `status` filter. Appointments are in schedule order
 (`order=ASC|DESC`), with a half-open `from`/`to` window and a repeatable
-`status` filter. The BFF forwards only allowlisted query parameters. The
+`status` filter. Clinical cases are most recently opened first, with `patientId`
+and a repeatable `status` filter, and a case's session records are latest
+session first. The BFF forwards only allowlisted query parameters. The
 dashboard reads its counts from `totalElements` instead of downloading full
 lists.
 
-Rationale: every list read loaded the caller's whole history, and appointments
-and notifications grow with every session, so response size and latency grew
-until they would reach the BFF and gateway timeouts. Offset paging with an index
-fits a practice's data volume and gives totals. Keyset paging stays an option
-behind the same shape. Patients and clinical records follow in later changes.
+Rationale: every list read loaded the caller's whole history, and appointments,
+notifications and session records grow with every session, so response size and
+latency grew until they would reach the BFF and gateway timeouts. Offset paging
+with an index fits a practice's data volume and gives totals. Keyset paging
+stays an option behind the same shape. Patients follow in a later change.
 See [ADR-029](decisions/ADR-029-paged-list-endpoints.md) for the contract, the
 alternatives considered and what is not paged yet.
 

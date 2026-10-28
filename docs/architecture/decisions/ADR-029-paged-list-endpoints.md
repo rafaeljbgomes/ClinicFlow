@@ -1,7 +1,8 @@
 # ADR-029: Paged list endpoints
 
-Status: implemented for appointments and notifications; patients and clinical
-records to follow. Date: 2026-10-23.
+Status: implemented for appointments, notifications, clinical cases and session
+records; patients to follow. Date: 2026-10-23, extended to clinical-service on
+2026-10-28.
 
 ## Context
 
@@ -55,9 +56,14 @@ the server.
   | --- | --- | --- | --- |
   | `GET /notifications` | `status` (repeatable) | `createdAt` desc, `id` desc | `(psychologist_id, created_at DESC)`; new `(created_at DESC, id DESC)` for the administrator view |
   | `GET /appointments` | `from`, `to` (ISO-8601 instants, half-open `[from, to)`), `status` (repeatable) | `scheduledAt` then `id`, `order=ASC` (default) or `DESC` | new `(psychologist_id, scheduled_at, id)`, which replaces `(psychologist_id)` |
+  | `GET /clinical-cases` | `patientId`, `status` (repeatable) | `openedAt` desc, `id` desc | new `(psychologist_id, opened_at DESC, id DESC)`, which replaces `(psychologist_id)` |
+  | `GET /clinical-cases/{id}/session-records` | none | `sessionDate` desc, `id` desc | new `(clinical_case_id, session_date DESC, id DESC)`, which replaces `(clinical_case_id)` |
 
   `from` must be before `to`. `order=DESC` serves views of past sessions,
-  which read latest first.
+  which read latest first. Clinical cases and session records read latest
+  first, which is how the clinical workspace already sorted them in the
+  browser. The session-record list still checks that the caller owns the case
+  before it reads a page, so a foreign case id stays a `404`.
 - **Layers.** Each service has its own `PageQuery`, `PageResult` and
   `PageResponse`, in keeping with ADR-001's no-shared-library rule. Spring
   Data's `Pageable`, `Page` and `Specification` stay inside the persistence
@@ -71,7 +77,12 @@ the server.
   the three newest messages, and `totalElements` of `PENDING`/`FAILED`
   messages. The calendar has Upcoming (from today, earliest first) and Past
   (before today, latest first) views and a server-side status filter. The
-  calendar and the message screens page with Previous/Next.
+  calendar and the message screens page with Previous/Next. The dashboard's
+  case metric and intake follow-ups come from `status=ACTIVE` and
+  `status=INTAKE` pages. In the clinical workspace, the case switcher offers
+  the 20 most recently opened cases and the total, the case browser filters
+  by status on the server and pages through every case, and a case's session
+  records page with Previous/Next.
 
 Alternatives considered:
 
@@ -91,9 +102,12 @@ Alternatives considered:
 
 ## Consequences
 
-- This is a breaking change to `GET /appointments` and `GET /notifications`
-  for Bearer API clients. The BFF, the UI, the Playwright suite and the
-  gateway acceptance test are updated in the same change.
+- This is a breaking change to `GET /appointments`, `GET /notifications`,
+  `GET /clinical-cases` and `GET /clinical-cases/{id}/session-records` for
+  Bearer API clients. The BFF, the UI, the Playwright suite and the gateway
+  acceptance test are updated in the same change as each endpoint.
+  `GET /clinical-cases` also accepts `status` more than once now, where it took
+  a single value before.
 - `totalElements` costs a `count(*)` per request. That is cheap on the
   indexes above, but deep pages still scan the offset, so keyset paging is the
   next step if it ever matters.
@@ -102,11 +116,15 @@ Alternatives considered:
   for them.
 - The calendar's patient picker and name lookups still read the full patient
   list, so the pages remain usable until patients are paged.
+- Patient names live in patient-service, so the case browser's text search
+  narrows only the page on screen; the status filter and paging are
+  server-side. A server-side search by patient waits for patient search.
+- A case the psychologist picks can leave both loaded pages, for example when
+  its status changes away from the browser's filter. The workspace then reads
+  that case on its own with `GET /clinical-cases/{id}` rather than losing the
+  selection.
 - Not done yet:
   - `GET /patients`, which the appointment and clinical screens use as a
     lookup table and picker. It needs search and lookup-by-ids first.
-  - `GET /clinical-cases` and the session-record list in clinical-service.
-    These were held back while PR #97 (issue #81) changed the same files. It
-    has since merged, so they can follow.
-  - `GET /patients/{id}/clinical-history`, which is one aggregate document
-    rather than a list.
+  - `GET /patients/{id}/clinical-history` stays unpaged on purpose: it is one
+    aggregate document rather than a list.
