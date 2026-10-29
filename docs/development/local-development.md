@@ -125,11 +125,10 @@ RabbitMQ credentials for local development are `clinicflow` / `clinicflow`.
 
 Keycloak 26.8.1 is ClinicFlow's identity provider (ADR-027). The patient,
 appointment, clinical and notification services accept only Keycloak access
-tokens (see [Resource servers](#resource-servers)). It still runs in Compose
-next to `auth-service`, which keeps issuing the BFF's tokens until the BFF moves
-to the authorization-code flow (#88) and `auth-service` is removed (#90). Until
-#88 lands, a UI session from `auth-service` is rejected by the services, so the
-two changes ship together.
+tokens (see [Resource servers](#resource-servers)), and the BFF signs users in
+through Keycloak (see [BFF sign-in](#bff-sign-in)). `auth-service` still runs
+next to it until it is removed (#90); only its own `/api/v1/auth/*` routes use
+its tokens.
 
 | | |
 | --- | --- |
@@ -228,6 +227,48 @@ docker compose exec gateway wget -S -q -O - `
 The same call with an ID token, an `auth-service` token or a token older than
 five minutes answers `401`.
 
+### BFF sign-in
+
+The BFF is the realm's confidential `clinicflow-bff` client and uses the
+authorization-code flow with PKCE `S256`. "Sign in" on `/login` goes to
+`/api/auth/login`, which keeps `state`, `nonce` and the PKCE verifier in a
+ten-minute HttpOnly cookie scoped to `/api/auth/callback` and sends the browser
+to Keycloak's login page. The callback checks `state`, the RFC 9207 `iss`
+parameter and the ID token's `nonce` and audience, exchanges the code on the
+private network with the client secret, and sets three cookies:
+
+| Cookie | HttpOnly | Lifetime |
+| --- | --- | --- |
+| `clinicflow_access_token` | Yes | The access token's 5 minutes |
+| `clinicflow_refresh_token` | Yes | The Keycloak session (30 minutes idle) |
+| `clinicflow_csrf` | No, the browser client sends it back as `x-csrf-token` | The Keycloak session |
+
+The ID token is checked and discarded. `proxy.ts` refreshes the tokens when the
+access token is within 30 seconds of expiry, and hands the new ones to the same
+request. Concurrent requests share one refresh, because Keycloak rotates refresh
+tokens and refuses a reused one. A refused refresh ends the session. Sign-out
+ends the Keycloak session on the back channel with the refresh token, clears
+the cookies and sends the browser to Keycloak's end-session page, which returns
+to `/login`. No token appears in a URL.
+
+The BFF needs these variables:
+
+| Variable | Compose |
+| --- | --- |
+| `CLINICFLOW_OIDC_ISSUER` | `http://localhost:${CLINICFLOW_KEYCLOAK_PORT:-8180}/realms/clinicflow` |
+| `CLINICFLOW_OIDC_INTERNAL_ISSUER` | `http://keycloak:8080/realms/clinicflow` (token, keys, back-channel logout) |
+| `CLINICFLOW_PUBLIC_URL` | `${CLINICFLOW_PUBLIC_URL:-https://clinicflow.localhost}`; `/api/auth/callback` on it must be a redirect URI of the client |
+| `CLINICFLOW_BFF_CLIENT_SECRET` | From `secrets/keycloak/clinicflow-bff.env` |
+
+The sign-in starts on the public URL's host. A request on another host, such as
+`127.0.0.1` instead of `localhost`, is first redirected there, because the
+transaction cookie has to be on the origin Keycloak returns to. Keycloak's own
+login and registration pages use its default theme.
+
+The admin user lookup on the System page answers `501` for now: it was served by
+`auth-service`, which does not accept Keycloak tokens, and its replacement is
+decided in #90.
+
 ### Self-registration and provisioning
 
 Keycloak's "Register" page creates `PATIENT` accounts only: the realm's default
@@ -280,8 +321,10 @@ The following direct-service variables are retained only for host-run non-produc
 - `APPOINTMENT_SERVICE_URL`
 - `CLINICAL_SERVICE_URL`
 - `NOTIFICATION_SERVICE_URL`
-- `CLINICFLOW_SECURITY_JWT_ISSUER`
-- Either `CLINICFLOW_SECURITY_JWT_PUBLIC_KEY` or `CLINICFLOW_SECURITY_JWT_PUBLIC_KEY_PATH`
+- `CLINICFLOW_OIDC_ISSUER`, `CLINICFLOW_PUBLIC_URL` and `CLINICFLOW_BFF_CLIENT_SECRET`
+  (see [BFF sign-in](#bff-sign-in)); a host-run BFF on `http://localhost:3000`
+  uses the Compose Keycloak at `http://localhost:8180`, and that callback is
+  registered on the client
 
 For local development without Docker:
 
@@ -394,9 +437,11 @@ docker build -t "clinicflow/frontend:$imageTag" -f frontend/Dockerfile frontend
 docker build --target server -t "clinicflow/postgres:$imageTag" docker/postgres
 ```
 
-Create the JWT Secret from the local development keys. Only `auth-service` and
-the BFF still mount it; the other services trust the Keycloak realm, which
-arrives on Kubernetes with #89 (`oidc.*` in the service chart):
+Create the JWT Secret from the local development keys. Only `auth-service`
+still mounts it; the other services and the BFF trust the Keycloak realm, which
+arrives on Kubernetes with #89 (`oidc.*` in the service and frontend charts).
+`scripts/deploy-local-kubernetes.ps1` also creates the BFF's
+`clinicflow-bff-oidc` Secret from `secrets/keycloak/clinicflow-bff.env`:
 
 ```powershell
 kubectl create namespace clinicflow

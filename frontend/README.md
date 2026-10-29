@@ -8,7 +8,7 @@ Next.js 16 and React 19 frontend for ClinicFlow. It exposes a browser-facing BFF
 npm run dev
 ```
 
-Open `http://localhost:3000`. Configure the five services with `AUTH_SERVICE_URL`, `PATIENT_SERVICE_URL`, `APPOINTMENT_SERVICE_URL`, `CLINICAL_SERVICE_URL`, and `NOTIFICATION_SERVICE_URL`. The BFF also requires `CLINICFLOW_SECURITY_JWT_ISSUER` and either `CLINICFLOW_SECURITY_JWT_PUBLIC_KEY` or `CLINICFLOW_SECURITY_JWT_PUBLIC_KEY_PATH`.
+Open `http://localhost:3000`. Configure the five services with `AUTH_SERVICE_URL`, `PATIENT_SERVICE_URL`, `APPOINTMENT_SERVICE_URL`, `CLINICAL_SERVICE_URL`, and `NOTIFICATION_SERVICE_URL`. The BFF signs users in through Keycloak with the authorization-code flow and PKCE, and needs `CLINICFLOW_OIDC_ISSUER`, `CLINICFLOW_PUBLIC_URL` and `CLINICFLOW_BFF_CLIENT_SECRET` (see [BFF sign-in](../docs/development/local-development.md#bff-sign-in)).
 
 ## Access model
 
