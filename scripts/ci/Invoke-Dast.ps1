@@ -17,8 +17,8 @@ Push-Location $SecurityRoot
 try {
     # Per-service and platform administrator credentials (ADR-026); existing files are kept.
     & (Join-Path $SecurityRoot 'scripts/generate-dev-credentials.ps1')
-    Invoke-SecurityTool docker ($Compose + @('build','postgres','postgres-bootstrap','gateway','auth-service','patient-service','appointment-service','clinical-service','notification-service','frontend','zap'))
-    Invoke-SecurityTool docker ($Compose + @('up','--detach','--no-build','gateway','auth-service','patient-service','appointment-service','clinical-service','notification-service','frontend'))
+    Invoke-SecurityTool docker ($Compose + @('build','postgres','postgres-bootstrap','keycloak','gateway','auth-service','patient-service','appointment-service','clinical-service','notification-service','frontend','zap'))
+    Invoke-SecurityTool docker ($Compose + @('up','--detach','--no-build','keycloak','gateway','auth-service','patient-service','appointment-service','clinical-service','notification-service','frontend'))
     foreach ($Service in @('auth-service','patient-service','appointment-service','clinical-service','notification-service')) {
         $Deadline = [DateTimeOffset]::UtcNow.AddSeconds(240)
         do {
@@ -28,6 +28,15 @@ try {
         } while ([DateTimeOffset]::UtcNow -lt $Deadline)
         if ($LASTEXITCODE -ne 0) { throw "$Service did not become ready on its private management port." }
     }
+    # Keycloak issues the resource servers' tokens (ADR-027). Readiness is the HTTP status of /health/ready;
+    # the first start creates its schema and imports the realm.
+    $Deadline = [DateTimeOffset]::UtcNow.AddSeconds(240)
+    do {
+        & docker @Compose exec -T gateway wget -T 5 -q -O /dev/null "http://keycloak:9000/health/ready" 2>$null
+        if ($LASTEXITCODE -eq 0) { break }
+        Start-Sleep -Seconds 2
+    } while ([DateTimeOffset]::UtcNow -lt $Deadline)
+    if ($LASTEXITCODE -ne 0) { throw "keycloak did not become ready on its management port." }
     & docker @Compose run --no-deps --name $Container zap
     $Code = $LASTEXITCODE
     & docker cp "${Container}:/zap/wrk/reports/." $Directory

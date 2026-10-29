@@ -5,6 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
+import urllib.parse
 
 spec = importlib.util.spec_from_file_location("dast", Path(__file__).resolve().parents[1] / "dast.py")
 dast = importlib.util.module_from_spec(spec)
@@ -103,6 +104,67 @@ class AutomationContractTest(unittest.TestCase):
             return {"scans": [{"id": "1", "progress": "40", "state": "RUNNING"}]}
         with patch.object(dast, "zap_api", side_effect=api), self.assertRaises(RuntimeError):
             dast.verify_traffic(set(), [dast.API])
+
+    def test_login_form_posts_to_keycloak_on_the_private_network(self):
+        page = '<form id="kc-form-login" action="http://localhost:32004/realms/clinicflow/login-actions/authenticate?session_code=a&amp;execution=b" method="post">'
+        self.assertEqual(dast.login_form_action(page), "http://keycloak:8080/realms/clinicflow/login-actions/authenticate?session_code=a&execution=b")
+
+    def test_missing_login_form_fails_closed(self):
+        with self.assertRaises(RuntimeError):
+            dast.login_form_action("<p>We are sorry...</p>")
+
+    def test_resource_servers_and_auth_service_get_separate_tokens(self):
+        cases = {"/api/v1/patients": (True, False), "/api/v1/clinical/clinical-cases?page=1": (True, False),
+                 "/api/v1/auth/users/me": (False, True), "/api/v1/auth/login": (False, False), "/api/v1/auth/register?x=1": (False, False)}
+        for path, (resource_server, auth_service) in cases.items():
+            with self.subTest(path=path):
+                self.assertEqual(re.fullmatch(dast.RESOURCE_SERVER_PATHS, dast.API + path) is not None, resource_server)
+                self.assertEqual(re.fullmatch(dast.AUTH_SERVICE_PATHS, dast.API + path) is not None, auth_service)
+
+
+class KeycloakLoginTest(unittest.TestCase):
+    PAGE = b'<form id="kc-form-login" action="http://localhost:32004/realms/clinicflow/login-actions/authenticate?session_code=a">'
+
+    def login(self, roles=("PSYCHOLOGIST",), state=None, secret="s" * 32):
+        token = "e30." + dast.b64url(json.dumps({"roles": list(roles)}).encode()) + ".sig"
+        calls = []
+        def form_request(opener, url, fields=None, headers=None, expected=200):
+            calls.append((url, fields, headers, expected))
+            if "/openid-connect/auth" in url:
+                return self.PAGE, {}
+            if "/login-actions/" in url:
+                sent = urllib.parse.parse_qs(urllib.parse.urlsplit(calls[0][0]).query)["state"][0]
+                return b"", {"Location": dast.REDIRECT_URI + "?state=" + (state or sent) + "&code=c1"}
+            return json.dumps({"access_token": token}).encode(), {}
+        environment = {"CLINICFLOW_DEMO_PASSWORD": "demo", "CLINICFLOW_BFF_CLIENT_SECRET": secret}
+        with patch.object(dast, "form_request", side_effect=form_request), patch.dict(dast.os.environ, environment):
+            return dast.keycloak_token("psychologist"), calls
+
+    def test_exchanges_a_pkce_code_for_the_role_token(self):
+        token, calls = self.login()
+        authorize = urllib.parse.parse_qs(urllib.parse.urlsplit(calls[0][0]).query)
+        login, exchange = calls[1], calls[2]
+        self.assertEqual(authorize["code_challenge_method"], ["S256"])
+        self.assertEqual(login[0], "http://keycloak:8080/realms/clinicflow/login-actions/authenticate?session_code=a")
+        self.assertEqual((login[1]["username"], login[3]), (dast.ROLES["psychologist"], 302))
+        self.assertEqual(exchange[0], dast.REALM + "/protocol/openid-connect/token")
+        self.assertEqual(exchange[1]["code"], "c1")
+        self.assertEqual(dast.b64url(dast.hashlib.sha256(exchange[1]["code_verifier"].encode()).digest()), authorize["code_challenge"][0])
+        self.assertTrue(exchange[2]["Authorization"].startswith("Basic "))
+        self.assertEqual(dast.token_claims(token)["roles"], ["PSYCHOLOGIST"])
+
+    def test_state_mismatch_fails_closed(self):
+        with self.assertRaises(RuntimeError):
+            self.login(state="forged")
+
+    def test_token_without_exactly_the_expected_role_fails_closed(self):
+        for roles in [(), ("PATIENT",), ("PSYCHOLOGIST", "ADMIN")]:
+            with self.subTest(roles=roles), self.assertRaises(RuntimeError):
+                self.login(roles=roles)
+
+    def test_missing_client_secret_fails_closed(self):
+        with self.assertRaises(RuntimeError):
+            self.login(secret="")
 
 
 if __name__ == "__main__":
