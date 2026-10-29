@@ -16,7 +16,7 @@ function routeChanges(files, force = false) {
     if (component) {
       selected.add(component);
       if (component === 'frontend') {
-        if (/^frontend\/(src\/app\/api\/|src\/lib\/server\/|tests\/e2e\/|proxy\.|(Dockerfile|package(-lock)?\.json|next\.config\.ts|playwright\.config\.ts)$)/.test(file)) fullSystem = dast = true;
+        if (/^frontend\/(src\/app\/api\/|src\/lib\/server\/|tests\/e2e\/|(src\/)?proxy\.|(Dockerfile|package(-lock)?\.json|next\.config\.ts|playwright\.config\.ts)$)/.test(file)) fullSystem = dast = true;
       } else if (file.includes('/src/main/') || file.endsWith('/Dockerfile')) dast = true;
       continue;
     }

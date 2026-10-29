@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
-import { proxy } from "../../proxy";
+import { proxy } from "@/proxy";
 
 describe("session proxy", () => {
   it("redirects a protected request to login when the cookie is absent", () => {
