@@ -1,10 +1,14 @@
 # ClinicFlow's Keycloak image (ADR-027). Build-time options are fixed here, so `start --optimized`
-# skips the Quarkus re-augmentation that plain `start` runs on every boot.
+# skips the Quarkus re-augmentation that plain `start` runs on every boot. The relative paths are
+# Keycloak's defaults, persisted explicitly: the Kubernetes chart sets them at runtime, and
+# `--optimized` refuses to start when a runtime value differs from the persisted one.
 FROM quay.io/keycloak/keycloak:26.8.1@sha256:a78d6b79572168cb25886b80a8b5b8d4ed4390743e3eecb810538683e209dd6b AS builder
 
 ENV KC_DB=postgres \
     KC_HEALTH_ENABLED=true \
-    KC_METRICS_ENABLED=true
+    KC_METRICS_ENABLED=true \
+    KC_HTTP_RELATIVE_PATH=/ \
+    KC_HTTP_MANAGEMENT_RELATIVE_PATH=/
 
 RUN /opt/keycloak/bin/kc.sh build
 
