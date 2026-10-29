@@ -3,7 +3,7 @@ param(
     [switch]$SkipBuild,
     [switch]$SkipObservability,
     [switch]$UpgradeGatewayCrds,
-    [ValidateSet("All", "Platform", "Auth", "Patient", "Appointment", "Clinical", "Notification", "Frontend", "GatewayController", "Gateway")]
+    [ValidateSet("All", "Platform", "Keycloak", "Auth", "Patient", "Appointment", "Clinical", "Notification", "Frontend", "GatewayController", "Gateway")]
     [string]$Component = "All",
     [string]$ImageTag = "",
     [string]$Namespace = "clinicflow",
@@ -24,6 +24,8 @@ $serviceValuesDirectory = Join-Path $repoRoot "deploy\helm\services"
 $frontendChart = Join-Path $repoRoot "deploy\helm\frontend"
 $observabilityChart = Join-Path $repoRoot "deploy\helm\observability"
 $observabilityValues = Join-Path $observabilityChart "values-docker-desktop.yaml"
+$keycloakChart = Join-Path $repoRoot "deploy\helm\keycloak"
+$keycloakRealm = Join-Path $repoRoot "docker\keycloak\realm\clinicflow-realm.json"
 
 $components = [ordered]@{
     Auth = @{ Release = "clinicflow-auth"; Image = "auth-service"; Dockerfile = "auth-service/Dockerfile"; Context = "."; Values = "auth.yaml"; Chart = $serviceChart }
@@ -112,7 +114,7 @@ try {
     $selectedComponents = if ($Component -eq "All") {
         @($components.Keys)
     }
-    elseif ($Component -in @("Platform", "GatewayController", "Gateway")) {
+    elseif ($Component -in @("Platform", "Keycloak", "GatewayController", "Gateway")) {
         @()
     }
     else {
@@ -158,6 +160,20 @@ try {
         Invoke-Checked docker tag clinicflow/postgres:local $postgresImage
     }
 
+    # Keycloak runs the Compose image, realm included, tagged by image ID in the same way (ADR-027).
+    if ($Component -in @("All", "Keycloak")) {
+        if (-not $SkipBuild) {
+            Write-Host "Building the Keycloak image..."
+            Invoke-Checked docker build --provenance=false -t clinicflow/keycloak:local docker/keycloak
+        }
+        $keycloakImageId = (& docker image inspect clinicflow/keycloak:local --format '{{.Id}}' 2>$null)
+        if ($LASTEXITCODE -ne 0 -or "$keycloakImageId" -notmatch '^sha256:[0-9a-f]{64}$') {
+            throw "Image 'clinicflow/keycloak:local' was not found; run without -SkipBuild to build it."
+        }
+        $keycloakImageTag = "id-$("$keycloakImageId".Substring(7, 12))"
+        Invoke-Checked docker tag clinicflow/keycloak:local "clinicflow/keycloak:$keycloakImageTag"
+    }
+
     if (-not (Test-Path $privateKey) -or -not (Test-Path $publicKey)) {
         Write-Host "JWT development keys are missing; generating them..."
         & (Join-Path $PSScriptRoot "generate-dev-jwt-keys.ps1")
@@ -196,6 +212,8 @@ try {
     $credentialChecksums.keycloakClient = Set-SecretFromEnvFile -Name clinicflow-bff-oidc -Path (Join-Path $repoRoot "secrets/keycloak/clinicflow-bff.env")
     # Keycloak's database login, applied by the platform bootstrap and used by Keycloak itself.
     $credentialChecksums.keycloakDatabase = Set-SecretFromEnvFile -Name clinicflow-keycloak-database -Path (Join-Path $repoRoot "secrets/keycloak/database.env")
+    # The master realm's bootstrap administrator, applied only when Keycloak creates its database.
+    $credentialChecksums.keycloakAdmin = Set-SecretFromEnvFile -Name clinicflow-keycloak-admin -Path (Join-Path $repoRoot "secrets/keycloak/admin.env")
     foreach ($credentialFile in Get-ChildItem (Join-Path $repoRoot "secrets/services") -Filter "*.env") {
         $credentialChecksums[$credentialFile.BaseName] = Set-SecretFromEnvFile -Name "$($credentialFile.BaseName)-credentials" -Path $credentialFile.FullName
     }
@@ -231,6 +249,42 @@ try {
         if ($LASTEXITCODE -ne 0) {
             throw "Platform release 'clinicflow-platform' must be installed before upgrading $Component."
         }
+    }
+
+    if ($Component -in @("All", "Keycloak")) {
+        # Keycloak imports the realm only when it does not exist yet. The release records the realm file it
+        # was first installed with, and scripts/reset-keycloak-realm.ps1 records each re-import, so a changed
+        # file is reported here. Resetting is left to the operator: it removes self-registered users.
+        $realmChecksum = (Get-FileHash -Algorithm SHA256 -LiteralPath $keycloakRealm).Hash.ToLowerInvariant()
+        $importedRealm = $realmChecksum
+        $installedValues = & helm get values clinicflow-keycloak --namespace $Namespace --all -o json 2>$null
+        if ($LASTEXITCODE -eq 0 -and $installedValues) {
+            $installedRealm = ($installedValues | ConvertFrom-Json).global.clinicflow.checksums.realm
+            if ($installedRealm) { $importedRealm = $installedRealm }
+            if ($installedRealm -and $installedRealm -ne $realmChecksum) {
+                Write-Warning "docker/keycloak/realm/clinicflow-realm.json changed since Keycloak imported it. Run scripts/reset-keycloak-realm.ps1 -Target Kubernetes to apply it; that removes self-registered users."
+            }
+        }
+
+        # The realm's synthetic demo password, overridable as in Compose (docs/development/local-development.md).
+        $demoPassword = $env:CLINICFLOW_DEMO_PASSWORD ?? 'ClinicFlowDemo!2026'
+
+        Write-Host "Installing or upgrading Keycloak..."
+        Invoke-Checked helm upgrade --install clinicflow-keycloak $keycloakChart `
+            --namespace $Namespace `
+            --set-string "keycloakx.image.tag=$keycloakImageTag" `
+            --set-string "global.clinicflow.checksums.database=$($credentialChecksums.keycloakDatabase)" `
+            --set-string "global.clinicflow.checksums.admin=$($credentialChecksums.keycloakAdmin)" `
+            --set-string "global.clinicflow.checksums.client=$($credentialChecksums.keycloakClient)" `
+            --set-string "global.clinicflow.checksums.realm=$importedRealm" `
+            --set-string "global.clinicflow.demoPassword=$demoPassword" `
+            --set-string "networkPolicy.gatewayNamespace=$IngressNamespace" `
+            --set-string "networkPolicy.monitoringNamespace=$MonitoringNamespace" `
+            --set "keycloakx.serviceMonitor.enabled=$((-not $SkipObservability).ToString().ToLowerInvariant())" `
+            --rollback-on-failure `
+            --wait=watcher `
+            --server-side=false `
+            --timeout $Timeout
     }
 
     if ($Component -in @('All','GatewayController')) {
@@ -279,13 +333,23 @@ try {
     }
 
     if ($Component -in @('All','Gateway')) {
-        $TlsSecret = & kubectl get secret clinicflow-edge-tls --namespace $Namespace --ignore-not-found -o name
+        # The identity routes point at Keycloak's Service; without it they never resolve their references.
+        $KeycloakService = & kubectl get service keycloak --namespace $Namespace --ignore-not-found -o name
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect the Keycloak Service.' }
+        if (-not $KeycloakService) { throw "Service 'keycloak' is missing in namespace '$Namespace'; deploy -Component Keycloak before the gateway." }
+
+        # Issues the certificate, or a new leaf when it lacks a gateway host, then keeps the Secret in step.
+        & (Join-Path $PSScriptRoot 'gateway/New-DevelopmentCertificate.ps1')
+        $Certificate = Join-Path $repoRoot 'secrets/edge/edge.crt'
+        $CertificateKey = Join-Path $repoRoot 'secrets/edge/edge.key'
+        $InstalledCertificate = & kubectl get secret clinicflow-edge-tls --namespace $Namespace --ignore-not-found -o 'jsonpath={.data.tls\.crt}'
         if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect development TLS Secret.' }
-        if (-not $TlsSecret) {
-            & (Join-Path $PSScriptRoot 'gateway/New-DevelopmentCertificate.ps1')
-            $Certificate = Join-Path $repoRoot 'secrets/edge/edge.crt'
-            $CertificateKey = Join-Path $repoRoot 'secrets/edge/edge.key'
-            Invoke-Checked kubectl create secret tls clinicflow-edge-tls --namespace $Namespace "--cert=$Certificate" "--key=$CertificateKey"
+        if ("$InstalledCertificate" -ne [Convert]::ToBase64String([IO.File]::ReadAllBytes($Certificate))) {
+            Write-Host 'Creating or updating the development TLS Secret...'
+            $TlsManifest = & kubectl create secret tls clinicflow-edge-tls --namespace $Namespace "--cert=$Certificate" "--key=$CertificateKey" --dry-run=client -o yaml
+            if ($LASTEXITCODE -ne 0) { throw 'Failed to generate the development TLS Secret manifest.' }
+            $TlsManifest | & kubectl apply -f - | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'Failed to apply the development TLS Secret.' }
         }
         Invoke-Checked helm upgrade --install clinicflow-gateway (Join-Path $repoRoot 'deploy/helm/gateway') --namespace $Namespace --rollback-on-failure --wait=watcher --server-side=false --timeout $Timeout
         & (Join-Path $PSScriptRoot 'gateway/Wait-GatewayRoutes.ps1') -Namespace $Namespace
@@ -298,6 +362,10 @@ try {
     Write-Host ""
     Write-Host "Open the frontend with:"
     Write-Host "  https://clinicflow.localhost (trust secrets/edge/ca.crt manually)"
+    if ($Component -in @("All", "Keycloak")) {
+        Write-Host "Open the Keycloak admin console with:"
+        Write-Host "  kubectl port-forward svc/keycloak 8180:8080 -n $Namespace, then http://localhost:8180/admin/"
+    }
     if (-not $SkipObservability -and $Component -in @("All", "Platform")) {
         Write-Host "Open Grafana with:"
         Write-Host "  kubectl port-forward svc/clinicflow-observability-grafana 3001:80 -n $MonitoringNamespace"
