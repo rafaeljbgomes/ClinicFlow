@@ -60,7 +60,7 @@ spec:
           port: 3000
 {{- end }}
 {{- if .Values.tls.enabled }}
-{{- range $name, $hostname := dict "ui" .Values.uiHostname "public-api" .Values.apiHostname }}
+{{- range $name, $hostname := dict "ui" .Values.uiHostname "public-api" .Values.apiHostname "auth" .Values.authHostname }}
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute

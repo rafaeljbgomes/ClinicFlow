@@ -1,0 +1,31 @@
+{{- /*
+Keycloak on the auth host (ADR-027): the OIDC protocol endpoints, the login form posts, discovery and
+theme assets of one realm. Keycloak's guide keeps /admin and /realms/master internal, so nothing else
+is routed. The login limit sits on login-actions, where credentials and registrations are posted.
+*/ -}}
+{{- $realm := printf "/realms/%s" .Values.identity.realm }}
+{{- range $item := list (dict "name" "identity-oidc" "path" (printf "%s/protocol/openid-connect" $realm) "policy" "public") (dict "name" "identity-login" "path" (printf "%s/login-actions" $realm) "policy" "auth") (dict "name" "identity-discovery" "path" (printf "%s/.well-known" $realm) "policy" "public") (dict "name" "identity-resources" "path" "/resources" "policy" "public") }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $item.name }}
+spec:
+  parentRefs:
+    - name: clinicflow-gateway
+      sectionName: auth-{{ if $.Values.tls.enabled }}https{{ else }}http{{ end }}
+  hostnames: [{{ $.Values.authHostname | quote }}]
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: {{ $item.path | quote }}
+      filters:
+        - type: ExtensionRef
+          extensionRef: {group: traefik.io, kind: Middleware, name: {{ if $.Values.tls.enabled }}secure-headers{{ else }}headers{{ end }}}
+        - type: ExtensionRef
+          extensionRef: {group: traefik.io, kind: Middleware, name: {{ $item.policy }}-limit}
+      backendRefs:
+        - name: {{ $.Values.identity.service }}
+          port: {{ $.Values.identity.port }}
+{{- end }}

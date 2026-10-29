@@ -25,18 +25,27 @@ if (-not $IsWindows) {
 }
 $Cert = Join-Path $Directory 'edge.crt'
 $Key = Join-Path $Directory 'edge.key'
+# Every public gateway host: the UI, the API and Keycloak (ADR-018, ADR-027).
+$Hostnames = @('clinicflow.localhost','api.clinicflow.localhost','auth.clinicflow.localhost')
 if ((Test-Path $Cert) -and (Test-Path $Key) -and -not $Renew) {
-    Invoke-OpenSsl -Arguments @('x509','-in',$Cert,'-checkend','86400','-noout')
-    Invoke-OpenSsl -Arguments @('x509','-in',$Cert,'-checkhost','clinicflow.localhost','-noout')
-    Invoke-OpenSsl -Arguments @('x509','-in',$Cert,'-checkhost','api.clinicflow.localhost','-noout')
     Invoke-OpenSsl -Arguments @('verify','-CAfile',$CaCert,$Cert)
-    if (-not $IsWindows) { & chmod 600 $CaKey; & chmod 640 $Key; if ($LASTEXITCODE -ne 0) { throw 'Unable to restrict key permissions.' } }
-    Write-Host "Existing certificate retained: $Cert"
-    return
+    & $OpenSsl x509 -in $Cert -checkend 86400 -noout *> $null
+    $Current = $LASTEXITCODE -eq 0
+    foreach ($Hostname in $Hostnames) {
+        & $OpenSsl x509 -in $Cert -checkhost $Hostname -noout *> $null
+        if ($LASTEXITCODE -ne 0) { $Current = $false }
+    }
+    if ($Current) {
+        if (-not $IsWindows) { & chmod 600 $CaKey; & chmod 640 $Key; if ($LASTEXITCODE -ne 0) { throw 'Unable to restrict key permissions.' } }
+        Write-Host "Existing certificate retained: $Cert"
+        return
+    }
+    # Only the leaf is re-issued, so a CA the browser already trusts stays valid.
+    Write-Host 'The existing certificate expires within a day or lacks a gateway host; issuing a new one from the same CA.'
 }
 Invoke-OpenSsl -Arguments @('req','-config',$Configuration,'-new','-newkey','rsa:2048','-nodes','-keyout',$Key,'-out',(Join-Path $Directory 'edge.csr'),'-subj','/CN=clinicflow.localhost')
 $Extensions = Join-Path $Directory 'edge.ext'
-@('basicConstraints=critical,CA:FALSE','keyUsage=critical,digitalSignature,keyEncipherment','extendedKeyUsage=serverAuth','subjectAltName=DNS:clinicflow.localhost,DNS:api.clinicflow.localhost') | Set-Content $Extensions
+@('basicConstraints=critical,CA:FALSE','keyUsage=critical,digitalSignature,keyEncipherment','extendedKeyUsage=serverAuth',"subjectAltName=$(($Hostnames | ForEach-Object { "DNS:$_" }) -join ',')") | Set-Content $Extensions
 Invoke-OpenSsl -Arguments @('x509','-req','-in',(Join-Path $Directory 'edge.csr'),'-CA',$CaCert,'-CAkey',$CaKey,'-CAcreateserial','-out',$Cert,'-days',[string]$Days,'-sha256','-extfile',$Extensions)
 if (-not $IsWindows) { & chmod 600 $CaKey; & chmod 640 $Key; if ($LASTEXITCODE -ne 0) { throw 'Unable to restrict key permissions.' } }
 Write-Host "Created $Cert. Trust ca.crt manually in your browser if desired; keys remain outside Git."

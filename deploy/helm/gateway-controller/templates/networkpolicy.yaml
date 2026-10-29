@@ -55,6 +55,15 @@ spec:
         - {port: 8083, protocol: TCP}
         - {port: 8084, protocol: TCP}
         - {port: 8085, protocol: TCP}
+    # Keycloak's HTTP port only, for the identity routes on the auth host (ADR-027).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.applicationNamespace }}
+          podSelector:
+            matchLabels: {app.kubernetes.io/component: keycloak}
+      ports:
+        - {port: 8080, protocol: TCP}
     {{- if .Values.kubernetesApi.cidrs }}
     - to:
         {{- range .Values.kubernetesApi.cidrs }}
