@@ -88,6 +88,18 @@ try {
     Set-Content -Path $frontendPath -Value $frontendManifest
     $renderedManifests.Add($frontendPath)
 
+    # Keycloak (ADR-027): rendered here so kubeconform and the Trivy misconfiguration gate cover it.
+    & helm lint ./deploy/helm/keycloak
+    if ($LASTEXITCODE -ne 0) { throw "Keycloak Helm lint failed." }
+    $keycloakManifest = & helm template clinicflow-keycloak ./deploy/helm/keycloak --namespace clinicflow --api-versions monitoring.coreos.com/v1
+    if ($LASTEXITCODE -ne 0) { throw "Keycloak Helm rendering failed." }
+    if ([regex]::Matches(($keycloakManifest -join "`n"), "(?m)^kind: StatefulSet$").Count -ne 1) {
+        throw "Keycloak release must render exactly one StatefulSet."
+    }
+    $keycloakPath = Join-Path $ReportsDirectory "keycloak-rendered.yaml"
+    Set-Content -Path $keycloakPath -Value $keycloakManifest
+    $renderedManifests.Add($keycloakPath)
+
     & node ./scripts/gateway/validate-manifests.cjs @renderedManifests
     if ($LASTEXITCODE -ne 0) { throw 'Full gateway/network boundary validation failed.' }
     & helm template invalid ./deploy/helm/gateway-controller --set traefik.deployment.replicas=2 *> $null
@@ -115,6 +127,32 @@ try {
     if ($LASTEXITCODE -eq 0) { throw "Service schema accepted both image tag and digest." }
     & helm template invalid ./deploy/helm/frontend --set-string image.tag=latest *> $null
     if ($LASTEXITCODE -eq 0) { throw "Frontend schema accepted mutable image tag 'latest'." }
+    & helm template invalid ./deploy/helm/gateway --set-string authHostname= *> $null
+    if ($LASTEXITCODE -eq 0) { throw "Gateway schema accepted an empty auth hostname." }
+    & helm template invalid ./deploy/helm/gateway --set-string identity.realm=master *> $null
+    if ($LASTEXITCODE -eq 0) { throw "Gateway schema accepted routing the master realm." }
+    $invalidKeycloak = [ordered]@{
+        "keycloakx.replicas=2" = "more than one replica on the local cache"
+        "keycloakx.image.tag=latest" = "mutable image tag 'latest'"
+        "keycloakx.image.tag=" = "an empty image tag"
+        "keycloakx.cache.stack=default" = "the clustered cache stack"
+        "keycloakx.proxy.mode=forwarded" = "RFC 7239 proxy headers Traefik does not send"
+        "keycloakx.http.relativePath=/auth" = "the legacy /auth path"
+        "global.clinicflow.hostname=http://auth.clinicflow.localhost" = "a plain-HTTP public hostname"
+        "global.clinicflow.hostname=https://auth.clinicflow.localhost/realms" = "a public hostname with a path"
+        "global.clinicflow.adminHostname=https://auth.clinicflow.localhost" = "an admin console off loopback"
+        "keycloakx.resources.limits.memory=2Gi" = "a memory limit above 1Gi"
+        "global.clinicflow.database.poolMaxSize=100" = "a database pool larger than 10"
+        "networkPolicy.enabled=false" = "a release without its NetworkPolicy"
+        "keycloakx.serviceAccount.automountServiceAccountToken=true" = "a Kubernetes API token"
+    }
+    foreach ($case in $invalidKeycloak.GetEnumerator()) {
+        $setFlag = if ($case.Key -match '=(true|false|\d+)$') { "--set" } else { "--set-string" }
+        & helm template invalid ./deploy/helm/keycloak $setFlag $case.Key *> $null
+        if ($LASTEXITCODE -eq 0) { throw "Keycloak schema accepted $($case.Value)." }
+    }
+    & helm template invalid ./deploy/helm/keycloak --set "keycloakx.resources.limits.memory=null" *> $null
+    if ($LASTEXITCODE -eq 0) { throw "Keycloak schema accepted a missing memory limit." }
 
     & kubeconform -strict -summary -ignore-missing-schemas @renderedManifests
     if ($LASTEXITCODE -ne 0) { throw "kubeconform validation failed." }
