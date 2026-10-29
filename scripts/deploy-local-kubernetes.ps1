@@ -169,6 +169,7 @@ try {
         Invoke-Checked kubectl create namespace $Namespace
     }
 
+    # auth-service still signs its own tokens until it is removed (#90).
     Write-Host "Creating or updating the ClinicFlow JWT secret..."
     $secretManifest = & kubectl create secret generic clinicflow-jwt `
         "--from-file=jwt-private.pem=$privateKey" `
@@ -191,6 +192,8 @@ try {
         postgres = Set-SecretFromEnvFile -Name clinicflow-postgres-admin -Path (Join-Path $repoRoot "secrets/platform/postgres.env")
         rabbitmq = Set-SecretFromEnvFile -Name clinicflow-rabbitmq-admin -Path (Join-Path $repoRoot "secrets/platform/rabbitmq.env")
     }
+    # The BFF's Keycloak client secret (ADR-027), the same generated value the realm is imported with.
+    $null = Set-SecretFromEnvFile -Name clinicflow-bff-oidc -Path (Join-Path $repoRoot "secrets/keycloak/clinicflow-bff.env")
     foreach ($credentialFile in Get-ChildItem (Join-Path $repoRoot "secrets/services") -Filter "*.env") {
         $credentialChecksums[$credentialFile.BaseName] = Set-SecretFromEnvFile -Name "$($credentialFile.BaseName)-credentials" -Path $credentialFile.FullName
     }

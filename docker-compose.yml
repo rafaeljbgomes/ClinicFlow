@@ -305,10 +305,15 @@ services:
       CLINICAL_SERVICE_HEALTH_URL: http://clinical-service:9000
       NOTIFICATION_SERVICE_HEALTH_URL: http://notification-service:9000
       CLINICFLOW_AUTH_COOKIE_SECURE: "true"
-      CLINICFLOW_SECURITY_JWT_ISSUER: clinicflow-auth
-      CLINICFLOW_SECURITY_JWT_PUBLIC_KEY_PATH: /run/secrets/clinicflow/jwt-public.pem
-    volumes:
-      - {type: bind, source: ./secrets/jwt-public.pem, target: /run/secrets/clinicflow/jwt-public.pem, read_only: true}
+      # The BFF is a confidential OIDC client (ADR-027): the browser signs in on the public issuer, and the
+      # BFF exchanges codes, refreshes and reads keys on the private network.
+      CLINICFLOW_OIDC_ISSUER: http://localhost:${CLINICFLOW_KEYCLOAK_PORT:-8180}/realms/clinicflow
+      CLINICFLOW_OIDC_INTERNAL_ISSUER: http://keycloak:8080/realms/clinicflow
+      # Must match a redirect URI registered on the realm's BFF client.
+      CLINICFLOW_PUBLIC_URL: ${CLINICFLOW_PUBLIC_URL:-https://clinicflow.localhost}
+    env_file:
+      - path: ./secrets/keycloak/clinicflow-bff.env
+        required: false
     depends_on:
       - auth-service
       - patient-service

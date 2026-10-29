@@ -32,14 +32,12 @@ spec:
             - configMapRef:
                 name: {{ include "clinicflow-frontend.configName" . }}
           env:
-            - name: CLINICFLOW_SECURITY_JWT_ISSUER
-              value: {{ .Values.jwt.issuer | quote }}
-            - name: CLINICFLOW_SECURITY_JWT_PUBLIC_KEY_PATH
-              value: /run/secrets/clinicflow/jwt-public.pem
+            - name: CLINICFLOW_BFF_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.oidc.clientSecretName }}
+                  key: {{ .Values.oidc.clientSecretKey }}
           volumeMounts:
-            - name: jwt-public-key
-              mountPath: /run/secrets/clinicflow
-              readOnly: true
             # The root filesystem is read-only; Next.js writes its cache and temporary files here.
             - name: next-cache
               mountPath: /app/.next/cache
@@ -64,9 +62,3 @@ spec:
           emptyDir: {}
         - name: tmp
           emptyDir: {}
-        - name: jwt-public-key
-          secret:
-            secretName: {{ .Values.jwt.secretName }}
-            items:
-              - key: {{ .Values.jwt.publicKeyKey }}
-                path: jwt-public.pem

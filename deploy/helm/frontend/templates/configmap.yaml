@@ -7,6 +7,9 @@ metadata:
 data:
   GATEWAY_URL: {{ required "gatewayUrl is required for deployed BFF traffic" .Values.gatewayUrl | quote }}
   CLINICFLOW_AUTH_COOKIE_SECURE: {{ .Values.cookieSecure | quote }}
+  CLINICFLOW_OIDC_ISSUER: {{ .Values.oidc.issuer | quote }}
+  CLINICFLOW_OIDC_INTERNAL_ISSUER: {{ .Values.oidc.internalIssuer | quote }}
+  CLINICFLOW_PUBLIC_URL: {{ .Values.oidc.publicUrl | quote }}
   AUTH_SERVICE_HEALTH_URL: {{ .Values.services.auth.healthUrl | quote }}
   PATIENT_SERVICE_HEALTH_URL: {{ .Values.services.patient.healthUrl | quote }}
   APPOINTMENT_SERVICE_HEALTH_URL: {{ .Values.services.appointment.healthUrl | quote }}
