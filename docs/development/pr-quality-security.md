@@ -136,6 +136,14 @@ endpoint is added. This is bounded API/BFF and HTML coverage, not exhaustive
 browser or business-logic testing, so the role, ownership and CSRF Playwright
 tests remain necessary.
 
+The patient, appointment, clinical and notification APIs accept only Keycloak
+access tokens (ADR-027). For them the scanner signs in to the realm on the
+private network (`keycloak:8080`) with the authorization-code flow and PKCE as
+the BFF client. It uses the generated client secret and the realm's demo
+password, and requires the token's `roles` to be exactly the scanned role.
+Keycloak traffic bypasses the ZAP proxy, so it is neither scanned nor reported.
+`auth-service` routes keep its own bearer token until it is removed (#90).
+
 Bearer tokens and BFF sessions are renewed periodically. The runner verifies
 certificate identity and protected API/BFF access before and after each role
 scan, and rejects automation errors or warnings and missing endpoint coverage.

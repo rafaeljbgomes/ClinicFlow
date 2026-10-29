@@ -103,7 +103,11 @@ docker build -t clinicflow/notification-service:0.1.0-local -f notification-serv
 docker build -t clinicflow/frontend:0.1.0-local -f frontend/Dockerfile frontend
 ```
 
-Create the application namespace and JWT Secret:
+Create the application namespace and JWT Secret. Only `auth-service` and the
+BFF mount it. The patient, appointment, clinical and notification services trust
+the Keycloak realm instead (ADR-027, `oidc.*` in the service chart), and
+Keycloak arrives on the cluster with #89. Until then they answer `401` to every
+API call on Kubernetes.
 
 ```powershell
 kubectl create namespace clinicflow
@@ -206,8 +210,8 @@ through the dashboard sidecar configured in kube-prometheus-stack.
 
 ## Troubleshooting
 
-- If backend pods fail to start with missing JWT files, recreate the
-  `clinicflow-jwt` Secret in the `clinicflow` namespace.
+- If the `auth-service` or frontend pods fail to start with missing JWT files,
+  recreate the `clinicflow-jwt` Secret in the `clinicflow` namespace.
 - If image pulls fail, rebuild the local images and confirm Docker Desktop
   Kubernetes is the active cluster.
 - If Prometheus targets are missing, confirm the observability release is
