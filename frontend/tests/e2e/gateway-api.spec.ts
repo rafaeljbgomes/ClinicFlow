@@ -1,9 +1,12 @@
-import { expect, test as base, type APIRequestContext, type APIResponse } from "@playwright/test";
+import { expect, test as base, type APIRequestContext, type APIResponse, type Browser, type PlaywrightWorkerArgs } from "@playwright/test";
+import { keycloakAccessToken, provisionPsychologist, signInThroughBff, type StorageState } from "./keycloak";
 
-type StorageState = Awaited<ReturnType<APIRequestContext["storageState"]>>;
 type DemoTokens = { psychologist: string; patient: string; administrator: string };
+// auth-service checks only its own tokens until it is removed (#90); the other services only Keycloak's.
+type AuthServiceTokens = { psychologist: string; administrator: string };
 type OwnedRecords = { owner: string; patientId: string; caseId: string };
 
+const uiBaseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
 const requestBaseURL = process.env.PLAYWRIGHT_REQUEST_BASE_URL ?? process.env.PLAYWRIGHT_BASE_URL;
 const uiHost = { Host: "clinicflow.localhost" };
 const apiHost = { Host: "api.clinicflow.localhost" };
@@ -14,44 +17,55 @@ const demoAccounts = {
   administrator: "admin@demo.clinicflow.local",
 };
 
-// Logins go through gateway auth rate limits, so demo tokens, owned records, and the BFF session are
+// Sign-ins go through Keycloak's login page, so demo tokens, owned records, and the BFF session are
 // arranged once per worker and shared read-only; every test still performs its own single action.
-const test = base.extend<{ bffRequest: APIRequestContext }, {
+// Sign-out tests use a session of their own, because sign-out ends the Keycloak session.
+const test = base.extend<{ bffRequest: APIRequestContext; ownBffRequest: APIRequestContext }, {
   demoTokens: DemoTokens;
+  authServiceTokens: AuthServiceTokens;
   ownedRecords: OwnedRecords;
   bffSession: StorageState;
 }>({
-  demoTokens: [async ({ playwright }, provide) => {
+  demoTokens: [async ({ browser, playwright }, provide) => {
+    await provide({
+      psychologist: await apiToken(browser, playwright, demoAccounts.psychologist),
+      patient: await apiToken(browser, playwright, demoAccounts.patient),
+      administrator: await apiToken(browser, playwright, demoAccounts.administrator),
+    });
+  }, { scope: "worker" }],
+  authServiceTokens: [async ({ playwright }, provide) => {
     const request = await playwright.request.newContext(contextOptions());
     try {
       await provide({
-        psychologist: await login(request, demoAccounts.psychologist),
-        patient: await login(request, demoAccounts.patient),
-        administrator: await login(request, demoAccounts.administrator),
+        psychologist: await authServiceLogin(request, demoAccounts.psychologist),
+        administrator: await authServiceLogin(request, demoAccounts.administrator),
       });
     } finally {
       await request.dispose();
     }
   }, { scope: "worker" }],
-  ownedRecords: [async ({ playwright }, provide) => {
+  ownedRecords: [async ({ browser, playwright }, provide) => {
     const request = await playwright.request.newContext(contextOptions());
     try {
-      await provide(await createOwnedRecords(request));
+      await provide(await createOwnedRecords(browser, playwright, request));
     } finally {
       await request.dispose();
     }
   }, { scope: "worker" }],
-  bffSession: [async ({ playwright }, provide) => {
-    const request = await playwright.request.newContext(contextOptions());
-    try {
-      await arrangeStep(await bffLogin(request), 200, "BFF login");
-      await provide(await request.storageState());
-    } finally {
-      await request.dispose();
-    }
+  bffSession: [async ({ browser }, provide) => {
+    await provide(await signInThroughBff(browser, browserOptions(), demoAccounts.psychologist, demoPassword));
   }, { scope: "worker" }],
   bffRequest: async ({ playwright, bffSession }, provide) => {
     const request = await playwright.request.newContext({ ...contextOptions(), storageState: bffSession });
+    try {
+      await provide(request);
+    } finally {
+      await request.dispose();
+    }
+  },
+  ownBffRequest: async ({ browser, playwright }, provide) => {
+    const storageState = await signInThroughBff(browser, browserOptions(), demoAccounts.psychologist, demoPassword);
+    const request = await playwright.request.newContext({ ...contextOptions(), storageState });
     try {
       await provide(request);
     } finally {
@@ -107,9 +121,9 @@ test.describe("direct bearer APIs enforce backend roles and clinical/notificatio
     });
   }
 
-  test("a psychologist can read their own profile", async ({ request, demoTokens }) => {
+  test("a psychologist can read their own profile", async ({ request, authServiceTokens }) => {
     // Arrange
-    const headers = signed(demoTokens.psychologist);
+    const headers = signed(authServiceTokens.psychologist);
 
     // Act
     const response = await request.get("/api/v1/auth/users/me", { headers });
@@ -118,23 +132,23 @@ test.describe("direct bearer APIs enforce backend roles and clinical/notificatio
     expect(response.status()).toBe(200);
   });
 
-  test("a psychologist cannot look up a user by id", async ({ request, demoTokens }) => {
+  test("a psychologist cannot look up a user by id", async ({ request, authServiceTokens }) => {
     // Arrange
-    const userId = await currentUserId(request, demoTokens.psychologist);
+    const userId = await currentUserId(request, authServiceTokens.psychologist);
 
     // Act
-    const response = await request.get(`/api/v1/auth/users/${userId}`, { headers: signed(demoTokens.psychologist) });
+    const response = await request.get(`/api/v1/auth/users/${userId}`, { headers: signed(authServiceTokens.psychologist) });
 
     // Assert
     expect(response.status()).toBe(403);
   });
 
-  test("an administrator can look up a user by id", async ({ request, demoTokens }) => {
+  test("an administrator can look up a user by id", async ({ request, authServiceTokens }) => {
     // Arrange
-    const userId = await currentUserId(request, demoTokens.psychologist);
+    const userId = await currentUserId(request, authServiceTokens.psychologist);
 
     // Act
-    const response = await request.get(`/api/v1/auth/users/${userId}`, { headers: signed(demoTokens.administrator) });
+    const response = await request.get(`/api/v1/auth/users/${userId}`, { headers: signed(authServiceTokens.administrator) });
 
     // Assert
     expect(response.status()).toBe(200);
@@ -214,6 +228,14 @@ test.describe("direct bearer APIs enforce backend roles and clinical/notificatio
     expect(statuses).toEqual(notifications.map(() => 200));
   });
 
+  test("the resource servers reject an auth-service token", async ({ request, authServiceTokens }) => {
+    // Act
+    const response = await request.get("/api/v1/patients", { headers: signed(authServiceTokens.psychologist) });
+
+    // Assert
+    expect(response.status()).toBe(401);
+  });
+
   for (const path of ["/actuator/health", "/api/v1/unknown", "/dashboard", "/api/v1/patients-other"]) {
     test(`${path} is not routed on the API host`, async ({ request }) => {
       // Act
@@ -226,18 +248,33 @@ test.describe("direct bearer APIs enforce backend roles and clinical/notificatio
 });
 
 test.describe("BFF session cookies respect transport configuration and mutations reject missing CSRF", () => {
-  test("login sets exactly the session and CSRF cookies with a transport-matching Secure flag", async ({ request }) => {
+  test("sign-in leaves exactly the session cookies, with a transport-matching Secure flag", async ({ bffSession }) => {
     // Arrange
-    const secure = (process.env.PLAYWRIGHT_BASE_URL || "").startsWith("https:");
+    const secure = uiBaseURL.startsWith("https:");
 
     // Act
-    const response = await bffLogin(request);
+    // Cookies are not scoped by port, so Keycloak's own cookies on the same host are told apart by their path.
+    const cookies = bffSession.cookies.filter((cookie) => cookie.domain === new URL(uiBaseURL).hostname && !cookie.path.startsWith("/realms/"));
 
     // Assert
-    const cookies = response.headersArray().filter((h) => h.name.toLowerCase() === "set-cookie").map((h) => h.value);
-    expect(response.status()).toBe(200);
-    expect(cookies.length).toBe(2);
-    expect(cookies.map((cookie) => /; secure/i.test(cookie))).toEqual(cookies.map(() => secure));
+    expect(cookies.map((cookie) => cookie.name).sort()).toEqual(["clinicflow_access_token", "clinicflow_csrf", "clinicflow_refresh_token"]);
+    expect(cookies.map((cookie) => cookie.secure)).toEqual(cookies.map(() => secure));
+  });
+
+  test("sign-in keeps the tokens in HttpOnly cookies", async ({ bffSession }) => {
+    // Act
+    const httpOnly = Object.fromEntries(bffSession.cookies.filter((cookie) => cookie.name.startsWith("clinicflow_")).map((cookie) => [cookie.name, cookie.httpOnly]));
+
+    // Assert
+    expect(httpOnly).toEqual({ clinicflow_access_token: true, clinicflow_refresh_token: true, clinicflow_csrf: false });
+  });
+
+  test("the BFF no longer accepts a password", async ({ request }) => {
+    // Act
+    const response = await request.post("/api/auth/login", { data: { email: demoAccounts.psychologist, password: demoPassword } });
+
+    // Assert
+    expect(response.status()).toBe(405);
   });
 
   test("login stores a CSRF cookie for the browser client", async ({ bffRequest }) => {
@@ -264,33 +301,69 @@ test.describe("BFF session cookies respect transport configuration and mutations
     expect(response.status()).toBe(200);
   });
 
-  test("logout succeeds with the CSRF token", async ({ bffRequest }) => {
+  test("logout succeeds with the CSRF token", async ({ ownBffRequest }) => {
     // Arrange
-    const csrf = await csrfToken(bffRequest);
+    const csrf = await csrfToken(ownBffRequest);
 
     // Act
-    const response = await bffRequest.post("/api/auth/logout", { headers: { "x-csrf-token": csrf } });
+    const response = await ownBffRequest.post("/api/auth/logout", { headers: { "x-csrf-token": csrf } });
 
     // Assert
     expect(response.status()).toBe(200);
   });
 
-  test("the session is rejected after logout", async ({ bffRequest }) => {
+  test("the session is rejected after logout", async ({ ownBffRequest }) => {
     // Arrange
-    const csrf = await csrfToken(bffRequest);
+    const csrf = await csrfToken(ownBffRequest);
     await arrangeStep(
-      await bffRequest.post("/api/auth/logout", { headers: { "x-csrf-token": csrf } }),
+      await ownBffRequest.post("/api/auth/logout", { headers: { "x-csrf-token": csrf } }),
       200,
       "BFF logout"
     );
 
     // Act
-    const response = await bffRequest.get("/api/patients");
+    const response = await ownBffRequest.get("/api/patients");
 
     // Assert
     expect(response.status()).toBe(401);
   });
+
+  test("logout revokes the refresh token in Keycloak", async ({ playwright, ownBffRequest }) => {
+    // Arrange
+    const before = await ownBffRequest.storageState();
+    await arrangeStep(
+      await ownBffRequest.post("/api/auth/logout", { headers: { "x-csrf-token": await csrfToken(ownBffRequest) } }),
+      200,
+      "BFF logout"
+    );
+    // Only the refresh cookie survives, so the next request has to refresh.
+    const replay = await playwright.request.newContext({
+      ...contextOptions(),
+      storageState: { ...before, cookies: before.cookies.filter((cookie) => cookie.name !== "clinicflow_access_token") },
+    });
+
+    // Act
+    const response = await replay.get("/api/patients");
+
+    // Assert
+    expect(response.status()).toBe(401);
+    await replay.dispose();
+  });
 });
+
+function browserOptions() {
+  return { baseURL: uiBaseURL, ignoreHTTPSErrors: process.env.PLAYWRIGHT_IGNORE_HTTPS_ERRORS === "true" };
+}
+
+// Keycloak is called on its own URL, so this context carries none of the gateway Host headers.
+async function apiToken(browser: Browser, playwright: PlaywrightWorkerArgs["playwright"], email: string, password = demoPassword) {
+  const request = await playwright.request.newContext();
+  try {
+    return await keycloakAccessToken(browser, request, uiBaseURL, email, password);
+  } finally {
+    await request.dispose();
+  }
+}
 
 function contextOptions() {
   return {
@@ -311,14 +384,10 @@ async function arrangeStep(response: APIResponse, expectedStatus: number, step: 
   return response;
 }
 
-async function login(request: APIRequestContext, email: string, password = demoPassword) {
+async function authServiceLogin(request: APIRequestContext, email: string, password = demoPassword) {
   const response = await request.post("/api/v1/auth/login", { headers: apiHost, data: { email, password } });
-  await arrangeStep(response, 200, `login ${email}`);
+  await arrangeStep(response, 200, `auth-service login ${email}`);
   return (await response.json()).accessToken as string;
-}
-
-async function bffLogin(request: APIRequestContext) {
-  return request.post("/api/auth/login", { data: { email: demoAccounts.psychologist, password: demoPassword } });
 }
 
 async function currentUserId(request: APIRequestContext, token: string) {
@@ -330,19 +399,17 @@ async function currentUserId(request: APIRequestContext, token: string) {
   return (await response.json()).id as string;
 }
 
-async function createOwnedRecords(request: APIRequestContext): Promise<OwnedRecords> {
+async function createOwnedRecords(browser: Browser, playwright: PlaywrightWorkerArgs["playwright"], request: APIRequestContext): Promise<OwnedRecords> {
   const stamp = Date.now();
   const email = `gateway.owner.${stamp}@example.com`;
   const password = "TestingPass123!";
-  await arrangeStep(
-    await request.post("/api/v1/auth/register", {
-      headers: apiHost,
-      data: { email, password, role: "PSYCHOLOGIST", fullName: "Synthetic Gateway Owner" },
-    }),
-    201,
-    "register owner"
-  );
-  const owner = await login(request, email, password);
+  const admin = await playwright.request.newContext();
+  try {
+    await provisionPsychologist(admin, { email, password, firstName: "Synthetic Gateway", lastName: "Owner" });
+  } finally {
+    await admin.dispose();
+  }
+  const owner = await apiToken(browser, playwright, email, password);
   const patient = await arrangeStep(
     await request.post("/api/v1/patients", {
       headers: signed(owner),

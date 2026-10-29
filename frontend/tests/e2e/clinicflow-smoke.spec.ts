@@ -1,14 +1,13 @@
 import {
   expect,
   test as base,
-  type APIRequestContext,
   type APIResponse,
   type BrowserContext,
   type Locator,
   type Page,
 } from "@playwright/test";
+import { fillKeycloakLogin, provisionPsychologist, signInThroughBff, type StorageState } from "./keycloak";
 
-type StorageState = Awaited<ReturnType<APIRequestContext["storageState"]>>;
 type DemoRole = "psychologist" | "patient" | "administrator";
 type Workspace = { fullName: string; storageState: StorageState };
 type Patient = { id: string; fullName: string; email: string; version: number };
@@ -31,36 +30,30 @@ const workspaceName = "ClinicFlow Demo Psychologist";
 const therapeuticFocus = "Stabilize routines and reduce acute stress triggers.";
 const sessionSummary = "Reviewed weekly routine and agreed on sleep hygiene homework.";
 
-// Logins go through rate-limited auth routes, so demo sessions and the synthetic psychologist
-// workspace are arranged once per worker and shared read-only; every test arranges its own records
-// through the BFF and performs a single action.
+// Sign-ins go through Keycloak's login page, so demo sessions and the synthetic psychologist workspace
+// are arranged once per worker and shared read-only; every test arranges its own records through the
+// BFF and performs a single action. Tests that sign out use a session of their own, because sign-out
+// ends the Keycloak session.
 const test = base.extend<{ workspacePage: Page; pageAs: (role: DemoRole) => Promise<Page> }, {
   demoSessions: Record<DemoRole, StorageState>;
   workspace: Workspace;
 }>({
-  demoSessions: [async ({ playwright }, provide, workerInfo) => {
+  demoSessions: [async ({ browser }, provide, workerInfo) => {
     const sessions = {} as Record<DemoRole, StorageState>;
     for (const role of Object.keys(demoAccounts) as DemoRole[]) {
-      const request = await playwright.request.newContext(requestOptions(workerInfo.project.use));
-      try {
-        await signInThroughBff(request, demoAccounts[role].email, demoPassword);
-        sessions[role] = await request.storageState();
-      } finally {
-        await request.dispose();
-      }
+      sessions[role] = await signInThroughBff(browser, requestOptions(workerInfo.project.use), demoAccounts[role].email, demoPassword);
     }
     await provide(sessions);
   }, { scope: "worker" }],
-  workspace: [async ({ playwright }, provide, workerInfo) => {
-    const request = await playwright.request.newContext(requestOptions(workerInfo.project.use));
+  workspace: [async ({ browser, playwright }, provide, workerInfo) => {
+    const request = await playwright.request.newContext();
     try {
       const email = `psychologist.${Date.now()}.${workerInfo.workerIndex}@example.com`;
       const password = "TestingPass123!";
-      await arrangeStep(await withAuthRetry(() => request.post("/api/auth/register", {
-        data: { email, password, role: "PSYCHOLOGIST", fullName: workspaceName },
-      })), 201, "register workspace psychologist");
-      await signInThroughBff(request, email, password);
-      await provide({ fullName: workspaceName, storageState: await request.storageState() });
+      // Psychologist accounts come from an administrator; self-registration yields PATIENT only (ADR-027).
+      await provisionPsychologist(request, { email, password, firstName: "ClinicFlow Demo", lastName: "Psychologist" });
+      const storageState = await signInThroughBff(browser, requestOptions(workerInfo.project.use), email, password);
+      await provide({ fullName: workspaceName, storageState });
     } finally {
       await request.dispose();
     }
@@ -102,7 +95,7 @@ test.describe("session routing", () => {
 
     // Assert
     await expect(page).toHaveURL(/\/login$/);
-    await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+    await expect(page.locator('a[href="/api/auth/login"]')).toBeVisible();
   });
 
   test("sends stale sessions back to login", async ({ context, page, baseURL }) => {
@@ -117,20 +110,91 @@ test.describe("session routing", () => {
   });
 });
 
-test.describe("psychologist registration", () => {
-  test("opens the Today dashboard after creating an account", async ({ page }) => {
+test.describe("sign-in through Keycloak", () => {
+  test("signs in on Keycloak's page and returns to the role's home", async ({ page }) => {
     // Arrange
-    await page.goto("/register");
-    await page.getByLabel("Full name").fill(workspaceName);
-    await page.getByLabel("Email").fill(`registration.${Date.now()}@example.com`);
-    await page.getByLabel("Password").fill("TestingPass123!");
+    await page.goto("/login");
+    await page.locator('a[href="/api/auth/login"]').click();
 
     // Act
-    await page.getByRole("button", { name: "Create account" }).click();
+    await fillKeycloakLogin(page, demoAccounts.psychologist.email, demoPassword);
 
     // Assert
-    await expect(page).toHaveURL(/\/dashboard$/);
+    await expect(page).toHaveURL(/\/dashboard$/, { timeout: 30_000 });
     await expect(page.getByRole("heading", { name: "Today" })).toBeVisible({ timeout: 30_000 });
+  });
+
+  test("leaves no code or token in the address bar after the callback", async ({ page }) => {
+    // Arrange
+    await page.goto("/api/auth/login");
+
+    // Act
+    await fillKeycloakLogin(page, demoAccounts.psychologist.email, demoPassword);
+
+    // Assert
+    await expect(page).toHaveURL(/\/dashboard$/, { timeout: 30_000 });
+    expect(new URL(page.url()).search).toBe("");
+  });
+
+  test("keeps the tokens out of reach of page scripts", async ({ page }) => {
+    // Arrange
+    await page.goto("/api/auth/login");
+    await fillKeycloakLogin(page, demoAccounts.psychologist.email, demoPassword);
+    await expect(page).toHaveURL(/\/dashboard$/, { timeout: 30_000 });
+
+    // Act
+    const visible = await page.evaluate(() => document.cookie.split("; ").map((cookie) => cookie.split("=")[0]));
+
+    // Assert
+    expect(visible).toEqual(["clinicflow_csrf"]);
+  });
+
+  test("renews a lapsed access cookie from the refresh token", async ({ page }) => {
+    // Arrange
+    await page.goto("/api/auth/login");
+    await fillKeycloakLogin(page, demoAccounts.psychologist.email, demoPassword);
+    await expect(page).toHaveURL(/\/dashboard$/, { timeout: 30_000 });
+    await page.context().clearCookies({ name: "clinicflow_access_token" });
+
+    // Act
+    await page.goto("/dashboard");
+
+    // Assert
+    await expect(page.getByRole("heading", { name: "Today" })).toBeVisible({ timeout: 30_000 });
+    expect((await page.context().cookies()).some((cookie) => cookie.name === "clinicflow_access_token")).toBe(true);
+  });
+
+  test("signing out ends the Keycloak session and returns to login", async ({ page }) => {
+    // Arrange
+    await page.goto("/api/auth/login");
+    await fillKeycloakLogin(page, demoAccounts.psychologist.email, demoPassword);
+    await expect(page.getByRole("heading", { name: "Today" })).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("button", { name: "Sofia Almeida" }).click();
+
+    // Act
+    await page.getByRole("menuitem", { name: "Sign out" }).click();
+
+    // Assert
+    await expect(page).toHaveURL(/\/login$/, { timeout: 30_000 });
+    await page.goto("/api/auth/login");
+    await expect(page.locator("#username")).toBeVisible();
+  });
+
+  test("self-registration creates a patient account", async ({ page }) => {
+    // Arrange
+    await page.goto("/register");
+    await page.locator('a[href="/api/auth/register"]').click();
+    await page.locator("#email").fill(`registration.${Date.now()}@example.test`);
+    await page.locator("#firstName").fill("Self");
+    await page.locator("#lastName").fill("Registered");
+    await page.locator("#password").fill("TestingPass123!");
+    await page.locator("#password-confirm").fill("TestingPass123!");
+
+    // Act
+    await page.locator("#kc-form-buttons input[type=submit], #kc-form-buttons button[type=submit]").click();
+
+    // Assert
+    await expect(page).toHaveURL(/\/dashboard\/access-limited$/, { timeout: 30_000 });
   });
 });
 
@@ -148,15 +212,15 @@ test.describe("role isolation", () => {
     });
   }
 
-  test("forbids psychologists from reading another user", async ({ pageAs }) => {
+  test("reports the user lookup as unavailable until it moves to Keycloak", async ({ pageAs }) => {
     // Arrange
-    const page = await pageAs("psychologist");
+    const page = await pageAs("administrator");
 
     // Act
     const response = await page.request.get("/api/users/9b38f432-6b8f-4d75-9e6a-e775cc4b0175");
 
     // Assert
-    expect(response.status()).toBe(403);
+    expect(response.status()).toBe(501);
   });
 
   test("forbids patients from reading system health", async ({ pageAs }) => {
@@ -685,24 +749,6 @@ async function arrangeStep(response: APIResponse, expectedStatus: number, step: 
     throw new Error(`Arrange step "${step}" returned ${response.status()}, expected ${expectedStatus}`);
   }
   return response;
-}
-
-// Auth routes allow a burst of five logins; later worker fixtures wait for the limiter to refill.
-async function withAuthRetry(send: () => Promise<APIResponse>) {
-  for (let attempt = 0; attempt < 6; attempt++) {
-    const response = await send();
-    if (response.status() !== 429) return response;
-    await new Promise((resolve) => setTimeout(resolve, 7_000));
-  }
-  return send();
-}
-
-async function signInThroughBff(request: APIRequestContext, email: string, password: string) {
-  await arrangeStep(
-    await withAuthRetry(() => request.post("/api/auth/login", { data: { email, password } })),
-    200,
-    `sign in ${email}`
-  );
 }
 
 async function addStaleAccessCookie(context: BrowserContext, baseURL?: string) {
