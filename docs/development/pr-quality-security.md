@@ -143,6 +143,9 @@ the BFF client. It uses the generated client secret and the realm's demo
 password, and requires the token's `roles` to be exactly the scanned role.
 Keycloak traffic bypasses the ZAP proxy, so it is neither scanned nor reported.
 `auth-service` routes keep its own bearer token until it is removed (#90).
+The BFF session comes from the BFF's own sign-in: the scanner follows
+`/api/auth/login` to Keycloak, signs in, returns through `/api/auth/callback`,
+and requires HttpOnly token cookies and Secure, `SameSite=Lax` cookies.
 
 Bearer tokens and BFF sessions are renewed periodically. The runner verifies
 certificate identity and protected API/BFF access before and after each role

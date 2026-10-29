@@ -24,10 +24,18 @@ services:
   notification:
     healthUrl: http://notification-service:9000
 
-jwt:
-  issuer: clinicflow-auth
-  secretName: clinicflow-jwt
-  publicKeyKey: jwt-public.pem
+# The BFF is a confidential OIDC client of the Keycloak realm (ADR-027). The browser uses the public
+# issuer; codes, refreshes and keys go to Keycloak on the cluster network. Keycloak arrives with #89.
+oidc:
+  issuer: https://auth.clinicflow.localhost/realms/clinicflow
+  internalIssuer: http://keycloak:8080/realms/clinicflow
+  # The BFF's public origin; its /api/auth/callback must be a redirect URI of the realm's BFF client.
+  publicUrl: https://clinicflow.localhost
+  clientSecretName: clinicflow-bff-oidc
+  clientSecretKey: CLINICFLOW_BFF_CLIENT_SECRET
+  # The in-cluster Keycloak pods (app.kubernetes.io/component) and HTTP port the egress rule allows.
+  component: keycloak
+  port: 8080
 
 resources:
   requests:

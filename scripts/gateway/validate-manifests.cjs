@@ -92,7 +92,11 @@ if(frontend) {
   const selects=(policy,pod)=>Object.keys(policy.spec.podSelector.matchLabels||{}).length>0 && Object.entries(policy.spec.podSelector.matchLabels||{}).every(([k,v])=>pod.spec.template.metadata.labels[k]===v);
   const policy=policies.find(p=>selects(p,frontend));
   assert(policy);
-  assert.deepEqual(policy.spec.egress.flatMap(r=>r.ports.map(p=>p.port)).sort((a,b)=>a-b),[53,53,8080,9000]);
+  assert.deepEqual(policy.spec.egress.flatMap(r=>r.ports.map(p=>p.port)).sort((a,b)=>a-b),[53,53,8080,8080,9000]);
+  // ADR-027: the BFF reaches Keycloak only, on its HTTP port, for code exchange, refresh, keys and logout.
+  const realmPeers=policy.spec.egress.filter(r=>r.to.some(peer=>peer.podSelector?.matchLabels?.['app.kubernetes.io/component']==='keycloak'));
+  assert.equal(realmPeers.length,1);
+  assert.deepEqual(realmPeers[0].ports,[{port:8080,protocol:'TCP'}]);
   for(const peer of policy.spec.ingress.flatMap(r=>r.from)) { assert(peer.namespaceSelector);assert.equal(peer.podSelector.matchLabels['clinicflow.io/edge'],'gateway'); }
   // ADR-021: ownership checks are the only service-to-service application flows (callee -> callers).
   const ownershipCallers={'patient-service':['appointment-service','clinical-service'],'appointment-service':['clinical-service']};

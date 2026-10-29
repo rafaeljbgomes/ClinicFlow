@@ -1,3 +1,4 @@
+import email.message
 import importlib.util
 import json
 import re
@@ -165,6 +166,65 @@ class KeycloakLoginTest(unittest.TestCase):
     def test_missing_client_secret_fails_closed(self):
         with self.assertRaises(RuntimeError):
             self.login(secret="")
+
+
+class BffSessionTest(unittest.TestCase):
+    SESSION = ["clinicflow_access_token=a1; Path=/; Max-Age=300; Secure; HttpOnly; SameSite=lax",
+               "clinicflow_refresh_token=r1; Path=/; Max-Age=1800; Secure; HttpOnly; SameSite=lax",
+               "clinicflow_csrf=c1; Path=/; Max-Age=1800; Secure; SameSite=lax",
+               "clinicflow_oidc=; Path=/api/auth/callback; Max-Age=0; Secure; HttpOnly; SameSite=lax"]
+
+    def test_accepts_the_session_and_drops_spent_cookies(self):
+        self.assertEqual(dast.session_cookies(self.SESSION), {"clinicflow_access_token": "a1", "clinicflow_refresh_token": "r1", "clinicflow_csrf": "c1"})
+
+    def test_token_cookies_must_be_http_only(self):
+        for index in (0, 1):
+            cookies = list(self.SESSION)
+            cookies[index] = cookies[index].replace(" HttpOnly;", "")
+            with self.subTest(cookie=cookies[index].split("=")[0]), self.assertRaises(RuntimeError):
+                dast.session_cookies(cookies)
+
+    def test_every_cookie_must_be_secure_and_lax(self):
+        for broken in (self.SESSION[2].replace(" Secure;", ""), self.SESSION[2].replace("lax", "none")):
+            with self.subTest(cookie=broken), self.assertRaises(RuntimeError):
+                dast.session_cookies([*self.SESSION[:2], broken])
+
+    def test_a_missing_refresh_cookie_fails_closed(self):
+        with self.assertRaises(RuntimeError):
+            dast.session_cookies([self.SESSION[0], self.SESSION[2]])
+
+    def headers(self, location, cookies=()):
+        message = email.message.Message()
+        message["Location"] = location
+        for cookie in cookies:
+            message["Set-Cookie"] = cookie
+        return message
+
+    def run_login(self, callback, landing="/dashboard"):
+        calls = []
+        def form_request(opener, url, fields=None, headers=None, expected=200):
+            calls.append(url)
+            if url == dast.UI + "/api/auth/login":
+                return b"", self.headers("http://localhost:32004/realms/clinicflow/protocol/openid-connect/auth?client_id=clinicflow-bff")
+            return b"", self.headers(dast.UI + landing, self.SESSION)
+        with patch.object(dast, "form_request", side_effect=form_request), patch.object(dast, "keycloak_login", return_value=callback) as login, \
+                patch.object(dast.ssl, "create_default_context"):
+            return dast.bff_session("psychologist"), calls, login
+
+    def test_follows_the_bff_redirect_through_keycloak_to_the_callback(self):
+        callback = dast.UI + "/api/auth/callback?code=c&state=s&iss=x"
+        cookies, calls, login = self.run_login(callback)
+        login.assert_called_once_with("psychologist", "http://localhost:32004/realms/clinicflow/protocol/openid-connect/auth?client_id=clinicflow-bff")
+        self.assertEqual(calls, [dast.UI + "/api/auth/login", callback])
+        self.assertEqual(cookies["clinicflow_csrf"], "c1")
+
+    def test_a_redirect_to_another_host_fails_closed(self):
+        with self.assertRaises(RuntimeError):
+            self.run_login("https://evil.example/api/auth/callback?code=c")
+
+    def test_a_callback_that_lands_on_login_fails_closed(self):
+        with self.assertRaises(RuntimeError):
+            self.run_login(dast.UI + "/api/auth/callback?code=c", landing="/login?error=failed")
 
 
 if __name__ == "__main__":

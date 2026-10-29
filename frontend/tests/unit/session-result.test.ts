@@ -1,63 +1,55 @@
 import { describe, expect, it } from "vitest";
-import { classifySession } from "@/lib/session-result";
+import { sessionFromVerification } from "@/lib/session-result";
 
-const user = {
-  id: "e2b930b6-8661-42a7-98bf-d62d1e8ebc42",
-  email: "psychologist@example.com",
-  fullName: "ClinicFlow Psychologist",
+const principal = {
+  userId: "00000000-0000-4000-8000-000000000011",
+  email: "sofia.almeida@demo.clinicflow.local",
   role: "PSYCHOLOGIST" as const,
+  name: "Sofia Almeida",
+  expiresAt: 2_000_000_000,
 };
 
-describe("classifySession", () => {
+describe("sessionFromVerification", () => {
   it("treats a missing cookie as anonymous", () => {
     // Act
-    const session = classifySession(undefined);
+    const session = sessionFromVerification(null);
 
     // Assert
     expect(session).toEqual({ status: "anonymous" });
   });
 
-  it("treats an authentication rejection as anonymous", () => {
-    // Arrange
-    const rejection = { ok: false, status: 401, data: null };
-
+  it("treats a rejected token as anonymous", () => {
     // Act
-    const session = classifySession("stale", rejection);
+    const session = sessionFromVerification({ status: "invalid" });
 
     // Assert
     expect(session).toEqual({ status: "anonymous" });
   });
 
-  it("reports an upstream failure as unavailable", () => {
-    // Arrange
-    const failure = { ok: false, status: 503, data: null, unavailable: true };
-
+  it("reports an unreachable key set as unavailable", () => {
     // Act
-    const session = classifySession("token", failure);
+    const session = sessionFromVerification({ status: "unavailable" });
 
     // Assert
     expect(session).toEqual({ status: "unavailable" });
   });
 
-  it.each([
-    ["an empty user payload", { ok: true, status: 200, data: {} }],
-    ["an unparseable payload", { ok: true, status: 200, data: null, invalidJson: true }],
-  ])("reports %s as an invalid response", (_payload, result) => {
+  it("builds the profile from the verified claims", () => {
     // Act
-    const session = classifySession("token", result);
+    const session = sessionFromVerification({ status: "verified", principal });
 
     // Assert
-    expect(session).toEqual({ status: "invalid-response" });
+    expect(session).toEqual({
+      status: "authenticated",
+      user: { id: principal.userId, email: principal.email, role: "PSYCHOLOGIST", fullName: "Sofia Almeida", enabled: true },
+    });
   });
 
-  it("returns a validated authenticated user", () => {
-    // Arrange
-    const result = { ok: true, status: 200, data: user };
-
+  it("shows the email when the token carries no name", () => {
     // Act
-    const session = classifySession("token", result);
+    const session = sessionFromVerification({ status: "verified", principal: { ...principal, name: null } });
 
     // Assert
-    expect(session).toEqual({ status: "authenticated", user });
+    expect(session).toMatchObject({ user: { fullName: principal.email } });
   });
 });

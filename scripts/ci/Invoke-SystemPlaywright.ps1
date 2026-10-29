@@ -1,7 +1,9 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$RunId,
-    [string]$RuntimeHost = "127.0.0.1"
+    # The browser must stay on the origin registered as the realm's redirect URI (CLINICFLOW_PUBLIC_URL in
+    # docker-compose.ci.yml), or the sign-in state cookie and the callback land on different hosts.
+    [string]$RuntimeHost = "localhost"
 )
 
 $ErrorActionPreference = "Stop"

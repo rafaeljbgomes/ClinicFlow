@@ -230,7 +230,7 @@ returned `issuer` to equal the URL discovery was fetched from. So the BFF
 either configures these endpoints explicitly, or discovers through the public
 issuer with requests rerouted to the internal host. Fetching discovery from
 `http://keycloak:8080` and validating the result fails, by design. #88 picks
-one.
+one; see [BFF client choices](#bff-client-choices-88).
 
 **The gateway (#89)** routes only `/realms/` and `/resources/` on
 `auth.clinicflow.localhost`. The admin console is not routed and stays on a
@@ -238,6 +238,49 @@ local port or `kubectl port-forward`. The existing login rate limit (10/minute,
 burst 5) moves to the Keycloak login-action paths. Keycloak's brute-force
 detection (5 failures, then an incremental wait up to 15 minutes) is the
 per-account control behind it.
+
+### BFF client choices (#88)
+
+The decisions this ADR left to #88, made in the implementation:
+
+- **Explicit endpoints, no discovery.** The BFF derives Keycloak's fixed
+  `protocol/openid-connect` paths from two settings: the public issuer for the
+  authorization, registration and end-session endpoints, and the private-network
+  issuer for the token endpoint, the JWKS and back-channel logout. This keeps
+  one HTTP client and no request rerouting, at the cost of tying the BFF to
+  Keycloak's path layout. It uses `jose`, which the BFF already depended on, so
+  no OIDC client library was added.
+- **Cookies, not a server-side session store.** Access and refresh tokens are
+  HttpOnly cookies; the ID token is verified (`aud: clinicflow-bff`, `nonce`)
+  and discarded. `state`, `nonce` and the PKCE verifier sit in a short-lived
+  HttpOnly cookie scoped to the callback path. The callback also requires the
+  RFC 9207 `iss` parameter to equal the issuer.
+- **Refresh in `proxy.ts`.** The proxy refreshes when the access token is
+  within 30 seconds of expiry and passes the new cookies to the same request.
+  Because refresh tokens rotate with no reuse, requests that carry the same
+  refresh token share one exchange for 30 seconds. That sharing is per process;
+  with more than one BFF replica a race can still end a session, which is
+  accepted for a single-replica prototype.
+- **Logout without a token in the URL.** The BFF ends the Keycloak session on
+  the back channel with the refresh token, then sends the browser to the
+  end-session endpoint with only `client_id` and `post_logout_redirect_uri`, so
+  Keycloak clears its own cookies. There is no `id_token_hint`, because an ID
+  token in a URL would leak through history and logs; the session it would
+  identify is already gone.
+- **One role inside the BFF.** The BFF reads the `roles` array and keeps the
+  single ClinicFlow role it must contain, rejecting tokens with none or several.
+  The role-aware UI and the ADR-016 route checks therefore keep a single `role`.
+- **Keycloak's default login theme**, not a ClinicFlow theme. The sign-in and
+  registration pages in the app link to it; a theme can come later without
+  touching the BFF.
+- **Login starts on the public origin.** A sign-in that reaches the BFF on
+  another host is first redirected to `CLINICFLOW_PUBLIC_URL`, because the
+  transaction cookie must be set on the origin Keycloak returns to. Browser tests
+  therefore use `localhost`, the registered origin. A browser that can reach
+  the app only through another name, such as Jenkins' `host.docker.internal`,
+  cannot complete a Compose sign-in, because the issuer is a `localhost` URL.
+- **The admin user lookup answers `501`** until #90 decides its replacement,
+  because `auth-service` does not accept Keycloak tokens.
 
 ### Packaging and runtime
 

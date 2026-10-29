@@ -1,4 +1,3 @@
-import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
@@ -24,12 +23,12 @@ export default defineConfig({
     : {
         command: "npm run dev",
         url: process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000",
+        // A host-run BFF against the Compose Keycloak (ADR-027); the client secret comes from
+        // CLINICFLOW_BFF_CLIENT_SECRET in the environment.
         env: {
           ...process.env,
-          CLINICFLOW_SECURITY_JWT_ISSUER: process.env.CLINICFLOW_SECURITY_JWT_ISSUER ?? "clinicflow-auth",
-          CLINICFLOW_SECURITY_JWT_PUBLIC_KEY_PATH:
-            process.env.CLINICFLOW_SECURITY_JWT_PUBLIC_KEY_PATH ??
-            path.resolve(__dirname, "../secrets/jwt-public.pem"),
+          CLINICFLOW_OIDC_ISSUER: process.env.CLINICFLOW_OIDC_ISSUER ?? "http://localhost:8180/realms/clinicflow",
+          CLINICFLOW_PUBLIC_URL: process.env.CLINICFLOW_PUBLIC_URL ?? "http://localhost:3000",
         },
         reuseExistingServer: true,
         timeout: 120_000,
