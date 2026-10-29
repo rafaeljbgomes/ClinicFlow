@@ -58,6 +58,18 @@ spec:
                 secretKeyRef:
                   name: {{ include "clinicflow-platform.postgresSecretName" . }}
                   key: POSTGRES_PASSWORD
+            {{- with .Values.keycloak.databaseSecret }}
+            - name: KC_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . | quote }}
+                  key: KC_DB_USERNAME
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . | quote }}
+                  key: KC_DB_PASSWORD
+            {{- end }}
           resources:
             {{- toYaml .Values.bootstrap.resources | nindent 12 }}
           volumeMounts:

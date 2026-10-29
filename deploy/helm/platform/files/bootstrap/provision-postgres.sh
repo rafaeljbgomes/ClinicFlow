@@ -19,3 +19,11 @@ while read -r service database _permissions; do
     )
     echo "PostgreSQL roles ready for $service ($database)."
 done < "$identities_file"
+
+# Keycloak's one login owns its database (ADR-027). Its credentials arrive as KC_DB_* only where
+# Keycloak runs: Compose's env_file, or the platform chart's keycloak.databaseSecret.
+if [ -n "${KC_DB_USERNAME:-}" ]; then
+    printenv KC_DB_PASSWORD >/dev/null || { echo "KC_DB_USERNAME is set without its password." >&2; exit 1; }
+    psql -v ON_ERROR_STOP=1 -q -f "$bootstrap_dir/keycloak-database.sql"
+    echo "PostgreSQL login ready for keycloak (clinicflow_keycloak)."
+fi

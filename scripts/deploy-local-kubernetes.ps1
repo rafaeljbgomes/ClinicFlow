@@ -193,7 +193,9 @@ try {
         rabbitmq = Set-SecretFromEnvFile -Name clinicflow-rabbitmq-admin -Path (Join-Path $repoRoot "secrets/platform/rabbitmq.env")
     }
     # The BFF's Keycloak client secret (ADR-027), the same generated value the realm is imported with.
-    $null = Set-SecretFromEnvFile -Name clinicflow-bff-oidc -Path (Join-Path $repoRoot "secrets/keycloak/clinicflow-bff.env")
+    $credentialChecksums.keycloakClient = Set-SecretFromEnvFile -Name clinicflow-bff-oidc -Path (Join-Path $repoRoot "secrets/keycloak/clinicflow-bff.env")
+    # Keycloak's database login, applied by the platform bootstrap and used by Keycloak itself.
+    $credentialChecksums.keycloakDatabase = Set-SecretFromEnvFile -Name clinicflow-keycloak-database -Path (Join-Path $repoRoot "secrets/keycloak/database.env")
     foreach ($credentialFile in Get-ChildItem (Join-Path $repoRoot "secrets/services") -Filter "*.env") {
         $credentialChecksums[$credentialFile.BaseName] = Set-SecretFromEnvFile -Name "$($credentialFile.BaseName)-credentials" -Path $credentialFile.FullName
     }
