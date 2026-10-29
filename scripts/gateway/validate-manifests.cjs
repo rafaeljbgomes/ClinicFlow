@@ -118,6 +118,7 @@ if(frontend) {
   assert.equal(config.data.CLINICFLOW_AUTH_COOKIE_SECURE,'true');
   assert(!Object.keys(config.data).some(k=>k.endsWith('_SERVICE_URL')),'Deployed BFF must not have direct business URLs');
   assert(frontend.spec.template.metadata.annotations['checksum/config']);
+  assert('checksum/client-secret' in frontend.spec.template.metadata.annotations,'A rotated BFF client secret must roll the BFF');
   const policies=docs.filter(d=>d.kind==='NetworkPolicy');
   const selects=(policy,pod)=>Object.keys(policy.spec.podSelector.matchLabels||{}).length>0 && Object.entries(policy.spec.podSelector.matchLabels||{}).every(([k,v])=>pod.spec.template.metadata.labels[k]===v);
   const policy=policies.find(p=>selects(p,frontend));

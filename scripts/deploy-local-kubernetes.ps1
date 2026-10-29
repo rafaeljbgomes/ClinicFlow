@@ -326,7 +326,7 @@ try {
         }
 
         if ($componentName -eq 'Frontend') {
-            $arguments += @('--set-string',"gatewayNamespace=$IngressNamespace",'--set-string',"gatewayUrl=http://clinicflow-gateway-api.$IngressNamespace.svc.cluster.local:8080")
+            $arguments += @('--set-string',"gatewayNamespace=$IngressNamespace",'--set-string',"gatewayUrl=http://clinicflow-gateway-api.$IngressNamespace.svc.cluster.local:8080",'--set-string',"oidc.clientSecretChecksum=$($credentialChecksums.keycloakClient)")
         }
         Write-Host "Installing or upgrading $($definition.Release)..."
         Invoke-Checked helm @arguments

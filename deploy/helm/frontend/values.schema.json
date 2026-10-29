@@ -41,6 +41,7 @@
         "publicUrl": { "type": "string", "pattern": "^https?://[^/ ]+$" },
         "clientSecretName": { "type": "string", "minLength": 1 },
         "clientSecretKey": { "type": "string", "minLength": 1 },
+        "clientSecretChecksum": { "type": "string" },
         "component": { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" },
         "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
       }
