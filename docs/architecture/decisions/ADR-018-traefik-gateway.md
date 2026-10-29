@@ -10,7 +10,9 @@ Helm chart 41.6.1. Exact OCI/artifact/image digests are recorded in
 `deploy/gateway/provenance.json`; the dependency lock and chart archive are committed.
 
 The public UI host is `clinicflow.localhost`; the public bearer-token API host is
-`api.clinicflow.localhost`. The BFF calls a separate unpublished HTTP listener on
+`api.clinicflow.localhost`. On Kubernetes a third host, `auth.clinicflow.localhost`,
+serves Keycloak's `clinicflow` realm through an allowlist of path prefixes (ADR-027,
+#89); Keycloak's admin console and `master` realm have no route. The BFF calls a separate unpublished HTTP listener on
 port 8080. It never falls back to a backend when gateway requests fail. Application
 Services remain ClusterIP and Compose publishes no backend or frontend application
 ports. Containerized Actuator traffic uses separate management port 9000.

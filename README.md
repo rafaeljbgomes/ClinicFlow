@@ -311,9 +311,12 @@ Deploy the local Kubernetes stack from the repository root:
 ```
 
 The deployment creates local JWT material when needed, builds local images,
-installs the observability and shared platform releases, and upgrades the
-frontend plus five application releases. A single application can be upgraded
-with, for example:
+installs the observability, shared platform and Keycloak releases, and upgrades
+the frontend plus five application releases. Keycloak signs users in on
+`https://auth.clinicflow.localhost` behind the gateway; its admin console has
+no public route and is reached with
+`kubectl port-forward svc/keycloak 8180:8080 -n clinicflow`. A single
+application can be upgraded with, for example:
 
 ```powershell
 .\scripts\deploy-local-kubernetes.ps1 -Component Patient
