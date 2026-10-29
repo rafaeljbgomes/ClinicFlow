@@ -49,6 +49,7 @@ const cases = [
   ['patient-service/src/test/java/PatientTest.java', ['patient-service'], false, false],
   ['event-contracts/src/main/resources/contracts/a.json', ['patient-service','appointment-service','clinical-service','notification-service'], true, false],
   ['frontend/src/lib/server/jwt.ts', ['frontend'], true, true],
+  ['frontend/src/proxy.ts', ['frontend'], true, true],
   ['pom.xml', policy.components, true, true],
   ['deploy/helm/service/templates/deployment.yaml', policy.components, true, true],
   ['.ci/security.json', policy.components, true, true],

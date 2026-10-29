@@ -1144,8 +1144,10 @@ class ClinicalApiIT {
         return Jwt.withTokenValue(token)
                 .header("alg", "none")
                 .issuedAt(now).expiresAt(now.plusSeconds(3600))
-                .claim("userId", userId.toString())
-                .claim("role", role)
+                .issuer("http://localhost:8180/realms/clinicflow")
+                .audience(List.of("clinicflow-api"))
+                .subject(userId.toString())
+                .claim("roles", List.of(role))
                 .build();
     }
 }

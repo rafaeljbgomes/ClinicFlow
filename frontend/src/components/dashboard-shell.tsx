@@ -72,11 +72,16 @@ export function DashboardShell({ children, user }: { children: React.ReactNode; 
   const isAdmin = user?.role === "ADMIN";
   const navItems = isAdmin ? adminNav : user.role === "PATIENT" ? patientNav : psychologistNav;
 
+  // The BFF ends the Keycloak session; the end-session page then clears Keycloak's cookies and returns
+  // to /login.
   async function logout() {
-    await apiFetch("/api/auth/logout", { method: "POST" });
-    toast.success("Signed out");
-    router.replace("/login");
-    router.refresh();
+    try {
+      const { logoutUrl } = await apiFetch<{ logoutUrl: string }>("/api/auth/logout", { method: "POST" });
+      window.location.assign(logoutUrl);
+    } catch {
+      toast.error("Sign out failed. Please try again.");
+      router.refresh();
+    }
   }
 
   return (

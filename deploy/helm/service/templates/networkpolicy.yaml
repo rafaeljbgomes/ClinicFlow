@@ -56,6 +56,15 @@ spec:
             matchLabels: {app.kubernetes.io/component: {{ .component }}}
       ports: [{port: {{ .port }}, protocol: TCP}]
     {{- end }}
+    {{- if .Values.oidc.enabled }}
+    # The realm JWKS that signs every accepted token (ADR-027).
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: {{ .Release.Namespace }}}
+          podSelector:
+            matchLabels: {app.kubernetes.io/component: {{ .Values.oidc.component }}}
+      ports: [{port: {{ .Values.oidc.port }}, protocol: TCP}]
+    {{- end }}
     {{- if .Values.rabbitmq.enabled }}
     - to:
         - namespaceSelector:

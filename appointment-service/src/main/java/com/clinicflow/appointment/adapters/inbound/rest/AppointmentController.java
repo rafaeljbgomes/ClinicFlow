@@ -103,6 +103,6 @@ public class AppointmentController {
     }
 
     private UUID userId(Jwt jwt) {
-        return UUID.fromString(jwt.getClaimAsString("userId"));
+        return UUID.fromString(jwt.getSubject());
     }
 }

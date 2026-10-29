@@ -33,16 +33,26 @@ services:
     ports: !override []
   rabbitmq:
     ports: !override []
+  keycloak:
+    ports: !override []
+    environment:
+      CLINICFLOW_PUBLIC_URL: https://clinicflow.localhost:8443
   frontend:
     environment:
       CLINICFLOW_AUTH_COOKIE_SECURE: "true"
+      CLINICFLOW_PUBLIC_URL: https://clinicflow.localhost:8443
   zap:
     profiles: [security]
     build:
       context: .
       dockerfile: deploy/security/Dockerfile
     image: clinicflow/zap:${CLINICFLOW_SECURITY_TAG:?Set an isolated security tag}
+    env_file:
+      # The BFF client secret: DAST signs in to Keycloak on the private network for API tokens (ADR-027).
+      - path: ./secrets/keycloak/clinicflow-bff.env
+        required: false
     environment:
+      CLINICFLOW_DEMO_PASSWORD: ${CLINICFLOW_DEMO_PASSWORD:-ClinicFlowDemo!2026}
       DAST_COMPONENTS: ${DAST_COMPONENTS:-auth-service,patient-service,appointment-service,clinical-service,notification-service,frontend}
       DAST_FULL_SCAN: ${DAST_FULL_SCAN:-false}
       DAST_SMOKE_ONLY: ${DAST_SMOKE_ONLY:-false}

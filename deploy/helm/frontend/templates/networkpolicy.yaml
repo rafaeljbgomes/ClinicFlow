@@ -37,4 +37,11 @@ spec:
                 operator: In
                 values: [auth-service, patient-service, appointment-service, clinical-service, notification-service]
       ports: [{port: 9000, protocol: TCP}]
+    # Code exchange, refresh, keys and back-channel logout on the realm (ADR-027).
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: {{ .Release.Namespace }}}
+          podSelector:
+            matchLabels: {app.kubernetes.io/component: {{ .Values.oidc.component }}}
+      ports: [{port: {{ .Values.oidc.port }}, protocol: TCP}]
 {{- end }}

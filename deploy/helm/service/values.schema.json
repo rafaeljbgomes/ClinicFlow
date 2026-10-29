@@ -1,7 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
-  "required": ["name", "image", "port", "database", "credentials", "jwt"],
+  "required": ["name", "image", "port", "database", "credentials", "oidc", "jwt"],
+  "oneOf": [
+    { "properties": { "oidc": { "properties": { "enabled": { "const": true } } }, "jwt": { "properties": { "enabled": { "const": false } } } } },
+    { "properties": { "oidc": { "properties": { "enabled": { "const": false } } }, "jwt": { "properties": { "enabled": { "const": true } } } } }
+  ],
   "properties": {
     "name": { "type": "string", "minLength": 1 },
     "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
@@ -49,9 +53,24 @@
         "checksum": { "type": "string", "pattern": "^([a-f0-9]{64})?$" }
       }
     },
+    "oidc": {
+      "type": "object",
+      "required": ["enabled", "issuer", "jwksUri", "component", "port"],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "issuer": { "type": "string", "pattern": "^https?://[^/ ]+(/[^/ ]+)*/realms/[^/ ]+$" },
+        "jwksUri": { "type": "string", "pattern": "^https?://[^/ ]+/[^ ]*$" },
+        "component": { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    },
     "jwt": {
       "type": "object",
-      "required": ["issuer", "secretName", "publicKeyKey", "privateKeyKey", "privateKeyEnabled"]
+      "required": ["enabled", "issuer", "secretName", "publicKeyKey", "privateKeyKey", "privateKeyEnabled"],
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
     },
     "networkPolicy": {
       "type": "object",

@@ -161,10 +161,15 @@ Security is treated as an engineering baseline for the prototype, not as a
 compliance or certification claim.
 
 - Passwords are hashed with BCrypt and login errors are deliberately generic.
-- Auth Service signs short-lived JWTs with an RSA private key; resource
-  services validate tokens with the public key.
-- The Next.js BFF keeps the access token in an HttpOnly cookie and requires a
-  double-submit CSRF token for mutating same-origin requests.
+- Keycloak issues the access tokens (ADR-027). The patient, appointment,
+  clinical and notification services check signature, issuer, audience and
+  expiry against the realm JWKS through Spring Boot configuration alone, take
+  roles from the `roles` claim and the caller from `sub`.
+- The Next.js BFF is a confidential OIDC client: it signs users in with the
+  authorization-code flow and PKCE, so it never sees a password. Access and
+  refresh tokens stay in HttpOnly cookies, the BFF refreshes them before they
+  expire, and sign-out ends the Keycloak session. Mutating same-origin requests
+  need a double-submit CSRF token.
 - Role checks are applied at HTTP boundaries, while ownership and business
   authorization remain in application services. Appointments, clinical cases,
   and linked session records are accepted only after the owning service

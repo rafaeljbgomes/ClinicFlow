@@ -4,6 +4,16 @@ server:
 spring:
   application:
     name: appointment-service
+  # Keycloak tokens (ADR-027): keys come from the private-network JWKS, iss must be the public issuer.
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${CLINICFLOW_OIDC_ISSUER:http://localhost:8180/realms/clinicflow}
+          jwk-set-uri: ${CLINICFLOW_OIDC_JWKS_URI:http://localhost:8180/realms/clinicflow/protocol/openid-connect/certs}
+          audiences: [clinicflow-api]
+          authorities-claim-name: roles
+          authority-prefix: ROLE_
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/clinicflow_appointment}
     username: ${SPRING_DATASOURCE_USERNAME:clinicflow}
@@ -41,11 +51,6 @@ logging:
     com.clinicflow: INFO
 
 clinicflow:
-  security:
-    jwt:
-      issuer: ${CLINICFLOW_SECURITY_JWT_ISSUER:clinicflow-auth}
-      public-key: ${CLINICFLOW_SECURITY_JWT_PUBLIC_KEY:}
-      public-key-path: ${CLINICFLOW_SECURITY_JWT_PUBLIC_KEY_PATH:}
   messaging:
     exchange: therapy.events.exchange
   services:

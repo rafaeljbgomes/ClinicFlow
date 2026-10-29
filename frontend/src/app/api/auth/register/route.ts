@@ -1,9 +1,7 @@
 import { NextRequest } from "next/server";
-import { proxyRequest } from "@/lib/server/bff";
+import { beginAuthorization } from "@/lib/server/auth-routes";
 
-export async function POST(request: NextRequest) {
-  return proxyRequest(request, "auth", "/auth/register", {
-    auth: false,
-    csrf: false,
-  });
+// Keycloak's registration page creates PATIENT accounts only (ADR-027).
+export async function GET(request: NextRequest) {
+  return beginAuthorization(request, "register");
 }

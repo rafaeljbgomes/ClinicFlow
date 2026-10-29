@@ -20,6 +20,7 @@ import org.springframework.web.client.RestClient;
 
 import java.io.IOException;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -181,8 +182,8 @@ class HttpPatientDirectoryTest {
         Jwt jwt = Jwt.withTokenValue("caller-token")
                 .header("alg", "none")
                 .issuedAt(now).expiresAt(now.plusSeconds(300))
-                .claim("userId", psychologistId.value().toString())
-                .claim("role", "PSYCHOLOGIST")
+                .subject(psychologistId.value().toString())
+                .claim("roles", List.of("PSYCHOLOGIST"))
                 .build();
         SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(jwt));
     }

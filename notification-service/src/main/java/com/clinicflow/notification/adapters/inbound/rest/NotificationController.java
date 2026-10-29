@@ -11,8 +11,8 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import com.clinicflow.notification.domain.PsychologistId;
 
 import java.util.Set;
@@ -31,30 +31,32 @@ public class NotificationController {
     }
 
     @GetMapping
-    public PageResponse<NotificationResponse> list(@AuthenticationPrincipal Jwt jwt,
+    public PageResponse<NotificationResponse> list(JwtAuthenticationToken authentication,
                                                    @RequestParam(defaultValue = "0") int page,
                                                    @RequestParam(defaultValue = "" + PageQuery.DEFAULT_SIZE) int size,
                                                    @RequestParam(required = false) Set<NotificationStatus> status) {
         var query = mapper.toListQuery(page, size, status);
-        var notifications = isAdmin(jwt)
+        var notifications = isAdmin(authentication)
                 ? notificationService.list(query)
-                : notificationService.listForPsychologist(query, psychologistId(jwt));
+                : notificationService.listForPsychologist(query, psychologistId(authentication.getToken()));
         return PageResponse.of(notifications, mapper::toResponse);
     }
 
     @GetMapping("/{id}")
-    public NotificationResponse get(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+    public NotificationResponse get(JwtAuthenticationToken authentication, @PathVariable UUID id) {
         var query = mapper.toQuery(id);
-        return mapper.toResponse(isAdmin(jwt)
+        return mapper.toResponse(isAdmin(authentication)
                 ? notificationService.get(query)
-                : notificationService.getForPsychologist(query, psychologistId(jwt)));
+                : notificationService.getForPsychologist(query, psychologistId(authentication.getToken())));
     }
 
-    private boolean isAdmin(Jwt jwt) {
-        return "ADMIN".equals(jwt.getClaimAsString("role"));
+    // Authorities are mapped from the token's roles claim, the same source as @PreAuthorize above.
+    private boolean isAdmin(JwtAuthenticationToken authentication) {
+        return authentication.getAuthorities().stream()
+                .anyMatch(authority -> "ROLE_ADMIN".equals(authority.getAuthority()));
     }
 
     private PsychologistId psychologistId(Jwt jwt) {
-        return new PsychologistId(UUID.fromString(jwt.getClaimAsString("userId")));
+        return new PsychologistId(UUID.fromString(jwt.getSubject()));
     }
 }

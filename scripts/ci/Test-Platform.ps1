@@ -96,10 +96,20 @@ try {
     if ($LASTEXITCODE -eq 0) { throw 'Gateway schema accepted a disabled public quota.' }
     & helm template invalid ./deploy/helm/frontend --set-string gatewayUrl= *> $null
     if ($LASTEXITCODE -eq 0) { throw 'Frontend schema accepted missing GATEWAY_URL.' }
+    & helm template invalid ./deploy/helm/frontend --set-string oidc.issuer=clinicflow-auth *> $null
+    if ($LASTEXITCODE -eq 0) { throw 'Frontend schema accepted an issuer that is not a realm URL.' }
+    & helm template invalid ./deploy/helm/frontend --set-string oidc.publicUrl=https://clinicflow.localhost/app *> $null
+    if ($LASTEXITCODE -eq 0) { throw 'Frontend schema accepted a public URL with a path.' }
     & helm template invalid ./deploy/helm/service --set-string image.tag=latest *> $null
     if ($LASTEXITCODE -eq 0) { throw "Service schema accepted mutable image tag 'latest'." }
     & helm template invalid ./deploy/helm/service --set-string image.tag= --set-string image.digest= *> $null
     if ($LASTEXITCODE -eq 0) { throw "Service schema accepted an empty image reference." }
+    & helm template invalid ./deploy/helm/service --set jwt.enabled=true *> $null
+    if ($LASTEXITCODE -eq 0) { throw "Service schema accepted a release that trusts two token issuers." }
+    & helm template invalid ./deploy/helm/service --set oidc.enabled=false *> $null
+    if ($LASTEXITCODE -eq 0) { throw "Service schema accepted a release that trusts no token issuer." }
+    & helm template invalid ./deploy/helm/service --set-string oidc.issuer=clinicflow-auth *> $null
+    if ($LASTEXITCODE -eq 0) { throw "Service schema accepted an issuer that is not a realm URL." }
     $digest = "sha256:" + ("a" * 64)
     & helm template invalid ./deploy/helm/service --set-string image.tag=immutable --set-string "image.digest=$digest" *> $null
     if ($LASTEXITCODE -eq 0) { throw "Service schema accepted both image tag and digest." }

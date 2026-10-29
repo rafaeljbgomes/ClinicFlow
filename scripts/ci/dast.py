@@ -1,12 +1,17 @@
 """Authenticated, bounded ZAP Automation Framework scans in a disposable HTTPS network.
 Only sanitized findings/coverage leave the container. Credentials and plans remain ephemeral.
 """
+import base64
 from datetime import datetime, timedelta, timezone
+import hashlib
+import html
+import http.cookiejar
 import http.cookies
 import json
 import os
 from pathlib import Path
 import re
+import secrets
 import ssl
 import subprocess
 import sys
@@ -24,6 +29,16 @@ ROLES = {
     "patient": "ana.martins@demo.clinicflow.local",
     "administrator": "admin@demo.clinicflow.local",
 }
+REALM_ROLES = {"psychologist": "PSYCHOLOGIST", "patient": "PATIENT", "administrator": "ADMIN"}
+# Keycloak on the private network (ADR-027). Tokens fetched here still carry the public issuer.
+KEYCLOAK = "http://keycloak:8080"
+REALM = KEYCLOAK + "/realms/clinicflow"
+BFF_CLIENT = "clinicflow-bff"
+# Registered on the BFF client. The code is read from the redirect, which is never followed.
+REDIRECT_URI = "http://localhost:3000/api/auth/callback"
+# The resource servers trust only Keycloak; auth-service checks its own tokens until it is removed (#90).
+RESOURCE_SERVER_PATHS = re.escape(API) + r"/api/v1/(?!auth(?:$|[/?])).*"
+AUTH_SERVICE_PATHS = re.escape(API) + r"/api/v1/auth/(?!(?:login|register)(?:$|[/?])).*"
 DEMO_BOOTSTRAP = Path("/opt/clinicflow/DemoDataBootstrap.java")
 REPORTS = Path("/zap/wrk/reports")
 DIRECT = None
@@ -47,6 +62,105 @@ def request(opener, url, method="GET", body=None, headers=None, expected=200):
             return response.read(), response.headers
     except urllib.error.HTTPError as error:
         raise RuntimeError(method + " " + target.netloc + target.path + " returned HTTP " + str(error.code) + ", expected " + str(expected)) from None
+
+
+def form_request(opener, url, fields=None, headers=None, expected=200):
+    # Keycloak takes form bodies. Diagnostics name the endpoint and status only, as in request().
+    data = urllib.parse.urlencode(fields).encode() if fields is not None else None
+    target = urllib.parse.urlsplit(url)
+    try:
+        with opener.open(urllib.request.Request(url, data=data, headers=headers or {}), timeout=30) as response:
+            status, body, response_headers = response.status, response.read(), response.headers
+    except urllib.error.HTTPError as error:
+        status, body, response_headers = error.code, b"", error.headers
+    require(status == expected, ("POST " if data else "GET ") + target.netloc + target.path + " returned HTTP " + str(status) + ", expected " + str(expected))
+    return body, response_headers
+
+
+class PrivateNetworkCookies(http.cookiejar.DefaultCookiePolicy):
+    # Keycloak marks its cookies Secure even over HTTP; this login stays on the disposable private network.
+    def return_ok_secure(self, cookie, request):
+        return urllib.parse.urlsplit(request.get_full_url()).netloc == urllib.parse.urlsplit(KEYCLOAK).netloc or super().return_ok_secure(cookie, request)
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def b64url(data):
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def token_claims(token):
+    payload = token.split(".")[1]
+    return json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+
+
+def private_url(url):
+    # Keycloak writes its public URL (KC_HOSTNAME) into redirects and forms; this container reaches the same
+    # server on the private network.
+    public = urllib.parse.urlsplit(url)
+    private = urllib.parse.urlsplit(KEYCLOAK)
+    return urllib.parse.urlunsplit((private.scheme, private.netloc, public.path, public.query, ""))
+
+
+def login_form_action(page):
+    tag = re.search(r'<form[^>]*id="kc-form-login"[^>]*>', page)
+    action = re.search(r'action="([^"]+)"', tag.group(0)) if tag else None
+    require(action is not None, "Keycloak login form missing")
+    return private_url(html.unescape(action.group(1)))
+
+
+def keycloak_login(role, authorization_url):
+    # Plays the browser on Keycloak's pages and returns the redirect back to the client, unfollowed.
+    browser = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar(PrivateNetworkCookies())), NoRedirect())
+    page, _ = form_request(browser, private_url(authorization_url))
+    credentials = {"username": ROLES[role], "password": os.environ.get("CLINICFLOW_DEMO_PASSWORD", "")}
+    _, headers = form_request(browser, login_form_action(page.decode()), credentials, expected=302)
+    return headers.get("Location", "")
+
+
+def keycloak_token(role):
+    # Authorization code with PKCE as the BFF client, the only flow the realm allows (ADR-027).
+    verifier, state = b64url(secrets.token_bytes(32)), b64url(secrets.token_bytes(16))
+    query = urllib.parse.urlencode({"response_type": "code", "client_id": BFF_CLIENT, "redirect_uri": REDIRECT_URI, "scope": "openid", "state": state,
+                                    "code_challenge": b64url(hashlib.sha256(verifier.encode()).digest()), "code_challenge_method": "S256"})
+    location = keycloak_login(role, REALM + "/protocol/openid-connect/auth?" + query)
+    params = urllib.parse.parse_qs(urllib.parse.urlsplit(location).query)
+    require(params.get("state") == [state] and "code" in params, "Keycloak login did not return the authorization code")
+    secret = os.environ.get("CLINICFLOW_BFF_CLIENT_SECRET", "")
+    require(len(secret) > 20, "BFF client secret is not configured")
+    basic = "Basic " + base64.b64encode((BFF_CLIENT + ":" + secret).encode()).decode()
+    raw, _ = form_request(DIRECT, REALM + "/protocol/openid-connect/token", {"grant_type": "authorization_code", "code": params["code"][0], "redirect_uri": REDIRECT_URI, "code_verifier": verifier}, {"Authorization": basic})
+    token = json.loads(raw)["access_token"]
+    require(token_claims(token).get("roles") == [REALM_ROLES[role]], "Keycloak token does not carry the " + role + " role")
+    return token
+
+
+def session_cookies(set_cookie_lines):
+    # The BFF session: tokens in HttpOnly cookies, everything Secure and SameSite=Lax; spent cookies are dropped.
+    cookies = http.cookies.SimpleCookie()
+    for line in set_cookie_lines:
+        cookies.load(line)
+    require(all(name in cookies and cookies[name].value for name in ("clinicflow_access_token", "clinicflow_refresh_token", "clinicflow_csrf")), "BFF session cookies missing")
+    require(cookies["clinicflow_access_token"]["httponly"] and cookies["clinicflow_refresh_token"]["httponly"], "BFF token cookies are not HttpOnly")
+    for cookie in cookies.values():
+        require(cookie["secure"] and cookie["samesite"].lower() == "lax", "BFF cookie transport protections missing")
+    return {name: item.value for name, item in cookies.items() if item.value}
+
+
+def bff_session(role):
+    # The BFF's authorization-code login (ADR-027): its redirect to Keycloak, the login on the private
+    # network, and the callback that sets the session cookies.
+    browser = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPSHandler(context=ssl.create_default_context(cafile="/certs/ca.crt")),
+                                          urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()), NoRedirect())
+    _, headers = form_request(browser, UI + "/api/auth/login", expected=303)
+    callback = keycloak_login(role, headers.get("Location", ""))
+    require(callback.startswith(UI + "/api/auth/callback?"), "Keycloak did not return to the BFF callback")
+    _, headers = form_request(browser, callback, expected=303)
+    require(urllib.parse.urlsplit(headers.get("Location", "")).path.startswith("/dashboard"), "BFF callback did not sign in")
+    return session_cookies(headers.get_all("Set-Cookie", []))
 
 
 def summarize(messages):
@@ -79,19 +193,14 @@ def demo_password():
 def authenticate(role):
     body = {"email": ROLES[role], "password": demo_password()}
     raw, _ = request(DIRECT, API + "/api/v1/auth/login", "POST", body)
-    token = json.loads(raw)["accessToken"]
-    require(isinstance(token, str) and len(token) > 20, "Bearer login did not produce a token")
-    _, headers = request(DIRECT, UI + "/api/auth/login", "POST", body)
-    cookies = http.cookies.SimpleCookie()
-    for line in headers.get_all("Set-Cookie", []):
-        cookies.load(line)
-    require(all(name in cookies for name in ("clinicflow_access_token", "clinicflow_csrf")), "BFF session cookies missing")
-    require(cookies["clinicflow_access_token"]["httponly"], "Access token cookie is not HttpOnly")
-    for cookie in cookies.values():
-        require(cookie["secure"] and cookie["samesite"].lower() == "lax", "BFF cookie transport protections missing")
-    set_rule("api-auth", "Authorization", "Bearer " + token, re.escape(API) + r"/api/v1/(?!auth/(?:login|register)(?:$|[/?])).*")
-    set_rule("bff-cookie", "Cookie", "; ".join(name + "=" + item.value for name, item in cookies.items()), re.escape(UI) + r"/.*")
-    set_rule("bff-csrf", "x-csrf-token", cookies["clinicflow_csrf"].value, re.escape(UI) + r"/api/.*")
+    auth_service_token = json.loads(raw)["accessToken"]
+    require(isinstance(auth_service_token, str) and len(auth_service_token) > 20, "Bearer login did not produce a token")
+    token = keycloak_token(role)
+    cookies = bff_session(role)
+    set_rule("api-auth", "Authorization", "Bearer " + token, RESOURCE_SERVER_PATHS)
+    set_rule("auth-service-auth", "Authorization", "Bearer " + auth_service_token, AUTH_SERVICE_PATHS)
+    set_rule("bff-cookie", "Cookie", "; ".join(name + "=" + value for name, value in cookies.items()), re.escape(UI) + r"/.*")
+    set_rule("bff-csrf", "x-csrf-token", cookies["clinicflow_csrf"], re.escape(UI) + r"/api/.*")
     request(PROXY, API + "/api/v1/auth/users/me")
     request(PROXY, UI + "/api/auth/me")
 
@@ -213,8 +322,8 @@ def main():
                 # Seed public JSON login bodies for active authentication-endpoint scanning.
                 login_body = {"email": ROLES[role], "password": demo_password()}
                 request(PROXY, API + "/api/v1/auth/login", "POST", login_body)
-                request(PROXY, UI + "/api/auth/login", "POST", login_body)
-                extra = [API + "/api/v1/auth/login", UI + "/api/auth/login"]
+                # The BFF no longer takes passwords; its login is a redirect to Keycloak (ADR-027).
+                extra = [API + "/api/v1/auth/login"]
                 urls = [API + "/api/v1/auth/users/me", UI + "/api/auth/me"]
                 for item in manifest["requests"]:
                     if item["component"] in selected and role in item["roles"]:

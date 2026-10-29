@@ -169,8 +169,7 @@ class NotificationControllerTest {
     }
 
     private org.springframework.test.web.servlet.request.RequestPostProcessor jwtFor(String authority) {
-        String role = authority.replace("ROLE_", "");
-        return jwt().jwt(token -> token.claim("role", role).claim("userId", PSYCHOLOGIST_ID.toString()))
+        return jwt().jwt(token -> token.subject(PSYCHOLOGIST_ID.toString()))
                 .authorities(new SimpleGrantedAuthority(authority));
     }
 

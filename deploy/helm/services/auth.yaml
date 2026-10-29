@@ -4,7 +4,10 @@ image:
 port: 8081
 database:
   name: clinicflow_auth
+oidc:
+  enabled: false
 jwt:
+  enabled: true
   privateKeyEnabled: true
 environment:
   CLINICFLOW_DEMO_BOOTSTRAP_ENABLED: "true"
