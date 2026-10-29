@@ -1,12 +1,6 @@
-"use client";
-
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { HeartPulseIcon, LockKeyholeIcon } from "lucide-react";
-import { useForm } from "react-hook-form";
-import { toast } from "sonner";
-import { z } from "zod";
+import { HeartPulseIcon, LockKeyholeIcon, UserPlusIcon } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -16,85 +10,20 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
-import { apiFetch, ApiClientError } from "@/lib/api-client";
-import type { UserView } from "@/lib/types";
-
-const loginSchema = z.object({
-  email: z.email(),
-  password: z.string().min(1, "Password is required"),
-});
-
-const registerSchema = loginSchema.extend({
-  fullName: z.string().min(2, "Full name is required").max(160),
-  password: z.string().min(12, "Use at least 12 characters"),
-});
 
 type AuthMode = "login" | "register";
-type AuthFormValues = {
-  email: string;
-  password: string;
-  fullName?: string;
+
+const signInErrors: Record<string, string> = {
+  cancelled: "Sign-in was cancelled.",
+  expired: "The sign-in took too long. Please try again.",
+  failed: "We could not sign you in. Please try again.",
+  unavailable: "Sign-in is temporarily unavailable. Please try again shortly.",
 };
 
-export function AuthForm({ mode }: { mode: AuthMode }) {
-  const router = useRouter();
+// Credentials are entered on Keycloak's pages only; ClinicFlow never receives a password (ADR-027).
+export function AuthForm({ mode, error }: { mode: AuthMode; error?: string }) {
   const isRegister = mode === "register";
-  const schema = isRegister ? registerSchema : loginSchema;
-  const form = useForm<AuthFormValues>({
-    resolver: zodResolver(schema),
-    defaultValues: {
-      email: "",
-      password: "",
-      fullName: "",
-    },
-  });
-
-  async function onSubmit(values: AuthFormValues) {
-    try {
-      if (isRegister) {
-        await apiFetch("/api/auth/register", {
-          method: "POST",
-          body: {
-            email: values.email,
-            password: values.password,
-            role: "PSYCHOLOGIST",
-            fullName: values.fullName ?? "",
-          },
-        });
-      }
-
-      const session = await apiFetch<{ user: UserView }>("/api/auth/login", {
-        method: "POST",
-        body: {
-          email: values.email,
-          password: values.password,
-        },
-      });
-
-      toast.success(isRegister ? "Account created" : "Signed in");
-      const destination = session.user.role === "ADMIN"
-        ? "/dashboard/system"
-        : session.user.role === "PATIENT"
-          ? "/dashboard/access-limited"
-          : "/dashboard";
-      router.replace(destination);
-      router.refresh();
-    } catch (error) {
-      const message =
-        error instanceof ApiClientError
-          ? error.message
-          : "Authentication failed";
-      toast.error(message);
-    }
-  }
+  const errorMessage = error ? (signInErrors[error] ?? signInErrors.failed) : null;
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-surface-container-low px-5 py-6 sm:px-8 sm:py-10">
@@ -127,85 +56,39 @@ export function AuthForm({ mode }: { mode: AuthMode }) {
             <HeartPulseIcon className="size-4 text-primary" />
             ClinicFlow
           </div>
-          <CardTitle>{isRegister ? "Create workspace access" : "Sign in"}</CardTitle>
+          <CardTitle>{isRegister ? "Create a patient account" : "Sign in"}</CardTitle>
           <CardDescription>
             {isRegister
-              ? "Create access for your ClinicFlow practice workspace."
+              ? "Patient accounts are created on the ClinicFlow sign-in page. Psychologist workspaces are set up by an administrator."
               : "Sign in to manage your practice with clarity."}
           </CardDescription>
         </CardHeader>
-        <form onSubmit={form.handleSubmit(onSubmit)}>
-          <CardContent>
-            <FieldGroup>
-              {isRegister && (
-                <Field data-invalid={!!form.formState.errors.fullName}>
-                  <FieldLabel htmlFor="fullName">Full name</FieldLabel>
-                  <Input
-                    id="fullName"
-                    aria-invalid={!!form.formState.errors.fullName}
-                    autoComplete="name"
-                    {...form.register("fullName")}
-                  />
-                  <FieldError>
-                    {form.formState.errors.fullName?.message as string}
-                  </FieldError>
-                </Field>
-              )}
-
-              <Field data-invalid={!!form.formState.errors.email}>
-                <FieldLabel htmlFor="email">Email</FieldLabel>
-                <Input
-                  id="email"
-                  type="email"
-                  aria-invalid={!!form.formState.errors.email}
-                  autoComplete="email"
-                  {...form.register("email")}
-                />
-                <FieldError>{form.formState.errors.email?.message}</FieldError>
-              </Field>
-
-              <Field data-invalid={!!form.formState.errors.password}>
-                <FieldLabel htmlFor="password">Password</FieldLabel>
-                <Input
-                  id="password"
-                  type="password"
-                  aria-invalid={!!form.formState.errors.password}
-                  autoComplete={isRegister ? "new-password" : "current-password"}
-                  {...form.register("password")}
-                />
-                {isRegister ? (
-                  <FieldDescription>
-                    Minimum 12 characters. Passwords are never stored in the browser.
-                  </FieldDescription>
-                ) : null}
-                <FieldError>{form.formState.errors.password?.message}</FieldError>
-              </Field>
-            </FieldGroup>
-          </CardContent>
-          <CardFooter className="flex flex-col gap-3">
-            <Button
-              type="submit"
-              className="w-full"
-              disabled={form.formState.isSubmitting}
-            >
-              <LockKeyholeIcon data-icon="inline-start" />
-              {form.formState.isSubmitting
-                ? "Please wait"
-                : isRegister
-                  ? "Create account"
-                  : "Sign in"}
-            </Button>
-            <p className="text-sm text-muted-foreground">
-              {isRegister ? "Already have access?" : "Need an account?"}{" "}
-              <Link
-                href={isRegister ? "/login" : "/register"}
-                className="font-medium text-foreground underline-offset-4 hover:underline"
-              >
-                {isRegister ? "Sign in" : "Register"}
-              </Link>
+        <CardContent>
+          {errorMessage ? (
+            <Alert variant="destructive">
+              <AlertDescription>{errorMessage}</AlertDescription>
+            </Alert>
+          ) : (
+            <p className="text-sm leading-6 text-muted-foreground">
+              You will continue to the ClinicFlow sign-in page and come back here when you are done.
             </p>
-          </CardFooter>
-        </form>
+          )}
+        </CardContent>
+        <CardFooter className="flex flex-col gap-3">
+          <Button className="w-full" render={<a href={isRegister ? "/api/auth/register" : "/api/auth/login"} />} nativeButton={false}>
+            {isRegister ? <UserPlusIcon data-icon="inline-start" /> : <LockKeyholeIcon data-icon="inline-start" />}
+            {isRegister ? "Create account" : "Sign in"}
+          </Button>
+          <p className="text-sm text-muted-foreground">
+            {isRegister ? "Already have access?" : "Need a patient account?"}{" "}
+            <Link
+              href={isRegister ? "/login" : "/register"}
+              className="font-medium text-foreground underline-offset-4 hover:underline"
+            >
+              {isRegister ? "Sign in" : "Register"}
+            </Link>
+          </p>
+        </CardFooter>
       </Card>
       </div>
     </main>

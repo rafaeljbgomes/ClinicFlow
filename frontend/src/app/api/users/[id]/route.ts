@@ -1,13 +1,7 @@
-import { NextRequest } from "next/server";
-import { proxyRequest } from "@/lib/server/bff";
+import { jsonError } from "@/lib/server/bff";
 
-export async function GET(
-  request: NextRequest,
-  context: { params: Promise<{ id: string }> }
-) {
-  const { id } = await context.params;
-  return proxyRequest(request, "auth", `/users/${encodeURIComponent(id)}`, {
-    csrf: false,
-    roles: ["ADMIN"],
-  });
+// auth-service owned this lookup and does not accept Keycloak tokens. Its replacement, the Keycloak
+// Admin API or removal, is decided when auth-service is retired (#90, ADR-027).
+export async function GET() {
+  return jsonError(501, "User lookup is not available while accounts move to Keycloak", { code: "user_lookup_unavailable" });
 }

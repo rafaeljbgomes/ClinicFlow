@@ -1,133 +1,120 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { exportSPKI, generateKeyPair, SignJWT } from "jose";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { errors, generateKeyPair } from "jose";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { verifyAccessToken } from "@/lib/server/jwt";
+import { accessToken, stubOidcEnvironment, testRealm, USER_ID, type TestRealm } from "./realm";
 
-const userId = "9b38f432-6b8f-4d75-9e6a-e775cc4b0175";
-let privateKey: CryptoKey;
-let publicKeyPem: string;
-let keyDirectory: string | undefined;
+let realm: TestRealm;
 
 beforeAll(async () => {
-  const keyPair = await generateKeyPair("RS256");
-  privateKey = keyPair.privateKey;
-  publicKeyPem = await exportSPKI(keyPair.publicKey);
+  realm = await testRealm();
 });
 
-afterEach(async () => {
-  delete process.env.CLINICFLOW_SECURITY_JWT_PUBLIC_KEY;
-  delete process.env.CLINICFLOW_SECURITY_JWT_PUBLIC_KEY_PATH;
-  delete process.env.CLINICFLOW_SECURITY_JWT_ISSUER;
-  vi.resetModules();
-  if (keyDirectory) {
-    await rm(keyDirectory, { recursive: true, force: true });
-    keyDirectory = undefined;
-  }
-});
+beforeEach(() => stubOidcEnvironment());
+afterEach(() => vi.unstubAllEnvs());
 
 describe("verifyAccessToken", () => {
-  it("verifies a valid RS256 token with all ClinicFlow claims", async () => {
+  it("verifies a realm access token and identifies the caller by sub", async () => {
     // Arrange
-    const verifier = await inlineKeyVerifier();
-    const token = await signedToken();
+    const token = await accessToken(realm);
 
     // Act
-    const result = await verifier.verifyAccessToken(token);
+    const result = await verifyAccessToken(token, realm.keys);
 
     // Assert
-    expect(result).toMatchObject({
+    expect(result).toEqual({
       status: "verified",
       principal: {
-        userId,
-        email: "admin@example.com",
-        role: "ADMIN",
+        userId: USER_ID,
+        email: "sofia.almeida@demo.clinicflow.local",
+        role: "PSYCHOLOGIST",
+        name: "Sofia Almeida",
+        expiresAt: expect.any(Number),
       },
     });
   });
 
+  it("ignores roles outside the ClinicFlow set", async () => {
+    // Arrange
+    const token = await accessToken(realm, { claims: { roles: ["offline_access", "ADMIN", "uma_authorization"] } });
+
+    // Act
+    const result = await verifyAccessToken(token, realm.keys);
+
+    // Assert
+    expect(result).toMatchObject({ status: "verified", principal: { role: "ADMIN" } });
+  });
+
+  it("leaves the display name empty when the token has none", async () => {
+    // Arrange
+    const token = await accessToken(realm, { claims: { name: undefined } });
+
+    // Act
+    const result = await verifyAccessToken(token, realm.keys);
+
+    // Assert
+    expect(result).toMatchObject({ status: "verified", principal: { name: null } });
+  });
+
   it.each([
-    ["an expired token", () => signedToken({ expiresIn: "-1s" })],
-    ["a token from another issuer", () => signedToken({ issuer: "other-issuer" })],
-    [
-      "a token signed with another key",
-      async () => signedToken({ signingKey: (await generateKeyPair("RS256")).privateKey }),
-    ],
-    ["a token with an unknown role", () => signedToken({ claims: { role: "CLINICIAN" } })],
-    ["a token without an email claim", () => signedToken({ claims: { email: undefined } })],
-    [
-      "a token whose subject differs from the user id",
-      () => signedToken({ subject: "b1e674bd-a12d-4d16-916d-53ccde5b933d" }),
-    ],
+    ["an expired token", () => accessToken(realm, { expiresIn: "-2m" })],
+    ["a token from another issuer", () => accessToken(realm, { issuer: "clinicflow-auth" })],
+    ["a token for another audience", () => accessToken(realm, { audience: "clinicflow-bff" })],
+    ["a token signed with another key", async () => accessToken(realm, { signingKey: (await generateKeyPair("RS256")).privateKey })],
+    ["a token without roles", () => accessToken(realm, { claims: { roles: undefined } })],
+    ["a token with two ClinicFlow roles", () => accessToken(realm, { claims: { roles: ["PSYCHOLOGIST", "ADMIN"] } })],
+    ["a token with only unknown roles", () => accessToken(realm, { claims: { roles: ["CLINICIAN"] } })],
+    ["a token with a single-string role", () => accessToken(realm, { claims: { roles: "ADMIN" } })],
+    ["a token whose roles are only under realm_access", () => accessToken(realm, { claims: { roles: undefined, realm_access: { roles: ["ADMIN"] } } })],
+    ["a token without an email claim", () => accessToken(realm, { claims: { email: undefined } })],
+    ["a token whose subject is not a UUID", () => accessToken(realm, { subject: "sofia" })],
   ])("rejects %s", async (_scenario, createToken) => {
     // Arrange
-    const verifier = await inlineKeyVerifier();
     const token = await createToken();
 
     // Act
-    const result = await verifier.verifyAccessToken(token);
+    const result = await verifyAccessToken(token, realm.keys);
 
     // Assert
     expect(result).toEqual({ status: "invalid" });
   });
 
-  it("loads a public key from the configured file path", async () => {
+  it("rejects a token signed with a symmetric algorithm", async () => {
     // Arrange
-    keyDirectory = await mkdtemp(join(tmpdir(), "clinicflow-jwt-"));
-    const keyPath = join(keyDirectory, "jwt-public.pem");
-    await writeFile(keyPath, publicKeyPem, "utf8");
-    process.env.CLINICFLOW_SECURITY_JWT_PUBLIC_KEY_PATH = keyPath;
-    const verifier = await import("@/lib/server/jwt");
-    const token = await signedToken();
+    const [header, payload] = (await accessToken(realm)).split(".");
+    const forged = `${Buffer.from(JSON.stringify({ alg: "HS256", kid: "realm-key" })).toString("base64url")}.${payload}.${header}`;
 
     // Act
-    const result = await verifier.verifyAccessToken(token);
+    const result = await verifyAccessToken(forged, realm.keys);
 
     // Assert
-    expect(result).toMatchObject({ status: "verified" });
+    expect(result).toEqual({ status: "invalid" });
   });
 
-  it("fails closed when no public key can be loaded", async () => {
+  it("reports an unreachable key set as unavailable", async () => {
     // Arrange
-    const verifier = await import("@/lib/server/jwt");
-    const token = await signedToken();
+    const token = await accessToken(realm);
+    const unreachable = async () => {
+      throw new TypeError("fetch failed");
+    };
 
     // Act
-    const result = await verifier.verifyAccessToken(token);
+    const result = await verifyAccessToken(token, unreachable);
+
+    // Assert
+    expect(result).toEqual({ status: "unavailable" });
+  });
+
+  it("reports a key set timeout as unavailable", async () => {
+    // Arrange
+    const token = await accessToken(realm);
+    const slow = async () => {
+      throw new errors.JWKSTimeout();
+    };
+
+    // Act
+    const result = await verifyAccessToken(token, slow);
 
     // Assert
     expect(result).toEqual({ status: "unavailable" });
   });
 });
-
-async function inlineKeyVerifier() {
-  process.env.CLINICFLOW_SECURITY_JWT_PUBLIC_KEY = publicKeyPem;
-  return import("@/lib/server/jwt");
-}
-
-async function signedToken({
-  claims = {},
-  expiresIn = "5m",
-  issuer = "clinicflow-auth",
-  signingKey = privateKey,
-  subject = userId,
-}: {
-  claims?: Record<string, unknown>;
-  expiresIn?: string;
-  issuer?: string;
-  signingKey?: CryptoKey;
-  subject?: string;
-} = {}) {
-  return new SignJWT({
-    userId,
-    email: "admin@example.com",
-    role: "ADMIN",
-    ...claims,
-  })
-    .setProtectedHeader({ alg: "RS256" })
-    .setIssuer(issuer)
-    .setSubject(subject)
-    .setIssuedAt()
-    .setExpirationTime(expiresIn)
-    .sign(signingKey);
-}
