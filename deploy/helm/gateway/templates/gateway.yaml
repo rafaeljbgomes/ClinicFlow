@@ -5,7 +5,7 @@ metadata:
 spec:
   gatewayClassName: {{ .Values.gatewayClassName }}
   listeners:
-    {{- range $name, $hostname := dict "ui" .Values.uiHostname "public-api" .Values.apiHostname }}
+    {{- range $name, $hostname := dict "ui" .Values.uiHostname "public-api" .Values.apiHostname "auth" .Values.authHostname }}
     - name: {{ $name }}-http
       hostname: {{ $hostname | quote }}
       protocol: HTTP

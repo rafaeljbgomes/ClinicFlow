@@ -1,6 +1,7 @@
 -- Keycloak's database and its login (ADR-026, ADR-027). Keycloak migrates its own schema on startup
 -- and on every upgrade, so its one login owns the database; there is no separate runtime role.
--- Run by postgres-bootstrap as the platform administrator; every statement is idempotent.
+-- Run by provision-postgres.sh as the platform administrator, from Compose's postgres-bootstrap and
+-- the platform chart's bootstrap Job alike; every statement is idempotent.
 -- The login comes from the environment so the password never appears in a process list.
 \getenv keycloak_user KC_DB_USERNAME
 \getenv keycloak_password KC_DB_PASSWORD

@@ -1,0 +1,195 @@
+# ClinicFlow's identity provider (ADR-027): the vendored codecentric keycloakx chart, pinned in
+# provenance.json, running ClinicFlow's Keycloak image from docker/keycloak with the realm built in.
+# The realm is imported only when it does not exist; scripts/reset-keycloak-realm.ps1 applies changes.
+global:
+  clinicflow:
+    # The public origin behind the gateway. The issuer is <hostname>/realms/<realm>, which the
+    # frontend and service charts trust; scripts/gateway/validate-manifests.cjs keeps them equal.
+    hostname: https://auth.clinicflow.localhost
+    # The admin console's origin. It has no gateway route; operators reach it with
+    # kubectl port-forward svc/keycloak 8180:8080 -n clinicflow.
+    adminHostname: http://localhost:8180
+    realm: clinicflow
+    # The UI origin; must equal the frontend chart's oidc.publicUrl (redirect and post-logout URIs).
+    publicUrl: https://clinicflow.localhost
+    # The demo users' synthetic password, documented in docs/development/local-development.md. As in
+    # Compose, scripts/deploy-local-kubernetes.ps1 passes CLINICFLOW_DEMO_PASSWORD or the documented value;
+    # without one the realm import fails.
+    demoPassword: ""
+    database:
+      url: jdbc:postgresql://postgres:5432/clinicflow_keycloak
+      # PostgreSQL allows 100 connections; Keycloak would otherwise take up to 100 on its own.
+      poolMaxSize: 10
+    # Created by scripts/deploy-local-kubernetes.ps1 from the generated secrets/keycloak files (ADR-026).
+    secrets:
+      database: clinicflow-keycloak-database
+      admin: clinicflow-keycloak-admin
+      client: clinicflow-bff-oidc
+    # Digests of those Secrets and of the realm file; a change rolls the pod.
+    checksums:
+      database: ""
+      admin: ""
+      client: ""
+      realm: ""
+
+# The stable private-network URL, http://keycloak:8080, in Compose and Kubernetes alike.
+service:
+  name: keycloak
+  port: 8080
+
+networkPolicy:
+  enabled: true
+  gatewayNamespace: ingress-system
+  monitoringNamespace: monitoring
+  # Pods that exchange codes or fetch keys on the private network. auth-service is not one (#90).
+  clients:
+    - frontend
+    - patient-service
+    - appointment-service
+    - clinical-service
+    - notification-service
+
+keycloakx:
+  fullnameOverride: keycloak
+  # KC_CACHE=local is single-node (ADR-027); the schema keeps this at one.
+  replicas: 1
+  image:
+    repository: clinicflow/keycloak
+    # The deploy script tags the local build by image ID, so an unchanged rebuild keeps the pod.
+    tag: local
+    pullPolicy: IfNotPresent
+  enableServiceLinks: false
+  podLabels:
+    app.kubernetes.io/component: keycloak
+    app.kubernetes.io/part-of: clinicflow
+  podAnnotations:
+    checksum/database: "{{ .Values.global.clinicflow.checksums.database }}"
+    checksum/admin: "{{ .Values.global.clinicflow.checksums.admin }}"
+    checksum/client: "{{ .Values.global.clinicflow.checksums.client }}"
+    checksum/realm: "{{ .Values.global.clinicflow.checksums.realm }}"
+  # No KUBE_PING and no Kubernetes API access.
+  serviceAccount:
+    automountServiceAccountToken: false
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+  # "custom" stops the chart from injecting the clustered ispn cache with JDBC_PING.
+  cache:
+    stack: custom
+  # Traefik ends TLS and sends X-Forwarded-*; without them Keycloak refuses origin checks.
+  # proxy-trusted-addresses stays unset: NetworkPolicy admits only the gateway and the clients above.
+  proxy:
+    enabled: true
+    mode: xforwarded
+    http:
+      enabled: true
+  http:
+    relativePath: /
+    managementRelativePath: /
+  service:
+    httpsPort: null
+  extraEnv: |
+    - name: KC_CACHE
+      value: local
+    - name: KC_HOSTNAME
+      value: {{ .Values.global.clinicflow.hostname | quote }}
+    - name: KC_HOSTNAME_ADMIN
+      value: {{ .Values.global.clinicflow.adminHostname | quote }}
+    - name: KC_HOSTNAME_BACKCHANNEL_DYNAMIC
+      value: "true"
+    - name: KC_DB_URL
+      value: {{ .Values.global.clinicflow.database.url | quote }}
+    - name: KC_DB_POOL_MAX_SIZE
+      value: {{ .Values.global.clinicflow.database.poolMaxSize | quote }}
+    - name: CLINICFLOW_PUBLIC_URL
+      value: {{ .Values.global.clinicflow.publicUrl | quote }}
+    {{- with .Values.global.clinicflow.demoPassword }}
+    - name: CLINICFLOW_DEMO_PASSWORD
+      value: {{ . | quote }}
+    {{- end }}
+  # KC_DB_USERNAME/KC_DB_PASSWORD, KC_BOOTSTRAP_ADMIN_* and CLINICFLOW_BFF_CLIENT_SECRET.
+  extraEnvFrom: |
+    - secretRef:
+        name: {{ .Values.global.clinicflow.secrets.database | quote }}
+    - secretRef:
+        name: {{ .Values.global.clinicflow.secrets.admin | quote }}
+    - secretRef:
+        name: {{ .Values.global.clinicflow.secrets.client | quote }}
+  # The only writable paths: the JVM's temporary files; Keycloak's own, where it caches gzipped theme
+  # resources (without it every compressed request for them gets 404); and the transaction object
+  # store, without which every start waits on Narayana's recovery modules.
+  extraVolumes: |
+    - name: tmp
+      emptyDir:
+        sizeLimit: 64Mi
+    - name: data-tmp
+      emptyDir:
+        sizeLimit: 64Mi
+    - name: transaction-logs
+      emptyDir:
+        sizeLimit: 64Mi
+  extraVolumeMounts: |
+    - name: tmp
+      mountPath: /tmp
+    - name: data-tmp
+      mountPath: /opt/keycloak/data/tmp
+    - name: transaction-logs
+      mountPath: /opt/keycloak/data/transaction-logs
+  # Spike measurements (ADR-027, Footprint).
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 768Mi
+  # The first start creates the schema and imports the realm: up to 15 s + 60 x 5 s.
+  startupProbe: |
+    httpGet:
+      path: /health
+      port: http-internal
+      scheme: HTTP
+    initialDelaySeconds: 15
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 60
+  livenessProbe: |
+    httpGet:
+      path: /health/live
+      port: http-internal
+      scheme: HTTP
+    timeoutSeconds: 5
+  # Readiness is the HTTP status: the body lists passing sub-checks as UP while overall is DOWN.
+  readinessProbe: |
+    httpGet:
+      path: /health/ready
+      port: http-internal
+      scheme: HTTP
+    initialDelaySeconds: 10
+    timeoutSeconds: 3
+  # Scrapes /metrics on the management port through the chart's keycloak-http Service (ADR-013).
+  serviceMonitor:
+    enabled: true
+  # The wrapper owns routing and the NetworkPolicy; the busybox and test images are never pulled.
+  dbchecker:
+    enabled: false
+  test:
+    enabled: false
+  ingress:
+    enabled: false
+  httpRoute:
+    enabled: false
+  networkPolicy:
+    enabled: false

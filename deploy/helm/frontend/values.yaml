@@ -33,6 +33,8 @@ oidc:
   publicUrl: https://clinicflow.localhost
   clientSecretName: clinicflow-bff-oidc
   clientSecretKey: CLINICFLOW_BFF_CLIENT_SECRET
+  # A digest of that Secret; a rotated client secret rolls the BFF (ADR-026).
+  clientSecretChecksum: ""
   # The in-cluster Keycloak pods (app.kubernetes.io/component) and HTTP port the egress rule allows.
   component: keycloak
   port: 8080

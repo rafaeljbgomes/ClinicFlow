@@ -13,6 +13,7 @@ spec:
     metadata:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/client-secret: {{ .Values.oidc.clientSecretChecksum | quote }}
       labels:
         {{- include "clinicflow-frontend.labels" . | nindent 8 }}
         app.kubernetes.io/component: {{ .Values.name }}

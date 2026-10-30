@@ -181,7 +181,10 @@ the private network use the internal address:
 | Environment | Public URL (`KC_HOSTNAME`; the issuer is this plus `/realms/clinicflow`) | Private-network URL |
 |---|---|---|
 | Compose (local and CI) | `http://localhost:8180` | `http://keycloak:8080` |
-| Compose HTTPS acceptance and Docker Desktop Kubernetes behind Traefik (ADR-018) | `https://auth.clinicflow.localhost` | `http://keycloak:8080` (Compose) or the in-cluster Service (Kubernetes) |
+| Docker Desktop Kubernetes behind Traefik (ADR-018, #89) | `https://auth.clinicflow.localhost` | `http://keycloak:8080`, the `keycloak` Service |
+
+Compose's HTTPS acceptance overlay still uses the Compose row: serving Keycloak
+on `auth.clinicflow.localhost` through the Compose gateway is not implemented.
 
 The spike verified this split. Discovery fetched from `http://keycloak:8080`
 returns the public `issuer`, `authorization_endpoint` and
@@ -232,12 +235,13 @@ issuer with requests rerouted to the internal host. Fetching discovery from
 `http://keycloak:8080` and validating the result fails, by design. #88 picks
 one; see [BFF client choices](#bff-client-choices-88).
 
-**The gateway (#89)** routes only `/realms/` and `/resources/` on
-`auth.clinicflow.localhost`. The admin console is not routed and stays on a
-local port or `kubectl port-forward`. The existing login rate limit (10/minute,
-burst 5) moves to the Keycloak login-action paths. Keycloak's brute-force
-detection (5 failures, then an incremental wait up to 15 minutes) is the
-per-account control behind it.
+**The gateway (#89)** routes four prefixes of the `clinicflow` realm on
+`auth.clinicflow.localhost`, narrower than the `/realms/` this ADR first named;
+see [Kubernetes deployment choices](#kubernetes-deployment-choices-89). The
+admin console is not routed and stays on a local port or `kubectl port-forward`.
+The existing login rate limit (10/minute, burst 5) moves to the Keycloak
+`login-actions` paths. Keycloak's brute-force detection (5 failures, then an
+incremental wait up to 15 minutes) is the per-account control behind it.
 
 ### BFF client choices (#88)
 
@@ -286,10 +290,15 @@ The decisions this ADR left to #88, made in the implementation:
 
 - **Image.** A ClinicFlow image built `FROM` the official image, which runs
   `kc.sh build` with `KC_DB=postgres`, `KC_HEALTH_ENABLED=true`,
-  `KC_METRICS_ENABLED=true` and `KC_CACHE=local`, then `start --optimized`.
-  Plain `start` re-runs the Quarkus build on every boot. `KC_CACHE=local` is
-  right for one replica. The default clustered cache starts JGroups
-  (`JDBC_PING` discovery) for no benefit.
+  `KC_METRICS_ENABLED=true` and both relative paths at `/`, then
+  `start --optimized`. Plain `start` re-runs the Quarkus build on every boot.
+  `--optimized` exits when a build-time option set at runtime differs from the
+  persisted value, which is why the paths the Kubernetes chart always sets are
+  persisted explicitly. `KC_CACHE=local` is right for one replica; the default
+  clustered cache starts JGroups (`JDBC_PING` discovery) for no benefit. Since
+  Keycloak 25 the cache is a runtime option, so it is set on the runtime image:
+  until #89 it sat in the build stage, where it had no effect, and Compose ran
+  the clustered cache.
 - **Health.** Readiness is `GET /health/ready` on management port 9000, judged
   by the **HTTP status**. The spike's first health check grepped the body for
   `"UP"` and passed while Keycloak was still `DOWN`, because the body lists
@@ -314,8 +323,9 @@ The decisions this ADR left to #88, made in the implementation:
   upstream image only because it is throwaway.
 - **Kubernetes: the codecentric `keycloakx` chart** (7.4.0, `appVersion`
   26.8.1) with the ClinicFlow image, installed as its own Helm release (ADR-011,
-  ADR-017). The realm is mounted from the same JSON file that Compose uses, and
-  placeholders come from Secrets. Alternatives considered:
+  ADR-017). It runs the same image as Compose, so the realm file built into it
+  is the one Compose imports, and placeholders come from Secrets. Alternatives
+  considered:
   - **Keycloak Operator** (official). It would add a second always-on JVM pod
     and two cluster-scoped CRDs (platform-owned, as in ADR-018), installed from
     raw manifests rather than Helm. The realm would have to be restated as a
@@ -361,13 +371,66 @@ Keycloak's database used 52 to 59 MiB.
   Give the startup probe at least 90 s for the first install.
 - On the local cluster, Keycloak replaces `auth-service` and its database.
   `scripts/scale-local-kubernetes-to-zero.ps1` scales every Deployment and
-  StatefulSet in the application and monitoring namespaces, so a `keycloakx`
-  StatefulSet in the `clinicflow` namespace is covered with no change. If #89
-  installs it in its own namespace, the script needs that namespace added. The
-  script is not on `main` yet; it exists only as an untracked file in a working
-  copy.
-- Not measured: the memory of today's `auth-service`, so the net change on the
-  cluster is not quantified here. #89 records it.
+  StatefulSet in the application and monitoring namespaces, so the Keycloak
+  StatefulSet in `clinicflow` is covered with no change.
+- Kubernetes (#89, measured 2026-10-29 on the same machine): the first install
+  went from pod start to Ready in 95 s, with the schema created and the realm
+  imported under a read-only root filesystem and a 1-CPU limit. After the
+  acceptance runs, Keycloak's pod used 597 MiB and `auth-service`'s 253 MiB
+  (cgroup `memory.current`); their databases held 14 MB and 7.7 MB. Until #90
+  removes `auth-service`, the cluster carries both; after it, the net change is
+  about +345 MiB.
+
+### Kubernetes deployment choices (#89)
+
+- **Release.** `clinicflow-keycloak` in `clinicflow` wraps the vendored
+  `keycloakx` 7.4.0 chart, pinned by hash in `deploy/helm/keycloak/provenance.json`.
+  It runs the Compose image, tagged by image ID like PostgreSQL's (ADR-028). The
+  wrapper adds a `keycloak` Service on 8080, so `http://keycloak:8080` is the
+  private-network URL in both runtimes and the service and frontend charts from
+  #87 and #88 needed no change. The chart's own defaults did not fit: its
+  Service is `keycloak-http` on port 80, its paths sit under `/auth`, it
+  injects the clustered cache with `JDBC_PING`, and it expects RFC 7239
+  `Forwarded` headers. The values and the schema fix each of these.
+- **Narrower routes.** Keycloak's reverse-proxy guide keeps `/admin` and
+  `/realms/master` internal. A `/realms/` route would also expose the `master`
+  realm's token endpoint, where `admin-cli` accepts the password grant, so the
+  bootstrap administrator's password could be guessed through the edge. The
+  gateway therefore routes only `/realms/clinicflow/protocol/openid-connect`,
+  `/realms/clinicflow/login-actions` (with the login limit),
+  `/realms/clinicflow/.well-known` and `/resources`. The account console,
+  client registration and brokering stay unrouted; the app does not use them.
+- **Proxy headers.** `KC_PROXY_HEADERS=xforwarded`: Traefik ends TLS and sends
+  `X-Forwarded-*`, and without them Keycloak answers origin-checked requests
+  with 403 and builds `http://` URLs. `proxy-trusted-addresses` stays unset.
+  Traefik's entrypoints trust no forwarded headers from clients and write their
+  own, and NetworkPolicy admits only the gateway, the BFF and the four resource
+  servers to Keycloak's HTTP port. A pod CIDR, the only stable value on Docker
+  Desktop, would contain those same pods. The residual: a compromised one of
+  them could put a false client address in Keycloak's events. Set the option
+  where proxies have fixed addresses.
+- **Admin console.** `KC_HOSTNAME_ADMIN=http://localhost:8180`, reached with
+  `kubectl port-forward svc/keycloak 8180:8080`. A port-forward enters the pod's
+  network namespace, so NetworkPolicy does not apply to it; it is limited to
+  kubeconfig holders. NetworkPolicy works at layer 4, so the pods allowed on
+  8080 could also call `/admin` in-cluster. That is accepted for a single-tenant
+  local cluster.
+- **Hardening.** Read-only root filesystem, no service-account token, all
+  capabilities dropped, RuntimeDefault seccomp. Three scratch volumes are the
+  only writable paths: `/tmp`; `data/tmp`, where Keycloak caches gzipped theme
+  resources (without it every compressed request for them gets 404); and
+  `data/transaction-logs`, without which each start waits about 30 s on
+  Narayana's recovery modules. The realm import directory stays the image's.
+- **Database.** The platform bootstrap creates `clinicflow_keycloak` and its
+  owner from the same SQL Compose runs. `KC_DB_POOL_MAX_SIZE=10`: PostgreSQL
+  allows 100 connections, the five services' pools take 50, and Keycloak's
+  default pool is 100.
+- **Realm drift.** The import only creates, so the release records the realm
+  file Keycloak imported; the deploy script warns when the file changes and
+  `reset-keycloak-realm.ps1 -Target Kubernetes` re-imports it. Nothing resets
+  on its own, because a reset deletes self-registered users.
+- **Metrics.** The chart's ServiceMonitor scrapes `/metrics` on the management
+  port; only Prometheus may reach it.
 
 ### Version and upgrade cadence
 

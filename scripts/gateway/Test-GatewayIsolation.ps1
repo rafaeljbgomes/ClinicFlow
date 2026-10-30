@@ -9,7 +9,11 @@ $Probes=@(
     @{Name='frontend';Namespace=$Namespace;Labels=@{'app.kubernetes.io/component'='frontend'}},
     @{Name='gateway';Namespace=$IngressNamespace;Labels=@{'clinicflow.io/edge'='gateway'}},
     @{Name='monitoring';Namespace=$MonitoringNamespace;Labels=@{'app.kubernetes.io/name'='prometheus'}},
-    @{Name='egress-sink';Namespace=$Namespace;Labels=@{'app.kubernetes.io/component'='postgres';'clinicflow.io/sink'=$Run};Command="for(const port of [5432,5672])require('node:http').createServer((q,r)=>r.end('ok')).listen(port,'0.0.0.0')"}
+    @{Name='egress-sink';Namespace=$Namespace;Labels=@{'app.kubernetes.io/component'='postgres';'clinicflow.io/sink'=$Run};Command="for(const port of [5432,5672])require('node:http').createServer((q,r)=>r.end('ok')).listen(port,'0.0.0.0')"},
+    # Keycloak (ADR-027): a resource server, an impostor of Keycloak's own label, and a sink no policy names.
+    @{Name='patient-service';Namespace=$Namespace;Labels=@{'app.kubernetes.io/component'='patient-service'}},
+    @{Name='keycloak-label';Namespace=$Namespace;Labels=@{'app.kubernetes.io/component'='keycloak'}},
+    @{Name='plain-sink';Namespace=$Namespace;Labels=@{'clinicflow.io/sink'=$Run};Command="for(const port of [5432,8443])require('node:http').createServer((q,r)=>r.end('ok')).listen(port,'0.0.0.0')"}
 )
 function Apply-Object($Object) {
     $Object | ConvertTo-Json -Depth 15 | & kubectl apply -f -
@@ -22,6 +26,20 @@ function Probe($Name,$Url,$Allowed,$Status) {
     $Connected=$LASTEXITCODE -eq 0
     if ($Connected -ne $Allowed -or ($Allowed -and $Actual -ne $Status)) { throw "Isolation FAILED: $Name -> $Url returned '$Actual'; allowed=$Allowed expected=$Status" }
     Write-Host "PASS $Name -> $Url (allowed=$Allowed)"
+}
+# A TCP connect, for services that do not speak HTTP.
+function Probe-Tcp($Name,$HostName,$Port,$Allowed) {
+    $Source=$Probes | Where-Object Name -eq $Name
+    $Code="const s=require('node:net').connect(Number(process.argv[2]),process.argv[1],()=>{s.end();process.exit(0)});s.setTimeout(4000,()=>process.exit(9));s.on('error',()=>process.exit(9))"
+    & kubectl exec "$Run-$Name" -n $Source.Namespace -- node -e $Code $HostName $Port 2>$null
+    if (($LASTEXITCODE -eq 0) -ne $Allowed) { throw "Isolation FAILED: $Name -> ${HostName}:$Port allowed=$Allowed" }
+    Write-Host "PASS $Name -> ${HostName}:$Port (allowed=$Allowed)"
+}
+# Keycloak's own egress, from inside its pod: the image has bash and timeout, and no curl.
+function Probe-KeycloakEgress($HostName,$Port,$Allowed) {
+    & kubectl exec keycloak-0 -n $Namespace -c keycloak -- bash -c 'timeout 4 bash -c "exec 3<>/dev/tcp/$0/$1"' $HostName $Port 2>$null
+    if (($LASTEXITCODE -eq 0) -ne $Allowed) { throw "Isolation FAILED: keycloak-0 -> ${HostName}:$Port allowed=$Allowed" }
+    Write-Host "PASS keycloak-0 -> ${HostName}:$Port (allowed=$Allowed)"
 }
 try {
     foreach ($TargetNamespace in @($Namespace,$IngressNamespace,$MonitoringNamespace) | Sort-Object -Unique) {
@@ -74,6 +92,27 @@ try {
         & kubectl exec $Controller -n $IngressNamespace -- nc -z -w 4 $Destination[0] $Destination[1] 2>$null
         if ($LASTEXITCODE -eq 0) { throw "Controller unexpectedly reached $($Destination[0]):$($Destination[1])" }
     }
+    # Keycloak (ADR-027, #89): the gateway and the private-network clients reach HTTP; Prometheus reaches
+    # the management port; nothing else reaches either, and Keycloak itself reaches only DNS and PostgreSQL.
+    $Discovery="http://keycloak.$Namespace.svc.cluster.local:8080/realms/clinicflow/.well-known/openid-configuration"
+    foreach ($Name in @('gateway','frontend','patient-service')) { Probe $Name $Discovery $true '200' }
+    foreach ($Name in @('denied','spoofed-gateway','monitoring','keycloak-label')) { Probe $Name $Discovery $false '' }
+    $Management="http://keycloak-http.$Namespace.svc.cluster.local:9000/health/ready"
+    Probe monitoring $Management $true '200'
+    foreach ($Name in @('denied','gateway','frontend')) { Probe $Name $Management $false '' }
+    & kubectl exec $Controller -n $IngressNamespace -- wget -T 4 -q -O /dev/null $Discovery
+    if ($LASTEXITCODE -ne 0) { throw 'Real controller cannot reach Keycloak for the identity routes.' }
+    Write-Host 'PASS real controller -> keycloak:8080 (allowed=True)'
+    Probe-KeycloakEgress "postgres.$Namespace.svc.cluster.local" 5432 $true
+    $PlainSink=(& kubectl get pod "$Run-plain-sink" -n $Namespace -o json | ConvertFrom-Json).status.podIP
+    foreach ($Port in @(5432,8443)) { Probe frontend "http://${PlainSink}:$Port/" $true '200' }
+    foreach ($Destination in @(@("rabbitmq.$Namespace.svc.cluster.local",5672),@("patient-service.$Namespace.svc.cluster.local",8082),@("frontend.$Namespace.svc.cluster.local",3000),@("clinicflow-gateway-api.$IngressNamespace.svc.cluster.local",8080),@($PlainSink,5432),@($PlainSink,8443),@('1.1.1.1',443))) {
+        Probe-KeycloakEgress $Destination[0] $Destination[1] $false
+    }
+    # PostgreSQL trusts the component label, as for every service: an unlabelled pod is refused, a pod
+    # carrying Keycloak's label is admitted. That residual is the one ADR-026 already accepts.
+    Probe-Tcp denied "postgres.$Namespace.svc.cluster.local" 5432 $false
+    Probe-Tcp keycloak-label "postgres.$Namespace.svc.cluster.local" 5432 $true
     Write-Host 'Isolation traffic acceptance passed in this cluster. Retain this output and CNI/version evidence before closing issue #13.'
 }
 finally {

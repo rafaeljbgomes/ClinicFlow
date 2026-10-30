@@ -88,6 +88,11 @@ bootstrap:
     capabilities:
       drop: ["ALL"]
 
+# Keycloak's database login (ADR-027). When set, the bootstrap Job also creates the clinicflow_keycloak
+# database and its owner from this Secret's KC_DB_USERNAME and KC_DB_PASSWORD.
+keycloak:
+  databaseSecret: ""
+
 serviceMonitor:
   enabled: true
   interval: 15s

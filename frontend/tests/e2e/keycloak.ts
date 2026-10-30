@@ -7,6 +7,9 @@ import type { APIRequestContext, Browser, BrowserContextOptions, Page } from "@p
 export const keycloakUrl =
   process.env.PLAYWRIGHT_KEYCLOAK_URL ?? `http://localhost:${process.env.CLINICFLOW_KEYCLOAK_PORT ?? "8180"}`;
 const realmUrl = `${keycloakUrl}/realms/clinicflow`;
+// The admin API and the token exchange from Node. On Kubernetes the gateway routes neither the master realm
+// nor the admin API, so they go through kubectl port-forward; in Compose this is the public URL.
+const keycloakBackchannelUrl = process.env.PLAYWRIGHT_KEYCLOAK_BACKCHANNEL_URL ?? keycloakUrl;
 const secretsDirectory = path.resolve(__dirname, "../../../secrets/keycloak");
 
 export type StorageState = Awaited<ReturnType<APIRequestContext["storageState"]>>;
@@ -65,7 +68,7 @@ export async function keycloakAccessToken(browser: Browser, request: APIRequestC
     if (callback.searchParams.get("state") !== state || !callback.searchParams.get("code")) {
       throw new Error(`Arrange step "Keycloak login ${email}" returned no authorization code`);
     }
-    const response = await request.post(`${realmUrl}/protocol/openid-connect/token`, {
+    const response = await request.post(`${keycloakBackchannelUrl}/realms/clinicflow/protocol/openid-connect/token`, {
       headers: { Authorization: `Basic ${Buffer.from(`clinicflow-bff:${clientSecret()}`).toString("base64")}` },
       form: { grant_type: "authorization_code", code: callback.searchParams.get("code")!, redirect_uri: redirectUri, code_verifier: verifier },
     });
@@ -80,12 +83,12 @@ export async function keycloakAccessToken(browser: Browser, request: APIRequestC
 // no default role, so the token carries exactly PSYCHOLOGIST.
 export async function provisionPsychologist(request: APIRequestContext, user: { email: string; password: string; firstName: string; lastName: string }) {
   const admin = readEnvFile("admin.env");
-  const login = await request.post(`${keycloakUrl}/realms/master/protocol/openid-connect/token`, {
+  const login = await request.post(`${keycloakBackchannelUrl}/realms/master/protocol/openid-connect/token`, {
     form: { grant_type: "password", client_id: "admin-cli", username: admin.KC_BOOTSTRAP_ADMIN_USERNAME, password: admin.KC_BOOTSTRAP_ADMIN_PASSWORD },
   });
   if (!login.ok()) throw new Error(`Arrange step "Keycloak administrator login" returned ${login.status()}`);
   const id = randomUUID();
-  const response = await request.post(`${keycloakUrl}/admin/realms/clinicflow/partialImport`, {
+  const response = await request.post(`${keycloakBackchannelUrl}/admin/realms/clinicflow/partialImport`, {
     headers: { Authorization: `Bearer ${(await login.json()).access_token}` },
     data: {
       ifResourceExists: "FAIL",

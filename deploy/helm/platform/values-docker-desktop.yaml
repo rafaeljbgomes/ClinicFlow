@@ -5,3 +5,6 @@ postgres:
 
 rabbitmq:
   existingSecret: clinicflow-rabbitmq-admin
+
+keycloak:
+  databaseSecret: clinicflow-keycloak-database

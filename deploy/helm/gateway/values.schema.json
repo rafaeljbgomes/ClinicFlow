@@ -1,10 +1,11 @@
 {
   "$schema":"https://json-schema.org/draft-07/schema#","type":"object",
-  "required":["gatewayClassName","uiHostname","apiHostname","tls","rateLimits"],
+  "required":["gatewayClassName","uiHostname","apiHostname","authHostname","tls","identity","rateLimits"],
   "properties":{
     "gatewayClassName":{"type":"string","minLength":1},
-    "uiHostname":{"type":"string","minLength":1},"apiHostname":{"type":"string","minLength":1},
+    "uiHostname":{"type":"string","minLength":1},"apiHostname":{"type":"string","minLength":1},"authHostname":{"type":"string","minLength":1},
     "tls":{"type":"object","required":["enabled","secretName"],"properties":{"enabled":{"type":"boolean"},"secretName":{"type":"string","minLength":1}}},
+    "identity":{"type":"object","additionalProperties":false,"required":["service","port","realm"],"properties":{"service":{"type":"string","minLength":1},"port":{"type":"integer","minimum":1,"maximum":65535},"realm":{"type":"string","pattern":"^[a-z0-9-]+$","not":{"const":"master"}}}},
     "rateLimits":{"type":"object","required":["public","auth","internal"],"additionalProperties":{"type":"object","required":["average","period","burst"],"properties":{"average":{"type":"integer","minimum":1},"burst":{"type":"integer","minimum":1},"period":{"type":"string","pattern":"^[1-9][0-9]*(ms|s|m|h)$"}}}}
   }
 }

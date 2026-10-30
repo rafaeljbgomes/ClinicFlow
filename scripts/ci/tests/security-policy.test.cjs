@@ -52,6 +52,9 @@ const cases = [
   ['frontend/src/proxy.ts', ['frontend'], true, true],
   ['pom.xml', policy.components, true, true],
   ['deploy/helm/service/templates/deployment.yaml', policy.components, true, true],
+  // The identity provider every component trusts (ADR-027): its release and its vendored chart.
+  ['deploy/helm/keycloak/values.yaml', policy.components, true, true],
+  ['deploy/helm/keycloak/charts/keycloakx-7.4.0.tgz', policy.components, true, true],
   ['.ci/security.json', policy.components, true, true],
   ['unknown-executable.sh', policy.components, true, true],
 ];

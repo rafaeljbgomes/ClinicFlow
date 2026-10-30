@@ -1,0 +1,10 @@
+apiVersion: v2
+name: clinicflow-keycloak
+description: ClinicFlow's Keycloak identity provider (ADR-027) on the vendored codecentric keycloakx chart
+type: application
+version: 0.1.0
+appVersion: "26.8.1"
+dependencies:
+  - name: keycloakx
+    version: 7.4.0
+    repository: https://codecentric.github.io/helm-charts

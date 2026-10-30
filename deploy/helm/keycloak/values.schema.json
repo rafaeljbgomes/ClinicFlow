@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["global", "service", "networkPolicy", "keycloakx"],
+  "properties": {
+    "global": {
+      "type": "object",
+      "required": ["clinicflow"],
+      "properties": {
+        "clinicflow": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["hostname", "adminHostname", "realm", "publicUrl", "demoPassword", "database", "secrets", "checksums"],
+          "properties": {
+            "hostname": {
+              "description": "Public origin with no path: https, or http on localhost only.",
+              "type": "string",
+              "pattern": "^(https://[a-z0-9]([a-z0-9.-]*[a-z0-9])?|http://localhost)(:[0-9]{1,5})?$"
+            },
+            "adminHostname": {
+              "description": "Admin console origin, reachable through a port-forward on loopback only.",
+              "type": "string",
+              "pattern": "^http://(localhost|127\\.0\\.0\\.1)(:[0-9]{1,5})?$"
+            },
+            "realm": {"const": "clinicflow"},
+            "publicUrl": {"type": "string", "pattern": "^https?://[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?$"},
+            "demoPassword": {"type": "string", "anyOf": [{"maxLength": 0}, {"minLength": 12}]},
+            "database": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["url", "poolMaxSize"],
+              "properties": {
+                "url": {"type": "string", "pattern": "^jdbc:postgresql://[a-z0-9.-]+:[0-9]{1,5}/clinicflow_keycloak$"},
+                "poolMaxSize": {"type": "integer", "minimum": 1, "maximum": 10}
+              }
+            },
+            "secrets": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["database", "admin", "client"],
+              "properties": {
+                "database": {"type": "string", "minLength": 1},
+                "admin": {"type": "string", "minLength": 1},
+                "client": {"type": "string", "minLength": 1}
+              }
+            },
+            "checksums": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "database": {"type": "string"},
+                "admin": {"type": "string"},
+                "client": {"type": "string"},
+                "realm": {"type": "string"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "port"],
+      "properties": {
+        "name": {"const": "keycloak"},
+        "port": {"const": 8080}
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "gatewayNamespace", "monitoringNamespace", "clients"],
+      "properties": {
+        "enabled": {"const": true},
+        "gatewayNamespace": {"type": "string", "minLength": 1},
+        "monitoringNamespace": {"type": "string", "minLength": 1},
+        "clients": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "not": {"const": "auth-service"}}
+        }
+      }
+    },
+    "keycloakx": {
+      "type": "object",
+      "required": ["fullnameOverride", "replicas", "image", "cache", "proxy", "http", "resources"],
+      "properties": {
+        "fullnameOverride": {"const": "keycloak"},
+        "replicas": {"const": 1},
+        "autoscaling": {"type": "object", "properties": {"enabled": {"const": false}}},
+        "image": {
+          "type": "object",
+          "required": ["repository", "tag"],
+          "properties": {
+            "repository": {"type": "string", "minLength": 1},
+            "tag": {"type": "string", "minLength": 1, "not": {"const": "latest"}},
+            "digest": {"type": "string", "maxLength": 0}
+          }
+        },
+        "cache": {"type": "object", "required": ["stack"], "properties": {"stack": {"const": "custom"}}},
+        "proxy": {
+          "type": "object",
+          "required": ["enabled", "mode"],
+          "properties": {"enabled": {"const": true}, "mode": {"const": "xforwarded"}}
+        },
+        "http": {
+          "type": "object",
+          "required": ["relativePath", "managementRelativePath"],
+          "properties": {"relativePath": {"const": "/"}, "managementRelativePath": {"const": "/"}}
+        },
+        "serviceAccount": {
+          "type": "object",
+          "required": ["automountServiceAccountToken"],
+          "properties": {"automountServiceAccountToken": {"const": false}}
+        },
+        "rbac": {"type": "object", "properties": {"create": {"const": false}}},
+        "resources": {
+          "type": "object",
+          "required": ["requests", "limits"],
+          "properties": {
+            "limits": {
+              "type": "object",
+              "required": ["cpu", "memory"],
+              "properties": {
+                "memory": {
+                  "description": "At most 1Gi on the shared Docker Desktop VM.",
+                  "type": "string",
+                  "pattern": "^([1-9][0-9]{0,2}|10[01][0-9]|102[0-4])Mi$|^1Gi$"
+                }
+              }
+            }
+          }
+        },
+        "networkPolicy": {"type": "object", "properties": {"enabled": {"const": false}}},
+        "ingress": {"type": "object", "properties": {"enabled": {"const": false}}},
+        "httpRoute": {"type": "object", "properties": {"enabled": {"const": false}}},
+        "dbchecker": {"type": "object", "properties": {"enabled": {"const": false}}}
+      }
+    }
+  }
+}

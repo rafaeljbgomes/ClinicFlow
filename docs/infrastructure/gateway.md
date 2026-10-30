@@ -8,6 +8,7 @@ passed on 2026-10-02 for the tested local prototype. See the
 
 - UI/BFF: `https://clinicflow.localhost`; existing browser `/api/**` routes stay unchanged.
 - Bearer API: `https://api.clinicflow.localhost/api/v1/**`.
+- Keycloak (Kubernetes only): `https://auth.clinicflow.localhost`, the issuer's origin (ADR-027).
 - Kubernetes BFF URL: `http://clinicflow-gateway-api.ingress-system.svc.cluster.local:8080`.
 - Compose BFF URL: `http://gateway:8080`, unpublished.
 
@@ -27,6 +28,30 @@ passed on 2026-10-02 for the tested local prototype. See the
 change run `python scripts/gateway/render-config.py`; `--check` detects drift. Gateway
 facade versions do not rename backend controllers or move business logic.
 
+### Identity routes (Kubernetes)
+
+The auth host routes four path prefixes of the `clinicflow` realm to `keycloak:8080`, all
+with the secure headers. Everything else on it, including `/admin`, `/realms/master` and
+the account console, returns 404 from the edge.
+
+| Route | Path prefix | Limit |
+| --- | --- | --- |
+| `identity-oidc` | `/realms/clinicflow/protocol/openid-connect` | public |
+| `identity-login` | `/realms/clinicflow/login-actions` | auth (10/min, burst 5) |
+| `identity-discovery` | `/realms/clinicflow/.well-known` | public |
+| `identity-resources` | `/resources` | public |
+
+The OIDC prefix covers authorization, registration, the token endpoint, JWKS, logout and
+the session iframe; the token endpoint requires client authentication and the realm
+allows no password grant to the BFF. `login-actions` carries the credential, registration
+and required-action posts, so the login limit sits there. The admin console is reached
+with `kubectl port-forward svc/keycloak 8180:8080 -n clinicflow`. Keycloak trusts
+`X-Forwarded-*` from any peer NetworkPolicy admits (`proxy-trusted-addresses` is unset):
+every Traefik entrypoint drops client-sent forwarding headers and writes its own, and only
+the gateway, the BFF and the four resource servers can reach Keycloak's HTTP port. A
+compromised one of those pods could still put a false client address in Keycloak's
+events. A deployment whose proxies have fixed addresses should set the option.
+
 ## Compose HTTPS
 
 Prerequisites: Docker/Compose, PowerShell 7, OpenSSL. Port 80/443 must be free; override
@@ -40,8 +65,9 @@ if another local application uses them. The HTTPS override also controls redirec
 docker compose up --build --detach
 ```
 
-The script retains existing valid CA/certificate files; `-Renew` reissues the leaf for
-both hostnames. Browser trust is a manual choice. Never commit/share ca.key or edge.key.
+The script retains existing valid CA/certificate files. It reissues the leaf from the same
+CA when the certificate expires within a day or lacks one of the three hostnames, and
+`-Renew` reissues it unconditionally. Browser trust is a manual choice. Never commit/share ca.key or edge.key.
 On Unix the CA key is owner-only; the leaf key is owner/group-readable. The script
 sets CLINICFLOW_TLS_GROUP to the caller group for the non-root proxy. If running the
 script in a separate process, pass that group ID to Compose explicitly. Only the leaf
@@ -106,9 +132,11 @@ and waits for Gateway/HTTPRoute conditions at the current generation.
 ./scripts/deploy-local-kubernetes.ps1 -Component Patient -SkipBuild -ImageTag git-<commit>-<timestamp>
 ```
 
-Order: observability, platform, explicit CRD bootstrap, controller, applications, gateway
-routes, conditions, real HTTPS requests. Keep an existing `clinicflow-edge-tls` TLS Secret
-in `clinicflow`; a missing development Secret is bootstrapped outside the Helm release.
+Order: observability, platform, Keycloak, explicit CRD bootstrap, controller, applications,
+gateway routes, conditions, real HTTPS requests. The gateway step stops early when the
+`keycloak` Service is missing, because the identity routes could never resolve. The
+`clinicflow-edge-tls` Secret lives outside the Helm release; the installer creates it, and
+re-applies it whenever `secrets/edge/edge.crt` changes, such as after a reissued leaf.
 Provider watches and policy namespaces are configured together for custom namespaces.
 
 CRD upgrades require `Initialize-GatewayCrds.ps1 -Upgrade` (or installer
@@ -126,6 +154,8 @@ committed lock/archive; application operations use `--server-side=false`.
 ./scripts/gateway/Test-GatewayTraffic.ps1
 node scripts/gateway/test-kubernetes-contract.cjs
 ./scripts/gateway/Test-GatewayIsolation.ps1
+./scripts/gateway/Test-KeycloakTokens.ps1
+./scripts/gateway/Test-KeycloakEdge.ps1     # last before the browser run: it spends the login burst
 ./scripts/gateway/Test-GatewayBrowser.ps1
 ./scripts/gateway/Test-GatewayObservability.ps1
 ./scripts/gateway/Test-IndependentRollback.ps1 -PatientImageTag <available-immutable-tag>

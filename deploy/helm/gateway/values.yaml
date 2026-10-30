@@ -1,9 +1,17 @@
 gatewayClassName: clinicflow-traefik
 uiHostname: clinicflow.localhost
 apiHostname: api.clinicflow.localhost
+# Keycloak's public origin (ADR-027); must match the Keycloak chart's hostname.
+authHostname: auth.clinicflow.localhost
 tls:
   enabled: true
   secretName: clinicflow-edge-tls
+# Only the clinicflow realm's browser and OIDC paths are routed on the auth host. The admin console,
+# the master realm and the account console have no route, so the edge answers them with 404.
+identity:
+  service: keycloak
+  port: 8080
+  realm: clinicflow
 rateLimits:
   public: {average: 20, period: 1s, burst: 40}
   auth: {average: 10, period: 1m, burst: 5}

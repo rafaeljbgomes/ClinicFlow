@@ -88,10 +88,8 @@ services:
         export PGUSER="$$POSTGRES_USER" PGPASSWORD="$$POSTGRES_PASSWORD"
         psql -v ON_ERROR_STOP=1 -f /bootstrap/01-ensure-databases.sql
         psql -v ON_ERROR_STOP=1 -d clinicflow_patient -f /bootstrap/02-sanitize-patient-phone-data.sql
-        sh /platform-bootstrap/provision-postgres.sh
         : "$${KC_DB_PASSWORD:?No Keycloak database login; run scripts/generate-dev-credentials.ps1.}"
-        psql -v ON_ERROR_STOP=1 -q -f /bootstrap/03-ensure-keycloak-database.sql
-        echo "PostgreSQL login ready for keycloak (clinicflow_keycloak)."
+        sh /platform-bootstrap/provision-postgres.sh
     depends_on:
       postgres:
         condition: service_healthy

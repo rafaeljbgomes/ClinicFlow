@@ -1,6 +1,11 @@
 [CmdletBinding()]
-param([string]$Namespace='clinicflow',[int]$TimeoutSeconds=180)
+param([string]$Namespace='clinicflow',[string]$Release='clinicflow-gateway',[int]$TimeoutSeconds=180)
 $ErrorActionPreference='Stop'
+# Every HTTPRoute the installed gateway release declares must attach, so a new route needs no edit here.
+$Manifest=(& helm get manifest $Release -n $Namespace) -join "`n"
+if ($LASTEXITCODE -ne 0) { throw "Cannot read the $Release release manifest." }
+$ExpectedRoutes=[regex]::Matches($Manifest,'(?m)^kind: HTTPRoute\s*$').Count
+if ($ExpectedRoutes -lt 1) { throw "The $Release release declares no HTTPRoutes." }
 $Deadline=[DateTimeOffset]::UtcNow.AddSeconds($TimeoutSeconds)
 function Test-CurrentConditions($Conditions,$Generation,$Types) {
     foreach ($Type in $Types) {
@@ -19,7 +24,7 @@ do {
     $Routes=(& kubectl get httproutes -n $Namespace -o json) | ConvertFrom-Json
     if ($LASTEXITCODE -ne 0) { throw 'Cannot read HTTPRoutes.' }
     $Attached=@($Routes.items | Where-Object { $_.spec.parentRefs.name -contains 'clinicflow-gateway' })
-    $Ready=$Ready -and $Attached.Count -ge 24
+    $Ready=$Ready -and $Attached.Count -ge $ExpectedRoutes
     foreach ($Route in $Attached) {
         $Parents=@($Route.status.parents | Where-Object { $_.parentRef.name -eq 'clinicflow-gateway' })
         $Ready=$Ready -and $Parents.Count -gt 0

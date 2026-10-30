@@ -106,10 +106,12 @@ docker build -t clinicflow/frontend:0.1.0-local -f frontend/Dockerfile frontend
 Create the application namespace and JWT Secret. Only `auth-service` mounts it.
 The patient, appointment, clinical and notification services and the BFF trust
 the Keycloak realm instead (ADR-027, `oidc.*` in the service and frontend
-charts), and Keycloak arrives on the cluster with #89. Until then nobody can
-sign in on Kubernetes, and the services answer `401` to every API call. The BFF
-reads its client secret from the `clinicflow-bff-oidc` Secret, which
-`scripts/deploy-local-kubernetes.ps1` creates.
+charts). Keycloak runs as its own release, `clinicflow-keycloak`, installed after
+the platform; its Secrets, install command and realm reset are in
+[local development](../development/local-development.md#run-locally-with-docker-desktop-kubernetes).
+Its admin console has no gateway route:
+`kubectl port-forward svc/keycloak 8180:8080 -n clinicflow`, then
+`http://localhost:8180/admin/`.
 
 ```powershell
 kubectl create namespace clinicflow

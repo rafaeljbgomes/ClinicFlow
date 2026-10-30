@@ -35,6 +35,7 @@ spec:
                   - appointment-service
                   - clinical-service
                   - notification-service
+                  - keycloak
                   - platform-bootstrap
       ports:
         - port: 5432

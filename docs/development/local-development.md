@@ -42,7 +42,11 @@ and PostgreSQL and RabbitMQ re-apply their administrator password when they
 start, so existing volumes keep their data. Keycloak reads its client secret
 only when it imports the realm, and its bootstrap administrator only when its
 database is new, so also run `./scripts/reset-keycloak-realm.ps1 -Full` after a
-rotation (see [Keycloak](#keycloak)).
+rotation (see [Keycloak](#keycloak)). On Kubernetes, run
+`./scripts/deploy-local-kubernetes.ps1` after `-Rotate`, then
+`./scripts/reset-keycloak-realm.ps1 -Target Kubernetes -Full`. The deploy
+re-runs the platform bootstrap with the new passwords and rolls every workload
+whose Secret changed, the BFF included.
 
 To run a service from an IDE against the Compose infrastructure, load the
 variables from its `secrets/services/<service>.env`.
@@ -138,6 +142,16 @@ its tokens.
 | Console login | The `master` realm's bootstrap administrator from `secrets/keycloak/admin.env` |
 | Database | `clinicflow_keycloak` on the ClinicFlow PostgreSQL, owned by the `clinicflow_keycloak` login from `secrets/keycloak/database.env` |
 
+On Docker Desktop Kubernetes, Keycloak runs as the `clinicflow-keycloak`
+release behind the gateway (see
+[Run Locally with Docker Desktop Kubernetes](#run-locally-with-docker-desktop-kubernetes)):
+
+| | |
+| --- | --- |
+| Public URL and issuer | `https://auth.clinicflow.localhost`, issuer `https://auth.clinicflow.localhost/realms/clinicflow` |
+| Private-network URL | `http://keycloak:8080`, the `keycloak` Service |
+| Admin console | No gateway route. `kubectl port-forward svc/keycloak 8180:8080 -n clinicflow`, then `http://localhost:8180/admin/` |
+
 The bootstrap administrator is Keycloak's own administrator, not a ClinicFlow
 user. `admin@demo.clinicflow.local` is a ClinicFlow user with the `ADMIN` role
 and cannot open the console.
@@ -167,6 +181,19 @@ Keycloak's whole database instead, including the `master` realm, so the next
 start also applies a rotated bootstrap administrator. Both leave the other
 services' data alone. CI always starts from empty volumes, so it always tests
 the committed file.
+
+On Kubernetes, `scripts/deploy-local-kubernetes.ps1` warns when the realm file
+has changed since Keycloak imported it, and never resets on its own. Apply the
+change with:
+
+```powershell
+./scripts/reset-keycloak-realm.ps1 -Target Kubernetes
+```
+
+It rebuilds the image, scales Keycloak to zero, runs the import in a one-off pod
+with Keycloak's own configuration and network policy, and starts Keycloak again.
+`-Full` drops the database through the PostgreSQL pod and re-runs the platform
+bootstrap instead.
 
 An idempotent applier such as `keycloak-config-cli` was considered and not
 adopted. It would add a second image and JVM run to every `docker compose up`
@@ -306,8 +333,9 @@ associated with an existing account.", next to the field, while a new email
 creates the account. The login form stays generic and password reset is
 disabled, so registration is the only enumeration path. The realm has no
 built-in option to hide it. Hiding it would need a custom registration flow, so
-the practical control is the rate limit on the login-action paths planned for
-the gateway (#89). #79 stays open.
+the practical control is the gateway's login limit (10 per minute, burst 5) on
+Keycloak's `login-actions` paths, where the registration form posts. It applies
+on Kubernetes; Compose publishes Keycloak without the gateway. #79 stays open.
 
 ## Frontend Development
 
@@ -401,9 +429,14 @@ ADR-028) and pins it by an `id-<image id>` tag, so a rebuild that changes
 nothing does not restart the database. It generates missing development JWT
 keys and credentials, and creates or updates
 the JWT Secret. It also creates or updates `clinicflow-postgres-admin`,
-`clinicflow-rabbitmq-admin` and one `<service>-credentials` Secret per service.
-It then installs observability and the shared platform, upgrades six
-independent application releases, and waits for the workloads to become ready.
+`clinicflow-rabbitmq-admin` and one `<service>-credentials` Secret per service,
+and Keycloak's `clinicflow-keycloak-database`, `clinicflow-keycloak-admin` and
+`clinicflow-bff-oidc` Secrets. It then installs observability, the shared
+platform and Keycloak, upgrades six independent application releases and the
+gateway, and waits for the workloads to become ready. Keycloak's image is pinned
+by an `id-<image id>` tag like PostgreSQL's, so it restarts only when the image,
+a Keycloak Secret or the realm file changes. `-Component Keycloak` deploys only
+Keycloak.
 After every platform install or upgrade, the platform release runs the
 `clinicflow-platform-bootstrap` hook Job, which creates or rotates the per-service
 database roles and RabbitMQ users. Each credential file's checksum is set on its
@@ -438,10 +471,8 @@ docker build --target server -t "clinicflow/postgres:$imageTag" docker/postgres
 ```
 
 Create the JWT Secret from the local development keys. Only `auth-service`
-still mounts it; the other services and the BFF trust the Keycloak realm, which
-arrives on Kubernetes with #89 (`oidc.*` in the service and frontend charts).
-`scripts/deploy-local-kubernetes.ps1` also creates the BFF's
-`clinicflow-bff-oidc` Secret from `secrets/keycloak/clinicflow-bff.env`:
+still mounts it; the other services and the BFF trust the Keycloak realm
+(`oidc.*` in the service and frontend charts):
 
 ```powershell
 kubectl create namespace clinicflow
@@ -464,7 +495,16 @@ Get-ChildItem secrets/services -Filter *.env | ForEach-Object {
   kubectl create secret generic "$($_.BaseName)-credentials" `
     "--from-env-file=$($_.FullName)" -n clinicflow
 }
+kubectl create secret generic clinicflow-keycloak-database `
+  --from-env-file=secrets/keycloak/database.env -n clinicflow
+kubectl create secret generic clinicflow-keycloak-admin `
+  --from-env-file=secrets/keycloak/admin.env -n clinicflow
+kubectl create secret generic clinicflow-bff-oidc `
+  --from-env-file=secrets/keycloak/clinicflow-bff.env -n clinicflow
 ```
+
+The platform bootstrap creates Keycloak's database and login from
+`clinicflow-keycloak-database`, so install the platform before Keycloak.
 
 Install observability, the platform, and the independent application releases:
 
@@ -478,6 +518,14 @@ helm upgrade --install clinicflow-observability deploy/helm/observability `
 helm upgrade --install clinicflow-platform deploy/helm/platform `
   -n clinicflow -f deploy/helm/platform/values-docker-desktop.yaml `
   --set-string "postgres.image=clinicflow/postgres:$imageTag" `
+  --rollback-on-failure --wait=watcher --server-side=false --timeout 5m
+
+docker build --provenance=false -t "clinicflow/keycloak:$imageTag" docker/keycloak
+# The realm's demo users get the synthetic password from Demo accounts unless you set your own.
+$env:CLINICFLOW_DEMO_PASSWORD ??= Read-Host "Demo password"
+helm upgrade --install clinicflow-keycloak deploy/helm/keycloak `
+  -n clinicflow --set-string "keycloakx.image.tag=$imageTag" `
+  --set-string "global.clinicflow.demoPassword=$env:CLINICFLOW_DEMO_PASSWORD" `
   --rollback-on-failure --wait=watcher --server-side=false --timeout 5m
 
 foreach ($service in "auth", "patient", "appointment", "clinical", "notification") {
@@ -506,6 +554,7 @@ Validate rollouts:
 ```powershell
 kubectl rollout status statefulset/postgres -n clinicflow
 kubectl rollout status statefulset/rabbitmq -n clinicflow
+kubectl rollout status statefulset/keycloak -n clinicflow
 kubectl rollout status deployment/auth-service -n clinicflow
 kubectl rollout status deployment/patient-service -n clinicflow
 kubectl rollout status deployment/appointment-service -n clinicflow
