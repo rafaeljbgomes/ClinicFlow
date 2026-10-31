@@ -69,7 +69,7 @@
         <dependency>
             <groupId>com.googlecode.libphonenumber</groupId>
             <artifactId>libphonenumber</artifactId>
-            <version>9.0.32</version>
+            <version>9.0.42</version>
         </dependency>
 
         <dependency>
