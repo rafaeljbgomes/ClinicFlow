@@ -25,7 +25,6 @@ cross-service Compose and Playwright journey.
 The implementation uses these pipeline definitions:
 
 ```text
-Jenkinsfile.auth
 Jenkinsfile.patient
 Jenkinsfile.appointment
 Jenkinsfile.clinical
@@ -44,7 +43,7 @@ Every backend pipeline exposes distinct Jenkins stages for Checkout,
 Repository hygiene, Build, Unit tests, Integration tests, Mutation tests,
 Package, and Image build.
 
-`scripts/ci/Invoke-ServiceBackend.ps1` accepts only the five service names and
+`scripts/ci/Invoke-ServiceBackend.ps1` accepts only the four service names and
 the phases `Build`, `Unit`, `Integration`, or `Mutation`:
 
 - Build runs `clean compile` for `-pl :<service> -am` without tests.
@@ -61,9 +60,9 @@ the phases `Build`, `Unit`, `Integration`, or `Mutation`:
 - Image build uses only that component's Dockerfile, assigns a build-specific
   local tag, never pushes it, and removes the tag in pipeline cleanup.
 
-Auth selects only the root POM and `auth-service`. Patient, appointment,
-clinical, and notification additionally select `event-contracts` through
-their declared Maven test dependency. No service pipeline selects another
+Patient, appointment, clinical, and notification select the root POM, their
+own module and `event-contracts` through their declared Maven test dependency.
+(`Jenkinsfile.auth` and its pipeline were removed with `auth-service`, ADR-031.) No service pipeline selects another
 service or `coverage-report`.
 
 ## Frontend Lifecycle Contract

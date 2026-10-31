@@ -47,7 +47,8 @@ engineering decisions visible:
 
 The current local application supports:
 
-- registration and login with short-lived asymmetric JWTs;
+- sign-in and patient self-registration through Keycloak, with short-lived
+  access tokens and rotating refresh tokens;
 - role-aware psychologist, patient, and administrator flows;
 - psychologist patient management, including consent and emergency-contact
   data;
@@ -72,14 +73,14 @@ flowchart LR
     Browser[Browser]
     BFF[Next.js BFF\nHttpOnly session cookie + CSRF]
 
-    Auth[Auth / User Service]
+    Keycloak[Keycloak\nclinicflow realm]
     Patient[Patient Service]
     Appointment[Appointment Service]
     Clinical[Clinical Service]
     Notification[Notification Service]
 
     Broker[(RabbitMQ\ntherapy.events.exchange)]
-    AuthDB[(Auth PostgreSQL DB)]
+    KeycloakDB[(Keycloak PostgreSQL DB)]
     PatientDB[(Patient PostgreSQL DB)]
     AppointmentDB[(Appointment PostgreSQL DB)]
     ClinicalDB[(Clinical PostgreSQL DB)]
@@ -92,18 +93,19 @@ flowchart LR
     Edge --> BFF
     BFF -->|GATEWAY_URL| Private
     Client -->|API hostname| Edge
-    Edge --> Auth
+    Browser -->|auth hostname: sign-in| Edge
+    Edge --> Keycloak
+    BFF -->|code exchange, refresh, user lookup| Keycloak
     Edge --> Patient
     Edge --> Appointment
     Edge --> Clinical
     Edge --> Notification
-    Private --> Auth
     Private --> Patient
     Private --> Appointment
     Private --> Clinical
     Private --> Notification
 
-    Auth --> AuthDB
+    Keycloak --> KeycloakDB
     Patient --> PatientDB
     Appointment --> AppointmentDB
     Clinical --> ClinicalDB
@@ -119,7 +121,7 @@ flowchart LR
 
 | Component | Responsibility | Example boundary |
 | --- | --- | --- |
-| `auth-service` | Registration, password authentication, user profiles, roles, and JWT issuance | `POST /auth/login`, `GET /users/me` |
+| Keycloak | Identity provider: sign-in, self-registration, roles, token issuance and the realm JWKS ([ADR-027](docs/architecture/decisions/ADR-027-keycloak-identity-provider.md)) | `clinicflow` realm, defined in `docker/keycloak/realm` |
 | `patient-service` | Psychologist-owned patient records and patient lifecycle events | `POST /patients`, `GET /patients` |
 | `appointment-service` | Appointment lifecycle and appointment events | `POST /appointments`, paged `GET /appointments`, `PATCH /appointments/{id}/reschedule` |
 | `clinical-service` | Practice profiles, clinical cases, care plans, and session records | `POST /clinical-cases`, `POST /clinical-cases/{id}/session-records` |
@@ -160,7 +162,9 @@ through RabbitMQ.
 Security is treated as an engineering baseline for the prototype, not as a
 compliance or certification claim.
 
-- Passwords are hashed with BCrypt and login errors are deliberately generic.
+- Keycloak stores passwords (Argon2), enforces the password policy and
+  brute-force lockout, and is the only token issuer; `auth-service` was retired
+  in [ADR-031](docs/architecture/decisions/ADR-031-auth-service-retirement.md).
 - Keycloak issues the access tokens (ADR-027). The patient, appointment,
   clinical and notification services check signature, issuer, audience and
   expiry against the realm JWKS through Spring Boot configuration alone, take
@@ -175,6 +179,8 @@ compliance or certification claim.
   and linked session records are accepted only after the owning service
   confirms that the caller owns the referenced patient or appointment.
 - Notification history is scoped to the owning psychologist where appropriate.
+- The administrator's account lookup reads Keycloak's Admin API through a
+  read-only service account (`view-users` only).
 - Request validation and sanitized problem-style error responses are tested.
 - Development keys and generated artifacts are ignored by Git.
 - Kubernetes uses default-deny and workload-specific NetworkPolicies for the
@@ -202,14 +208,14 @@ See the [ASVS implementation mapping](docs/security/asvs-l2-mapping.md).
 From the repository root:
 
 ```powershell
-.\scripts\generate-dev-jwt-keys.ps1
+.\scripts\generate-dev-credentials.ps1
 .\scripts\gateway\New-DevelopmentCertificate.ps1
 docker compose up --build
 ```
 
 Open [https://clinicflow.localhost](https://clinicflow.localhost). Trust the generated
 `secrets/edge/ca.crt` manually in your browser; see the [gateway guide](docs/infrastructure/gateway.md). The Compose setup starts
-PostgreSQL, RabbitMQ, all five backend services, and the frontend. It also
+PostgreSQL, RabbitMQ, Keycloak, the four domain services, and the frontend. It also
 loads deterministic demo data so the main role-specific screens can be
 explored immediately.
 
@@ -310,9 +316,9 @@ Deploy the local Kubernetes stack from the repository root:
 .\scripts\deploy-local-kubernetes.ps1
 ```
 
-The deployment creates local JWT material when needed, builds local images,
+The deployment generates missing local credentials, builds local images,
 installs the observability, shared platform and Keycloak releases, and upgrades
-the frontend plus five application releases. Keycloak signs users in on
+the frontend plus four application releases. Keycloak signs users in on
 `https://auth.clinicflow.localhost` behind the gateway; its admin console has
 no public route and is reached with
 `kubectl port-forward svc/keycloak 8180:8080 -n clinicflow`. A single
@@ -338,7 +344,6 @@ their current status are maintained in the repository's Issues section.
 ## Repository guide
 
 ```text
-auth-service/          Authentication, users, roles, and JWT issuance
 patient-service/       Patient management and patient events
 appointment-service/   Appointment lifecycle and appointment events
 clinical-service/      Practice profiles and clinical workflow

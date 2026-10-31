@@ -1,6 +1,7 @@
 # ADR-027: Keycloak as the identity provider
 
-Status: accepted; implementation tracked in #86 to #90. Date: 2026-10-22.
+Status: implemented in #86 to #90. Date: 2026-10-22. ADR-031 records the retirement of
+`auth-service` and the user lookup that replaced its `/users/{id}`.
 Issue: #85. Epic: #91. Supersedes ADR-006 for token issuance.
 
 ## Context

@@ -8,20 +8,6 @@
 - Docker Desktop or Docker Engine
 - OpenSSL available in the shell path
 
-## Generate Development JWT Keys
-
-The services use asymmetric JWTs. Generate local-only keys before running Docker
-Compose:
-
-```powershell
-.\scripts\generate-dev-jwt-keys.ps1
-```
-
-The generated files are written under `secrets/` and ignored by Git. The
-service containers run as UID 10001, so on a Linux host the key files must be
-readable by that user (for example `chmod 644 secrets/jwt-*.pem`); Docker
-Desktop bind mounts on Windows and macOS already are.
-
 ## Generate Development Credentials
 
 Each service has its own PostgreSQL and RabbitMQ logins, and the platform
@@ -34,12 +20,12 @@ local-only passwords before running Docker Compose:
 
 The script writes `secrets/platform/*.env` (administrators),
 `secrets/services/<service>.env` (per service) and `secrets/keycloak/*.env`
-(Keycloak's database login, its bootstrap administrator and the BFF client
-secret). All of them are ignored by Git. It keeps existing files, so it is safe
+(Keycloak's database login, its bootstrap administrator, the BFF client secret
+and the user lookup client secret). All of them are ignored by Git. It keeps existing files, so it is safe
 to rerun. To rotate every password, run it with `-Rotate` and then
 `docker compose up -d`. The bootstrap services apply the new service passwords,
 and PostgreSQL and RabbitMQ re-apply their administrator password when they
-start, so existing volumes keep their data. Keycloak reads its client secret
+start, so existing volumes keep their data. Keycloak reads its client secrets
 only when it imports the realm, and its bootstrap administrator only when its
 database is new, so also run `./scripts/reset-keycloak-realm.ps1 -Full` after a
 rotation (see [Keycloak](#keycloak)). On Kubernetes, run
@@ -75,7 +61,6 @@ rules, coverage thresholds, and report locations.
 ## Run Locally with Docker Compose
 
 ```powershell
-./scripts/generate-dev-jwt-keys.ps1
 ./scripts/generate-dev-credentials.ps1
 ./scripts/gateway/New-DevelopmentCertificate.ps1
 docker compose up --build
@@ -130,9 +115,8 @@ RabbitMQ credentials for local development are `clinicflow` / `clinicflow`.
 Keycloak 26.8.1 is ClinicFlow's identity provider (ADR-027). The patient,
 appointment, clinical and notification services accept only Keycloak access
 tokens (see [Resource servers](#resource-servers)), and the BFF signs users in
-through Keycloak (see [BFF sign-in](#bff-sign-in)). `auth-service` still runs
-next to it until it is removed (#90); only its own `/api/v1/auth/*` routes use
-its tokens.
+through Keycloak (see [BFF sign-in](#bff-sign-in)). Keycloak replaced
+`auth-service`, which was retired in ADR-031.
 
 | | |
 | --- | --- |
@@ -202,8 +186,8 @@ same end state for a local, synthetic-data stack.
 
 ### Demo accounts and checks
 
-The realm holds the same demo users as `auth-service`, with the same ids, roles
-and synthetic password, so the seeded patients, appointments and notes keep
+The realm holds the demo users that `auth-service` used to seed, with the same
+ids, roles and synthetic password, so the seeded patients, appointments and notes keep
 their owners. Each has exactly one ClinicFlow role and no default role.
 
 To check a running stack against the ADR-027 token contract, run:
@@ -251,8 +235,8 @@ docker compose exec gateway wget -S -q -O - `
   --header "Authorization: Bearer $token" http://patient-service:8082/patients
 ```
 
-The same call with an ID token, an `auth-service` token or a token older than
-five minutes answers `401`.
+The same call with an ID token, a token signed by any other key or a token older
+than five minutes answers `401`.
 
 ### BFF sign-in
 
@@ -292,9 +276,30 @@ The sign-in starts on the public URL's host. A request on another host, such as
 transaction cookie has to be on the origin Keycloak returns to. Keycloak's own
 login and registration pages use its default theme.
 
-The admin user lookup on the System page answers `501` for now: it was served by
-`auth-service`, which does not accept Keycloak tokens, and its replacement is
-decided in #90.
+### Administrator user lookup
+
+The System page's user lookup reads one account from Keycloak's Admin API
+(ADR-031). The BFF route `GET /api/users/{id}` checks that the caller is an
+administrator and that the id is a UUID, then calls
+`http://keycloak:8080/admin/realms/clinicflow/users/{id}` and the account's
+effective realm roles with a token for the `clinicflow-user-lookup` client:
+
+| Variable | Compose |
+| --- | --- |
+| `CLINICFLOW_USER_LOOKUP_CLIENT_SECRET` | From `secrets/keycloak/clinicflow-user-lookup.env` |
+| `CLINICFLOW_USER_LOOKUP_CLIENT_ID` | Optional, `clinicflow-user-lookup` by default |
+
+The client allows only the client-credentials grant, and its service account
+holds `realm-management/view-users` and nothing else, so it can read users but
+not change them, read clients or events, or reach another realm. Its token has
+no `clinicflow-api` audience and no `roles` claim, so no resource server and no
+BFF route accepts it. An account with no ClinicFlow role, or with several,
+shows "No role": the BFF would refuse its sign-in.
+
+The route answers `404` for an unknown id and `503` when Keycloak is down or
+the secret is missing. A realm imported before ADR-031 lacks the client; apply
+it with `./scripts/reset-keycloak-realm.ps1` (or `-Target Kubernetes`).
+`py -I scripts/check-keycloak-realm.py` checks the client's privileges.
 
 ### Self-registration and provisioning
 
@@ -312,7 +317,7 @@ $login['password'] = $admin.KC_BOOTSTRAP_ADMIN_PASSWORD
 $token = (Invoke-RestMethod -Method Post -Body $login `
   http://localhost:8180/realms/master/protocol/openid-connect/token).access_token
 $user = @{
-  id = [guid]::NewGuid().ToString()   # or the person's existing auth-service id
+  id = [guid]::NewGuid().ToString()   # or an id the services already store, to keep ownership
   username = 'new.psychologist@example.test'; email = 'new.psychologist@example.test'
   firstName = 'New'; lastName = 'Psychologist'; enabled = $true; emailVerified = $true
   realmRoles = @('PSYCHOLOGIST'); requiredActions = @('UPDATE_PASSWORD')
@@ -362,9 +367,9 @@ npm install
 npm run dev
 ```
 
-The default values point to services running on `localhost:8081` through
-`localhost:8085`. Copy `frontend/.env.example` if custom service URLs are
-needed.
+The default values point to services running on `localhost:8082` through
+`localhost:8085`. Copy `frontend/.env.example` and fill in the Keycloak client
+secrets from `secrets/keycloak/` when you sign in against the Compose Keycloak.
 
 Frontend validation commands:
 
@@ -389,21 +394,22 @@ localhost backend service URLs.
 
 The access token is stored only in the `clinicflow_access_token` HttpOnly cookie.
 The BFF also sets `clinicflow_csrf` and requires `X-CSRF-Token` on mutating
-same-origin API requests. Role-protected BFF routes verify the signed JWT with
-the auth-service public key before forwarding; dashboard rendering still calls
-auth-service when it needs the complete profile.
+same-origin API requests. Role-protected BFF routes and dashboard rendering
+verify the access token against the realm JWKS and read the profile from its
+claims.
 
 ## Minimal Smoke Flow
 
-1. Open `https://clinicflow.localhost/register` (or `http://localhost:3000/register` for host-run development).
-2. Register a psychologist account.
+1. Open `https://clinicflow.localhost/login` (or `http://localhost:3000/login` for host-run development).
+2. Sign in as the demo psychologist `sofia.almeida@demo.clinicflow.local`.
 3. Create a patient from the Patients page.
 4. Schedule an appointment from the Appointments page.
 5. Create a clinical case from the Clinical page.
 6. Add a care plan and a session record.
 7. Open the patient's clinical history.
 8. Confirm notification history updates from the Notifications page.
-9. Check backend health on the System page.
+9. Sign in as `admin@demo.clinicflow.local`, check backend health on the System
+   page and look up `00000000-0000-4000-8000-000000000011`.
 
 ## Run Locally with Docker Desktop Kubernetes
 
@@ -426,13 +432,13 @@ Run the complete local deployment from the repository root:
 The script derives a commit/timestamp image tag, builds the local images,
 builds ClinicFlow's PostgreSQL image (the official image without `gosu`,
 ADR-028) and pins it by an `id-<image id>` tag, so a rebuild that changes
-nothing does not restart the database. It generates missing development JWT
-keys and credentials, and creates or updates
-the JWT Secret. It also creates or updates `clinicflow-postgres-admin`,
+nothing does not restart the database. It generates missing development
+credentials and creates or updates `clinicflow-postgres-admin`,
 `clinicflow-rabbitmq-admin` and one `<service>-credentials` Secret per service,
-and Keycloak's `clinicflow-keycloak-database`, `clinicflow-keycloak-admin` and
-`clinicflow-bff-oidc` Secrets. It then installs observability, the shared
-platform and Keycloak, upgrades six independent application releases and the
+and Keycloak's `clinicflow-keycloak-database`, `clinicflow-keycloak-admin`,
+`clinicflow-bff-oidc` and `clinicflow-user-lookup-oidc` Secrets. It then
+installs observability, the shared platform and Keycloak, upgrades five
+independent application releases (four services and the frontend) and the
 gateway, and waits for the workloads to become ready. Keycloak's image is pinned
 by an `id-<image id>` tag like PostgreSQL's, so it restarts only when the image,
 a Keycloak Secret or the realm file changes. `-Component Keycloak` deploys only
@@ -461,7 +467,6 @@ Build the local images with one immutable tag:
 
 ```powershell
 $imageTag = "git-<commit>-<timestamp>"
-docker build -t "clinicflow/auth-service:$imageTag" -f auth-service/Dockerfile .
 docker build -t "clinicflow/patient-service:$imageTag" -f patient-service/Dockerfile .
 docker build -t "clinicflow/appointment-service:$imageTag" -f appointment-service/Dockerfile .
 docker build -t "clinicflow/clinical-service:$imageTag" -f clinical-service/Dockerfile .
@@ -470,22 +475,12 @@ docker build -t "clinicflow/frontend:$imageTag" -f frontend/Dockerfile frontend
 docker build --target server -t "clinicflow/postgres:$imageTag" docker/postgres
 ```
 
-Create the JWT Secret from the local development keys. Only `auth-service`
-still mounts it; the other services and the BFF trust the Keycloak realm
+Create the platform administrator, per-service and Keycloak client Secrets
+from the generated files. The services and the BFF trust the Keycloak realm
 (`oidc.*` in the service and frontend charts):
 
 ```powershell
 kubectl create namespace clinicflow
-kubectl create secret generic clinicflow-jwt `
-  --from-file=jwt-private.pem=secrets/jwt-private.pem `
-  --from-file=jwt-public.pem=secrets/jwt-public.pem `
-  -n clinicflow
-```
-
-Create the platform administrator and per-service credential Secrets from the
-generated files:
-
-```powershell
 .\scripts\generate-dev-credentials.ps1
 kubectl create secret generic clinicflow-postgres-admin `
   --from-env-file=secrets/platform/postgres.env -n clinicflow
@@ -501,6 +496,8 @@ kubectl create secret generic clinicflow-keycloak-admin `
   --from-env-file=secrets/keycloak/admin.env -n clinicflow
 kubectl create secret generic clinicflow-bff-oidc `
   --from-env-file=secrets/keycloak/clinicflow-bff.env -n clinicflow
+kubectl create secret generic clinicflow-user-lookup-oidc `
+  --from-env-file=secrets/keycloak/clinicflow-user-lookup.env -n clinicflow
 ```
 
 The platform bootstrap creates Keycloak's database and login from
@@ -528,7 +525,7 @@ helm upgrade --install clinicflow-keycloak deploy/helm/keycloak `
   --set-string "global.clinicflow.demoPassword=$env:CLINICFLOW_DEMO_PASSWORD" `
   --rollback-on-failure --wait=watcher --server-side=false --timeout 5m
 
-foreach ($service in "auth", "patient", "appointment", "clinical", "notification") {
+foreach ($service in "patient", "appointment", "clinical", "notification") {
   helm upgrade --install "clinicflow-$service" deploy/helm/service `
     -n clinicflow -f "deploy/helm/services/$service.yaml" `
     --set-string "image.tag=$imageTag" `
@@ -555,7 +552,6 @@ Validate rollouts:
 kubectl rollout status statefulset/postgres -n clinicflow
 kubectl rollout status statefulset/rabbitmq -n clinicflow
 kubectl rollout status statefulset/keycloak -n clinicflow
-kubectl rollout status deployment/auth-service -n clinicflow
 kubectl rollout status deployment/patient-service -n clinicflow
 kubectl rollout status deployment/appointment-service -n clinicflow
 kubectl rollout status deployment/clinical-service -n clinicflow
@@ -571,3 +567,35 @@ kubectl port-forward svc/clinicflow-observability-grafana 3001:80 -n monitoring
 
 Frontend: `https://clinicflow.localhost`. Grafana: `http://localhost:3001` with
 `admin` / `clinicflow`.
+
+## Retiring auth-service
+
+`auth-service` was removed in ADR-031. A clean Compose start or a new cluster
+has none of its artefacts. An environment created before that keeps them until
+you remove them; nothing else uses them.
+
+Compose:
+
+```powershell
+docker compose up -d --remove-orphans
+docker compose exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres -c "DROP DATABASE IF EXISTS clinicflow_auth WITH (FORCE)" -c "DROP ROLE IF EXISTS clinicflow_auth_app" -c "DROP ROLE IF EXISTS clinicflow_auth_owner"'
+docker image rm clinicflow-auth-service
+Remove-Item secrets/jwt-private.pem, secrets/jwt-public.pem, secrets/services/auth-service.env -ErrorAction SilentlyContinue
+./scripts/reset-keycloak-realm.ps1
+```
+
+The realm reset adds the `clinicflow-user-lookup` client to a realm imported
+before ADR-031; it removes self-registered users. The image name follows your
+Compose project; `docker image ls` lists it.
+
+Docker Desktop Kubernetes:
+
+```powershell
+helm uninstall clinicflow-auth -n clinicflow --wait
+kubectl delete secret clinicflow-jwt auth-service-credentials -n clinicflow --ignore-not-found
+kubectl exec postgres-0 -n clinicflow -- sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres -c "DROP DATABASE IF EXISTS clinicflow_auth WITH (FORCE)" -c "DROP ROLE IF EXISTS clinicflow_auth_app" -c "DROP ROLE IF EXISTS clinicflow_auth_owner"'
+./scripts/deploy-local-kubernetes.ps1
+./scripts/reset-keycloak-realm.ps1 -Target Kubernetes
+```
+
+The deploy script warns while the `clinicflow-auth` release is still installed.

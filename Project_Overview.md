@@ -126,33 +126,33 @@ Capabilities:
 
 # 6. Microservices
 
-## 6.1 Auth/User Service
+## 6.1 Identity (Keycloak)
 
-Responsible for authentication, authorization, and user management.
+Responsible for authentication, roles, and user accounts. The MVP started with
+a hand-written Auth/User Service; Keycloak replaced it (ADR-027) and the
+service was retired (ADR-031).
 
 ### Responsibilities
 
-- register users;
-- authenticate users;
-- issue JWT tokens;
-- validate roles;
-- manage basic user profiles;
-- differentiate psychologists, patients, and admins.
+- let patients register themselves;
+- authenticate users and issue short-lived access tokens;
+- carry exactly one ClinicFlow role per user: psychologist, patient, or admin;
+- publish signing keys through JWKS for the services and the BFF.
 
-### Main Entities
+### Main Concepts
 
-- User
-- Role
-- Credentials
-- UserProfile
+- `clinicflow` realm, defined as code
+- Realm roles `ADMIN`, `PSYCHOLOGIST`, `PATIENT`
+- Clients: the BFF's login client and its read-only user lookup client
 
 ### Example Endpoints
 
 ```http
-POST /auth/register
-POST /auth/login
-GET /users/me
-GET /users/{id}
+GET  /realms/clinicflow/protocol/openid-connect/auth
+POST /realms/clinicflow/protocol/openid-connect/token
+GET  /realms/clinicflow/protocol/openid-connect/certs
+GET  /api/auth/me        (BFF, from the access token)
+GET  /api/users/{id}     (BFF, administrator lookup through the Admin API)
 ```
 
 ---
@@ -728,7 +728,7 @@ domain and application code must not depend on infrastructure packages.
 ## Patient Creation and Appointment Scheduling Flow
 
 1. Psychologist authenticates.
-2. Auth Service issues JWT token.
+2. Keycloak issues the access token to the BFF.
 3. Psychologist creates a patient through Patient Service.
 4. Patient Service persists patient data.
 5. Patient Service publishes `PatientCreated`.

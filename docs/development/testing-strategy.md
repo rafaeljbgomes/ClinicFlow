@@ -108,7 +108,7 @@ mvn -pl patient-service -am clean verify
 Run a specific test:
 
 ```powershell
-mvn -pl auth-service -Dtest=LoginServiceTest test
+mvn -pl patient-service -Dtest=PatientServiceTest test
 mvn -pl patient-service -Dit.test=JpaPatientRepositoryIT verify
 ```
 
@@ -170,10 +170,10 @@ and image stages. Their phase interfaces can be run directly with PowerShell 7:
 
 ```powershell
 .\scripts\ci\Test-RepositoryHygiene.ps1
-.\scripts\ci\Invoke-ServiceBackend.ps1 -Service auth-service -Phase Build
-.\scripts\ci\Invoke-ServiceBackend.ps1 -Service auth-service -Phase Unit
-.\scripts\ci\Invoke-ServiceBackend.ps1 -Service auth-service -Phase Integration
-.\scripts\ci\Invoke-ServiceBackend.ps1 -Service auth-service -Phase Mutation
+.\scripts\ci\Invoke-ServiceBackend.ps1 -Service patient-service -Phase Build
+.\scripts\ci\Invoke-ServiceBackend.ps1 -Service patient-service -Phase Unit
+.\scripts\ci\Invoke-ServiceBackend.ps1 -Service patient-service -Phase Integration
+.\scripts\ci\Invoke-ServiceBackend.ps1 -Service patient-service -Phase Mutation
 .\scripts\ci\Invoke-FrontendPhase.ps1 -Phase Unit
 .\scripts\ci\Invoke-FrontendPhase.ps1 -Phase Quality
 .\scripts\ci\Invoke-FrontendPhase.ps1 -Phase Build
