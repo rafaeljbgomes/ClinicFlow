@@ -1,7 +1,8 @@
 # ADR-027: Keycloak as the identity provider
 
 Status: implemented in #86 to #90. Date: 2026-10-22. ADR-031 records the retirement of
-`auth-service` and the user lookup that replaced its `/users/{id}`.
+`auth-service` and the user lookup that replaced its `/users/{id}`. ADR-032
+replaces the default login theme with a ClinicFlow theme.
 Issue: #85. Epic: #91. Supersedes ADR-006 for token issuance.
 
 ## Context
@@ -277,7 +278,7 @@ The decisions this ADR left to #88, made in the implementation:
   The role-aware UI and the ADR-016 route checks therefore keep a single `role`.
 - **Keycloak's default login theme**, not a ClinicFlow theme. The sign-in and
   registration pages in the app link to it; a theme can come later without
-  touching the BFF.
+  touching the BFF. ADR-032 added that theme.
 - **Login starts on the public origin.** A sign-in that reaches the BFF on
   another host is first redirected to `CLINICFLOW_PUBLIC_URL`, because the
   transaction cookie must be set on the origin Keycloak returns to. Browser tests
