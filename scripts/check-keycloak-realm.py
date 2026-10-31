@@ -6,8 +6,9 @@ Standard library only. Run from the repository root after `docker compose up`:
 
 It plays the browser and the BFF against the public URL: an authorization-code login with PKCE for
 every demo user, the code exchange with the generated client secret, a signature check against the
-realm JWKS, refresh-token rotation, the refused password grant, and a self-registration. It then
-deletes the user it registered. Secrets are read from secrets/keycloak/ and are never printed.
+realm JWKS, refresh-token rotation, the refused password grant, and a self-registration. It checks
+that the user-lookup service account can read users and nothing more (ADR-031). It then deletes the
+user it registered. Secrets are read from secrets/keycloak/ and are never printed.
 """
 import argparse
 import base64
@@ -26,6 +27,7 @@ import urllib.request
 
 REALM = "clinicflow"
 CLIENT_ID = "clinicflow-bff"
+LOOKUP_CLIENT_ID = "clinicflow-user-lookup"
 REDIRECT_URI = "http://localhost:3000/api/auth/callback"
 # Synthetic and documented in docs/development/local-development.md.
 DEMO_PASSWORD = os.environ.get("CLINICFLOW_DEMO_PASSWORD", "ClinicFlowDemo!2026")
@@ -185,6 +187,40 @@ def check_tokens(context, label, grant, expected_sub, expected_role):
     return tokens
 
 
+def check_user_lookup(public, opener, token_endpoint, issuer):
+    """ADR-031: client credentials only, a token no resource server accepts, and view-users only."""
+    secret = read_env("clinicflow-user-lookup.env")["CLINICFLOW_USER_LOOKUP_CLIENT_SECRET"]
+    basic = "Basic " + base64.b64encode(f"{LOOKUP_CLIENT_ID}:{secret}".encode()).decode()
+    status, _, body = request(opener, token_endpoint, {"grant_type": "client_credentials"}, {"Authorization": basic})
+    check(status == 200, "the lookup client gets a client-credentials token")
+    if status != 200:
+        return
+    access = claims(json.loads(body)["access_token"])
+    check(access.get("iss") == issuer and access.get("azp") == LOOKUP_CLIENT_ID, "lookup token: public issuer, azp is the lookup client")
+    check("clinicflow-api" not in audiences(access.get("aud", [])) and "roles" not in access,
+          "lookup token: no clinicflow-api audience and no roles claim")
+    bearer = {"Authorization": "Bearer " + json.loads(body)["access_token"]}
+    base = f"{public}/admin/realms/{REALM}"
+    user_id, role = DEMO_USERS["sofia.almeida@demo.clinicflow.local"]
+    status, _, body = request(opener, f"{base}/users/{user_id}", headers=bearer)
+    check(status == 200 and json.loads(body).get("id") == user_id, "lookup client reads a user by id")
+    status, _, body = request(opener, f"{base}/users/{user_id}/role-mappings/realm/composite", headers=bearer)
+    check(status == 200 and role in [r["name"] for r in json.loads(body)], "lookup client reads the user's effective realm roles")
+    for label, url, method, data in [
+        ("change a user", f"{base}/users/{user_id}", "PUT", json.dumps({"enabled": True}).encode()),
+        ("read clients", f"{base}/clients", "GET", None),
+        ("read the realm's events", f"{base}/events", "GET", None),
+        ("read the master realm", f"{public}/admin/realms/master/users", "GET", None),
+    ]:
+        status, _, _ = request(opener, url, data, {**bearer, "Content-Type": "application/json"}, method=method)
+        check(status == 403, f"lookup client may not {label} ({status})")
+    status, _, body = request(opener, token_endpoint, {
+        "grant_type": "password", "username": "sofia.almeida@demo.clinicflow.local", "password": DEMO_PASSWORD},
+        {"Authorization": basic})
+    check(status in (400, 401) and json.loads(body).get("error") == "unauthorized_client",
+          "the lookup client is refused the password grant")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--public", default="http://localhost:8180", help="KC_HOSTNAME of the stack")
@@ -226,6 +262,9 @@ def main():
         "password": DEMO_PASSWORD, "scope": "openid"}, {"Authorization": basic})
     check(status in (400, 401) and json.loads(body).get("error") == "unauthorized_client",
           f"the BFF client is refused the password grant ({status} {json.loads(body).get('error')})")
+
+    print("User lookup service account")
+    check_user_lookup(public, opener, discovery["token_endpoint"], issuer)
 
     print("Self-registration")
     email = f"self-registered-{secrets.token_hex(4)}@example.test"
@@ -275,6 +314,14 @@ def main():
     client = get(f"/clients?clientId={CLIENT_ID}")[0]
     check(not client["directAccessGrantsEnabled"] and not client["implicitFlowEnabled"]
           and not client["fullScopeAllowed"], "BFF client: standard flow only, no full scope")
+    lookup = get(f"/clients?clientId={LOOKUP_CLIENT_ID}")[0]
+    check(lookup["serviceAccountsEnabled"] and not lookup["standardFlowEnabled"] and not lookup["directAccessGrantsEnabled"]
+          and not lookup["implicitFlowEnabled"] and not lookup["fullScopeAllowed"],
+          "lookup client: client credentials only, no full scope")
+    account = get(f"/clients/{lookup['id']}/service-account-user")
+    management = get("/clients?clientId=realm-management")[0]
+    granted = sorted(r["name"] for r in get(f"/users/{account['id']}/role-mappings/clients/{management['id']}"))
+    check(granted == ["view-users"], f"lookup service account holds view-users only ({granted})")
     for user in get(f"/users?email={urllib.parse.quote('@example.test')}&max=100"):
         request(opener, f"{base}/users/{user['id']}", headers=auth, method="DELETE")
     check(not get(f"/users?email={urllib.parse.quote('@example.test')}&max=100"), "registered test users removed")

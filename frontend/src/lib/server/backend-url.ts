@@ -1,7 +1,6 @@
-export type ServiceName = "auth" | "patient" | "appointment" | "clinical" | "notification";
+export type ServiceName = "patient" | "appointment" | "clinical" | "notification";
 
 const directUrls: Record<ServiceName, string> = {
-  auth: process.env.AUTH_SERVICE_URL ?? "http://localhost:8081",
   patient: process.env.PATIENT_SERVICE_URL ?? "http://localhost:8082",
   appointment: process.env.APPOINTMENT_SERVICE_URL ?? "http://localhost:8083",
   clinical: process.env.CLINICAL_SERVICE_URL ?? "http://localhost:8085",
@@ -14,7 +13,6 @@ export function gatewayPath(service: ServiceName, path: string): string {
     throw new Error("Backend path must be a relative API path");
   }
   const roots: Record<ServiceName, string[]> = {
-    auth: ["/auth/login", "/auth/register", "/users"],
     patient: ["/patients"], appointment: ["/appointments"],
     clinical: ["/clinical-cases", "/session-records", "/practice-profile", "/patients"],
     notification: ["/notifications"],
@@ -23,7 +21,6 @@ export function gatewayPath(service: ServiceName, path: string): string {
     throw new Error("Path is outside the service API contract");
   }
   if (service === "clinical") return `/api/v1/clinical${path}`;
-  if (service === "auth" && pathname.startsWith("/users")) return `/api/v1/auth${path}`;
   return `/api/v1${path}`;
 }
 

@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('auth-service','patient-service','appointment-service','clinical-service','notification-service','frontend')][string]$Component,
+    [Parameter(Mandatory)][ValidateSet('patient-service','appointment-service','clinical-service','notification-service','frontend')][string]$Component,
     [Parameter(Mandatory)][ValidateSet('Dependencies','Image','Config')][string]$Phase,
     [string]$Image
 )

@@ -37,11 +37,12 @@
             "secrets": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["database", "admin", "client"],
+              "required": ["database", "admin", "client", "userLookup"],
               "properties": {
                 "database": {"type": "string", "minLength": 1},
                 "admin": {"type": "string", "minLength": 1},
-                "client": {"type": "string", "minLength": 1}
+                "client": {"type": "string", "minLength": 1},
+                "userLookup": {"type": "string", "minLength": 1}
               }
             },
             "checksums": {
@@ -51,6 +52,7 @@
                 "database": {"type": "string"},
                 "admin": {"type": "string"},
                 "client": {"type": "string"},
+                "userLookup": {"type": "string"},
                 "realm": {"type": "string"}
               }
             }
@@ -79,7 +81,7 @@
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": {"type": "string", "minLength": 1, "not": {"const": "auth-service"}}
+          "items": {"type": "string", "minLength": 1}
         }
       }
     },

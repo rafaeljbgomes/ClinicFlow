@@ -1,7 +1,6 @@
 SELECT format('CREATE DATABASE %I', required_database.name)
 FROM (
     VALUES
-        ('clinicflow_auth'),
         ('clinicflow_patient'),
         ('clinicflow_appointment'),
         ('clinicflow_clinical'),

@@ -3,7 +3,6 @@ updates:
   - package-ecosystem: maven
     directories:
       - /
-      - /auth-service
       - /patient-service
       - /appointment-service
       - /clinical-service
@@ -40,7 +39,6 @@ updates:
       prefix: "build(deps)"
   - package-ecosystem: docker
     directories:
-      - /auth-service
       - /patient-service
       - /appointment-service
       - /clinical-service

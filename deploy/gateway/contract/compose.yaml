@@ -18,7 +18,7 @@ services:
     build: .
     networks:
       default:
-        aliases: [auth-service,patient-service,appointment-service,clinical-service,notification-service,frontend]
+        aliases: [patient-service,appointment-service,clinical-service,notification-service,frontend]
   gateway:
     build: ..
     environment:

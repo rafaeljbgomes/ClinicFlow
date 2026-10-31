@@ -26,7 +26,6 @@ async function main() {
   for(const route of contract) {
     const suffixes=route.match==='Exact'?['']:['','/id%20encoded'];
     for(const suffix of suffixes) {
-      // Login throttling is tested separately; one request per auth route here.
       const target=route.path+suffix+'?page=2&search=redaction-marker';
       const result=await request(target,{method:'POST',body:'{"value":"preserved"}',headers:{authorization:'Bearer redaction-token','x-correlation-id':'redaction-correlation',cookie:'secret-cookie'}});
       assert.equal(result.status,200,`${route.id}: ${result.text}`);
@@ -50,15 +49,17 @@ async function main() {
   run('exec','-T','fixture','node','-e',"fetch('http://127.0.0.1:9090/start?port=8082').then(r=>r.text())");
   await sleep(1100);
   const throttle=[];
-  for(let i=0;i<6;i++) throttle.push(await request('/api/v1/auth/login',{headers:{'x-forwarded-for':`198.51.100.${i}`}}));
+  // The sign-in routes carry the auth quota; the BFF's login is the one this gateway owns.
+  const login=headers=>request('/api/auth/login',{host:'clinicflow.localhost',headers});
+  for(let i=0;i<6;i++) throttle.push(await login({'x-forwarded-for':`198.51.100.${i}`}));
   assert(throttle.some(r=>r.status===429),'Spoofed forwarded addresses must not bypass observed-address quotas');
   const forwarded=JSON.parse(throttle.find(r=>r.status===200).text).forwarded;
   assert(!forwarded.startsWith('198.51.100.'),'Untrusted client address was accepted');
   console.log(`Observed client address in this topology: ${forwarded}`);
   // BFF private traffic has its independent limit/router and no public auth quota.
-  const internal=run('exec','-T','gateway','wget','-q','-O','-','http://gateway:8080/api/v1/auth/login');
-  assert.equal(JSON.parse(internal).port,8081);
-  await sleep(650);assert.equal((await request('/api/v1/auth/login')).status,200,'Token bucket did not refill');
+  const internal=run('exec','-T','gateway','wget','-q','-O','-','http://gateway:8080/api/v1/patients');
+  assert.equal(JSON.parse(internal).port,8082);
+  await sleep(650);assert.equal((await login()).status,200,'Token bucket did not refill');
   const metric=run('exec','-T','gateway','wget','-q','-O','-','http://127.0.0.1:9100/metrics');assert(metric.includes('traefik_entrypoint_requests_total'));
   if(tls) {
     const redirect=await request('/api/v1/patients?x=1',{method:'POST',plain:true});

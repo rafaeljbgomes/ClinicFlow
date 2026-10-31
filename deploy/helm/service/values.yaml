@@ -39,16 +39,6 @@ oidc:
   component: keycloak
   port: 8080
 
-# auth-service only, until it is removed: it signs and checks its own tokens with the PEM key pair.
-# A release enables exactly one of oidc and jwt.
-jwt:
-  enabled: false
-  issuer: clinicflow-auth
-  secretName: clinicflow-jwt
-  publicKeyKey: jwt-public.pem
-  privateKeyKey: jwt-private.pem
-  privateKeyEnabled: false
-
 environment: {}
 
 resources:

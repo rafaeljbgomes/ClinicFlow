@@ -18,11 +18,11 @@ import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiFetch, swrFetcher } from "@/lib/api-client";
-import type { SystemHealth, UserView } from "@/lib/types";
+import type { DirectoryUser, SystemHealth, UserView } from "@/lib/types";
 
 export default function SystemPage() {
   const [userId, setUserId] = useState("");
-  const [inspectedUser, setInspectedUser] = useState<UserView | null>(null);
+  const [inspectedUser, setInspectedUser] = useState<DirectoryUser | null>(null);
   const [lookupError, setLookupError] = useState<string | null>(null);
   const currentUser = useSWR<UserView>("/api/auth/me", swrFetcher);
   const { data, error, isLoading, isValidating, mutate } = useSWR<SystemHealth>(
@@ -35,7 +35,7 @@ export default function SystemPage() {
     setLookupError(null);
     setInspectedUser(null);
     try {
-      setInspectedUser(await apiFetch<UserView>(`/api/users/${encodeURIComponent(userId.trim())}`));
+      setInspectedUser(await apiFetch<DirectoryUser>(`/api/users/${encodeURIComponent(userId.trim())}`));
     } catch (lookupFailure) {
       setLookupError(lookupFailure instanceof Error ? lookupFailure.message : "User lookup failed");
     }
@@ -123,7 +123,7 @@ export default function SystemPage() {
       <Card>
         <CardHeader>
           <CardTitle>User access lookup</CardTitle>
-          <CardDescription>Inspect an account by UUID without exposing the full user directory.</CardDescription>
+          <CardDescription>Inspect a Keycloak account by UUID without exposing the full user directory.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
           <form className="flex flex-col gap-3 sm:flex-row" onSubmit={(event) => { event.preventDefault(); void inspectUser(); }}>
@@ -135,7 +135,7 @@ export default function SystemPage() {
             <div className="flex flex-col gap-4 rounded-[20px] bg-muted/55 p-4 sm:flex-row sm:items-center">
               <span className="flex size-11 items-center justify-center rounded-full bg-secondary text-secondary-foreground"><UserRoundIcon /></span>
               <div className="min-w-0 flex-1"><p className="font-medium">{inspectedUser.fullName}</p><p className="truncate text-sm text-muted-foreground">{inspectedUser.email}</p></div>
-              <div className="flex items-center gap-2"><StatusBadge status={inspectedUser.role} /><StatusBadge status={inspectedUser.enabled ? "ACTIVE" : "INACTIVE"} /></div>
+              <div className="flex items-center gap-2"><StatusBadge status={inspectedUser.role ?? "NO_ROLE"} /><StatusBadge status={inspectedUser.enabled ? "ACTIVE" : "INACTIVE"} /></div>
             </div>
           ) : null}
         </CardContent>

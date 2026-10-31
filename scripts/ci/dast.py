@@ -36,10 +36,8 @@ REALM = KEYCLOAK + "/realms/clinicflow"
 BFF_CLIENT = "clinicflow-bff"
 # Registered on the BFF client. The code is read from the redirect, which is never followed.
 REDIRECT_URI = "http://localhost:3000/api/auth/callback"
-# The resource servers trust only Keycloak; auth-service checks its own tokens until it is removed (#90).
-RESOURCE_SERVER_PATHS = re.escape(API) + r"/api/v1/(?!auth(?:$|[/?])).*"
-AUTH_SERVICE_PATHS = re.escape(API) + r"/api/v1/auth/(?!(?:login|register)(?:$|[/?])).*"
-DEMO_BOOTSTRAP = Path("/opt/clinicflow/DemoDataBootstrap.java")
+# Every API route is a resource server that trusts only Keycloak (ADR-027).
+RESOURCE_SERVER_PATHS = re.escape(API) + r"/api/v1/.*"
 REPORTS = Path("/zap/wrk/reports")
 DIRECT = None
 PROXY = None
@@ -183,26 +181,16 @@ def set_rule(name, header, replacement, pattern):
     RULES.add(name)
 
 
-def demo_password():
-    # Reuse the exact fixture that creates these disposable accounts; do not duplicate credentials.
-    match = re.search(r'DEMO_PASSWORD\s*=\s*"([^"]+)"', DEMO_BOOTSTRAP.read_text())
-    require(match is not None, "Synthetic bootstrap credential definition changed")
-    return match.group(1)
-
-
 def authenticate(role):
-    body = {"email": ROLES[role], "password": demo_password()}
-    raw, _ = request(DIRECT, API + "/api/v1/auth/login", "POST", body)
-    auth_service_token = json.loads(raw)["accessToken"]
-    require(isinstance(auth_service_token, str) and len(auth_service_token) > 20, "Bearer login did not produce a token")
+    # Returns the role's Keycloak user id. The API endpoints in scope verify the bearer rule when they are
+    # requested; /api/auth/me verifies the BFF session.
     token = keycloak_token(role)
     cookies = bff_session(role)
     set_rule("api-auth", "Authorization", "Bearer " + token, RESOURCE_SERVER_PATHS)
-    set_rule("auth-service-auth", "Authorization", "Bearer " + auth_service_token, AUTH_SERVICE_PATHS)
     set_rule("bff-cookie", "Cookie", "; ".join(name + "=" + value for name, value in cookies.items()), re.escape(UI) + r"/.*")
     set_rule("bff-csrf", "x-csrf-token", cookies["clinicflow_csrf"], re.escape(UI) + r"/api/.*")
-    request(PROXY, API + "/api/v1/auth/users/me")
     request(PROXY, UI + "/api/auth/me")
+    return token_claims(token)["sub"]
 
 
 def traffic_snapshot():
@@ -240,11 +228,12 @@ def verify_traffic(before, urls):
         if host:
             origins.add(host.group(1).strip())
         match = re.match(r"HTTP/[^ ]+ (\d+)", message.get("responseHeader", ""))
-        public_login = re.match(r"[A-Z]+\s+(?:https?://[^/]+)?/(?:api/v1/auth|api/auth)/(?:login|register)(?:[?\s])", header)
+        public_login = re.match(r"[A-Z]+\s+(?:https?://[^/]+)?/api/auth/(?:login|register)(?:[?\s])", header)
         if match and not public_login:
             statuses.append(int(match.group(1)))
     require(statuses and sum(code in (401, 403) for code in statuses) <= len(statuses) / 2, "Active traffic predominantly lost authenticated access")
-    require(all(urllib.parse.urlsplit(origin).netloc in origins for origin in (API, UI)), "Active API/BFF traffic missing")
+    # The BFF is always in scope; the API only for a role with an API endpoint in scope.
+    require(all(urllib.parse.urlsplit(url).netloc in origins for url in urls), "Active API/BFF traffic missing")
     return {"requests": len(message_ids), "sampleSize": len(statuses), "rejected": sum(code in (401, 403) for code in statuses), "progress": min(progress)}
 
 
@@ -318,13 +307,13 @@ def main():
             full_scan = os.environ.get("DAST_FULL_SCAN") == "true"
             coverage = []
             for role in ROLES:
-                authenticate(role)
-                # Seed public JSON login bodies for active authentication-endpoint scanning.
-                login_body = {"email": ROLES[role], "password": demo_password()}
-                request(PROXY, API + "/api/v1/auth/login", "POST", login_body)
-                # The BFF no longer takes passwords; its login is a redirect to Keycloak (ADR-027).
-                extra = [API + "/api/v1/auth/login"]
-                urls = [API + "/api/v1/auth/users/me", UI + "/api/auth/me"]
+                user_id = authenticate(role)
+                # The BFF takes no passwords; its login is a redirect to Keycloak (ADR-027).
+                extra = []
+                urls = [UI + "/api/auth/me"]
+                if role == "administrator":
+                    # The user lookup reads Keycloak's Admin API through a read-only service account (ADR-031).
+                    urls += [UI + "/api/users/" + user_id, UI + "/dashboard/system"]
                 for item in manifest["requests"]:
                     if item["component"] in selected and role in item["roles"]:
                         raw, _ = request(PROXY, API + item["path"])

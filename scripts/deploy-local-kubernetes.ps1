@@ -3,7 +3,7 @@ param(
     [switch]$SkipBuild,
     [switch]$SkipObservability,
     [switch]$UpgradeGatewayCrds,
-    [ValidateSet("All", "Platform", "Keycloak", "Auth", "Patient", "Appointment", "Clinical", "Notification", "Frontend", "GatewayController", "Gateway")]
+    [ValidateSet("All", "Platform", "Keycloak", "Patient", "Appointment", "Clinical", "Notification", "Frontend", "GatewayController", "Gateway")]
     [string]$Component = "All",
     [string]$ImageTag = "",
     [string]$Namespace = "clinicflow",
@@ -15,8 +15,6 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$privateKey = Join-Path $repoRoot "secrets\jwt-private.pem"
-$publicKey = Join-Path $repoRoot "secrets\jwt-public.pem"
 $platformChart = Join-Path $repoRoot "deploy\helm\platform"
 $platformValues = Join-Path $platformChart "values-docker-desktop.yaml"
 $serviceChart = Join-Path $repoRoot "deploy\helm\service"
@@ -28,7 +26,6 @@ $keycloakChart = Join-Path $repoRoot "deploy\helm\keycloak"
 $keycloakRealm = Join-Path $repoRoot "docker\keycloak\realm\clinicflow-realm.json"
 
 $components = [ordered]@{
-    Auth = @{ Release = "clinicflow-auth"; Image = "auth-service"; Dockerfile = "auth-service/Dockerfile"; Context = "."; Values = "auth.yaml"; Chart = $serviceChart }
     Patient = @{ Release = "clinicflow-patient"; Image = "patient-service"; Dockerfile = "patient-service/Dockerfile"; Context = "."; Values = "patient.yaml"; Chart = $serviceChart }
     Appointment = @{ Release = "clinicflow-appointment"; Image = "appointment-service"; Dockerfile = "appointment-service/Dockerfile"; Context = "."; Values = "appointment.yaml"; Chart = $serviceChart }
     Clinical = @{ Release = "clinicflow-clinical"; Image = "clinical-service"; Dockerfile = "clinical-service/Dockerfile"; Context = "."; Values = "clinical.yaml"; Chart = $serviceChart }
@@ -110,6 +107,11 @@ try {
     if ($LASTEXITCODE -eq 0) {
         throw "Legacy Helm release 'clinicflow' is installed in namespace '$Namespace'. Uninstall it before using independently managed releases."
     }
+    # auth-service was retired (ADR-031); this script no longer manages its release.
+    & helm status clinicflow-auth --namespace $Namespace *> $null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Warning "The retired 'clinicflow-auth' release is still installed. Remove it and its data with the steps in docs/development/local-development.md (Retiring auth-service)."
+    }
 
     $selectedComponents = if ($Component -eq "All") {
         @($components.Keys)
@@ -174,31 +176,10 @@ try {
         Invoke-Checked docker tag clinicflow/keycloak:local "clinicflow/keycloak:$keycloakImageTag"
     }
 
-    if (-not (Test-Path $privateKey) -or -not (Test-Path $publicKey)) {
-        Write-Host "JWT development keys are missing; generating them..."
-        & (Join-Path $PSScriptRoot "generate-dev-jwt-keys.ps1")
-    }
-
     Write-Host "Ensuring namespace '$Namespace' exists..."
     & kubectl get namespace $Namespace *> $null
     if ($LASTEXITCODE -ne 0) {
         Invoke-Checked kubectl create namespace $Namespace
-    }
-
-    # auth-service still signs its own tokens until it is removed (#90).
-    Write-Host "Creating or updating the ClinicFlow JWT secret..."
-    $secretManifest = & kubectl create secret generic clinicflow-jwt `
-        "--from-file=jwt-private.pem=$privateKey" `
-        "--from-file=jwt-public.pem=$publicKey" `
-        --namespace $Namespace `
-        --dry-run=client `
-        -o yaml
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to generate the clinicflow-jwt Secret manifest."
-    }
-    $secretManifest | & kubectl apply -f -
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to apply the clinicflow-jwt Secret."
     }
 
     # Keeps existing passwords and generates only missing ones; -Rotate on that script replaces them.
@@ -210,6 +191,8 @@ try {
     }
     # The BFF's Keycloak client secret (ADR-027), the same generated value the realm is imported with.
     $credentialChecksums.keycloakClient = Set-SecretFromEnvFile -Name clinicflow-bff-oidc -Path (Join-Path $repoRoot "secrets/keycloak/clinicflow-bff.env")
+    # The BFF's read-only Admin API client for the administrator's user lookup (ADR-031).
+    $credentialChecksums.userLookupClient = Set-SecretFromEnvFile -Name clinicflow-user-lookup-oidc -Path (Join-Path $repoRoot "secrets/keycloak/clinicflow-user-lookup.env")
     # Keycloak's database login, applied by the platform bootstrap and used by Keycloak itself.
     $credentialChecksums.keycloakDatabase = Set-SecretFromEnvFile -Name clinicflow-keycloak-database -Path (Join-Path $repoRoot "secrets/keycloak/database.env")
     # The master realm's bootstrap administrator, applied only when Keycloak creates its database.
@@ -276,6 +259,7 @@ try {
             --set-string "global.clinicflow.checksums.database=$($credentialChecksums.keycloakDatabase)" `
             --set-string "global.clinicflow.checksums.admin=$($credentialChecksums.keycloakAdmin)" `
             --set-string "global.clinicflow.checksums.client=$($credentialChecksums.keycloakClient)" `
+            --set-string "global.clinicflow.checksums.userLookup=$($credentialChecksums.userLookupClient)" `
             --set-string "global.clinicflow.checksums.realm=$importedRealm" `
             --set-string "global.clinicflow.demoPassword=$demoPassword" `
             --set-string "networkPolicy.gatewayNamespace=$IngressNamespace" `
@@ -326,7 +310,7 @@ try {
         }
 
         if ($componentName -eq 'Frontend') {
-            $arguments += @('--set-string',"gatewayNamespace=$IngressNamespace",'--set-string',"gatewayUrl=http://clinicflow-gateway-api.$IngressNamespace.svc.cluster.local:8080",'--set-string',"oidc.clientSecretChecksum=$($credentialChecksums.keycloakClient)")
+            $arguments += @('--set-string',"gatewayNamespace=$IngressNamespace",'--set-string',"gatewayUrl=http://clinicflow-gateway-api.$IngressNamespace.svc.cluster.local:8080",'--set-string',"oidc.clientSecretChecksum=$($credentialChecksums.keycloakClient)",'--set-string',"oidc.userLookupSecretChecksum=$($credentialChecksums.userLookupClient)")
         }
         Write-Host "Installing or upgrading $($definition.Release)..."
         Invoke-Checked helm @arguments

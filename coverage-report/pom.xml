@@ -21,11 +21,6 @@
     <dependencies>
         <dependency>
             <groupId>com.clinicflow</groupId>
-            <artifactId>auth-service</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.clinicflow</groupId>
             <artifactId>patient-service</artifactId>
             <version>${project.version}</version>
         </dependency>

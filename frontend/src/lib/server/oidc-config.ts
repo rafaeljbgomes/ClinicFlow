@@ -1,6 +1,7 @@
 import "server-only";
 
 const DEFAULT_CLIENT_ID = "clinicflow-bff";
+const DEFAULT_USER_LOOKUP_CLIENT_ID = "clinicflow-user-lookup";
 
 export type OidcConfig = {
   issuer: string;
@@ -15,6 +16,7 @@ export type OidcConfig = {
   tokenEndpoint: string;
   jwksEndpoint: string;
   backchannelLogoutEndpoint: string;
+  userLookup: { clientId: string; clientSecret: string; usersEndpoint: string | null };
 };
 
 // Endpoints are configured, not discovered (ADR-027). The browser uses the public issuer; the code
@@ -39,7 +41,20 @@ export function oidcConfig(): OidcConfig {
     tokenEndpoint: `${protocol(backchannel)}/token`,
     jwksEndpoint: `${protocol(backchannel)}/certs`,
     backchannelLogoutEndpoint: `${protocol(backchannel)}/logout`,
+    // The administrator's user lookup reads the Admin API with its own read-only client (ADR-031).
+    userLookup: {
+      clientId: process.env.CLINICFLOW_USER_LOOKUP_CLIENT_ID?.trim() || DEFAULT_USER_LOOKUP_CLIENT_ID,
+      clientSecret: process.env.CLINICFLOW_USER_LOOKUP_CLIENT_SECRET ?? "",
+      usersEndpoint: adminUsersEndpoint(backchannel),
+    },
   };
+}
+
+// http://keycloak:8080/realms/clinicflow -> http://keycloak:8080/admin/realms/clinicflow/users. Null for an
+// issuer of another shape, which leaves the lookup unavailable rather than breaking sign-in.
+function adminUsersEndpoint(issuer: string) {
+  const match = /^(.*)\/realms\/([^/]+)$/.exec(issuer);
+  return match ? `${match[1]}/admin/realms/${match[2]}/users` : null;
 }
 
 function required(name: string) {

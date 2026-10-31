@@ -2,7 +2,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const components = ['auth-service', 'patient-service', 'appointment-service', 'clinical-service', 'notification-service', 'frontend'];
+const components = ['patient-service', 'appointment-service', 'clinical-service', 'notification-service', 'frontend'];
 const blocking = new Set(['HIGH', 'CRITICAL']);
 function assert(ok, message) { if (!ok) throw new Error(message); }
 function json(file) { return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')); }
@@ -21,7 +21,7 @@ function routeChanges(files, force = false) {
       continue;
     }
     if (file.startsWith('event-contracts/')) {
-      components.filter(c => c !== 'auth-service' && c !== 'frontend').forEach(c => selected.add(c));
+      components.filter(c => c !== 'frontend').forEach(c => selected.add(c));
       fullSystem = true; continue;
     }
     fullSystem = dast = true;
@@ -168,12 +168,14 @@ function prepare(root, component, force = false) {
 
 function normalizeZap(report, context, manifest) {
   assert(report?.schemaVersion === 1 && report.complete === true && Array.isArray(report.alerts) && Array.isArray(report.coverage), 'Incomplete ZAP scan');
-  const expected = context.fullSystem ? components : [...new Set(['auth-service', ...context.components])];
+  const expected = context.fullSystem ? components : context.components;
   assert(Array.isArray(report.components) && [...report.components].sort().join(',') === [...expected].sort().join(','), 'ZAP scanned the wrong component scope');
   for (const role of ['psychologist','patient','administrator']) {
     const item = report.coverage.find(c => c.role === role);
     assert(item?.authenticated === true && Array.isArray(item.verifiedUrls), 'Missing authenticated role coverage');
-    assert(item.verifiedUrls.includes('https://api.clinicflow.localhost:8443/api/v1/auth/users/me') && item.verifiedUrls.includes('https://clinicflow.localhost:8443/api/auth/me'), 'Missing authenticated API/BFF verification');
+    assert(item.verifiedUrls.includes('https://clinicflow.localhost:8443/api/auth/me'), 'Missing authenticated BFF verification');
+    // The administrator's user lookup, read from Keycloak through the BFF (ADR-031).
+    if (role === 'administrator') assert(item.verifiedUrls.some(url => url.startsWith('https://clinicflow.localhost:8443/api/users/')), 'Missing administrator user lookup coverage');
     for (const request of manifest.requests.filter(r => expected.includes(r.component) && r.roles.includes(role)))
       assert(item.verifiedUrls.includes('https://api.clinicflow.localhost:8443' + request.path) && item.verifiedUrls.includes('https://clinicflow.localhost:8443' + request.bff), 'Missing endpoint discovery: ' + request.path);
   }

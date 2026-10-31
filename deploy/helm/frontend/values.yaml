@@ -13,8 +13,6 @@ cookieSecure: true
 gatewayNamespace: ingress-system
 
 services:
-  auth:
-    healthUrl: http://auth-service:9000
   patient:
     healthUrl: http://patient-service:9000
   appointment:
@@ -25,7 +23,7 @@ services:
     healthUrl: http://notification-service:9000
 
 # The BFF is a confidential OIDC client of the Keycloak realm (ADR-027). The browser uses the public
-# issuer; codes, refreshes and keys go to Keycloak on the cluster network. Keycloak arrives with #89.
+# issuer; codes, refreshes and keys go to Keycloak on the cluster network.
 oidc:
   issuer: https://auth.clinicflow.localhost/realms/clinicflow
   internalIssuer: http://keycloak:8080/realms/clinicflow
@@ -35,6 +33,10 @@ oidc:
   clientSecretKey: CLINICFLOW_BFF_CLIENT_SECRET
   # A digest of that Secret; a rotated client secret rolls the BFF (ADR-026).
   clientSecretChecksum: ""
+  # The read-only Admin API client behind the administrator's user lookup (ADR-031), and its digest.
+  userLookupSecretName: clinicflow-user-lookup-oidc
+  userLookupSecretKey: CLINICFLOW_USER_LOOKUP_CLIENT_SECRET
+  userLookupSecretChecksum: ""
   # The in-cluster Keycloak pods (app.kubernetes.io/component) and HTTP port the egress rule allows.
   component: keycloak
   port: 8080

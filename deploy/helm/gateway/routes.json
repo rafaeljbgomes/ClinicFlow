@@ -1,35 +1,5 @@
 [
   {
-    "id": "auth-login",
-    "service": "auth",
-    "backend": "auth-service",
-    "port": 8081,
-    "match": "Exact",
-    "path": "/api/v1/auth/login",
-    "upstream": "/auth/login",
-    "policy": "auth"
-  },
-  {
-    "id": "auth-register",
-    "service": "auth",
-    "backend": "auth-service",
-    "port": 8081,
-    "match": "Exact",
-    "path": "/api/v1/auth/register",
-    "upstream": "/auth/register",
-    "policy": "auth"
-  },
-  {
-    "id": "auth-users",
-    "service": "auth",
-    "backend": "auth-service",
-    "port": 8081,
-    "match": "PathPrefix",
-    "path": "/api/v1/auth/users",
-    "upstream": "/users",
-    "policy": "public"
-  },
-  {
     "id": "patients",
     "service": "patient",
     "backend": "patient-service",

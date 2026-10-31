@@ -6,7 +6,7 @@ on:
   workflow_call:
     inputs:
       service:
-        description: Maven module name, for example auth-service.
+        description: Maven module name, for example patient-service.
         type: string
         required: true
       run-id:

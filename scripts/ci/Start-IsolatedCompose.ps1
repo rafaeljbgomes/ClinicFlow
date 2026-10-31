@@ -96,7 +96,7 @@ try {
     & (Join-Path $RepositoryRoot 'scripts/generate-dev-credentials.ps1')
     & docker compose --file docker-compose.yml --file docker-compose.ci.yml --project-name $ProjectName up --detach --no-build
     if ($LASTEXITCODE -ne 0) { throw "Isolated Compose startup failed." }
-    foreach ($Service in @('auth-service','patient-service','appointment-service','clinical-service','notification-service')) {
+    foreach ($Service in @('patient-service','appointment-service','clinical-service','notification-service')) {
         $Deadline = [DateTimeOffset]::UtcNow.AddSeconds(240)
         do {
             & docker compose --file docker-compose.yml --file docker-compose.ci.yml --project-name $ProjectName exec -T gateway wget -T 5 -q -O /dev/null "http://${Service}:9000/actuator/health" 2>$null

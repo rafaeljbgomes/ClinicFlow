@@ -20,7 +20,6 @@
     <description>ClinicFlow cloud-native microservices prototype</description>
 
     <modules>
-        <module>auth-service</module>
         <module>patient-service</module>
         <module>appointment-service</module>
         <module>clinical-service</module>

@@ -7,7 +7,7 @@ $Container = "$Project-zap"
 Set-IsolatedPorts -RunId "$RunId-security"
 $env:CLINICFLOW_SECURITY_TAG = $Project
 $Context = Get-Content -Raw (Join-Path $SecurityReportRoot 'context.json') | ConvertFrom-Json
-$env:DAST_COMPONENTS = if ($Context.fullSystem -or $FullScan) { 'auth-service,patient-service,appointment-service,clinical-service,notification-service,frontend' } else { (@('auth-service') + @($Context.components) | Select-Object -Unique) -join ',' }
+$env:DAST_COMPONENTS = if ($Context.fullSystem -or $FullScan) { 'patient-service,appointment-service,clinical-service,notification-service,frontend' } else { @($Context.components) -join ',' }
 $env:DAST_FULL_SCAN = $FullScan.IsPresent.ToString().ToLowerInvariant()
 $env:DAST_SMOKE_ONLY = $SmokeOnly.IsPresent.ToString().ToLowerInvariant()
 $Compose = @('compose','--file','docker-compose.yml','--file','docker-compose.ci.yml','--file','docker-compose.security.yml','--project-name',$Project,'--profile','security')
@@ -17,9 +17,9 @@ Push-Location $SecurityRoot
 try {
     # Per-service and platform administrator credentials (ADR-026); existing files are kept.
     & (Join-Path $SecurityRoot 'scripts/generate-dev-credentials.ps1')
-    Invoke-SecurityTool docker ($Compose + @('build','postgres','postgres-bootstrap','keycloak','gateway','auth-service','patient-service','appointment-service','clinical-service','notification-service','frontend','zap'))
-    Invoke-SecurityTool docker ($Compose + @('up','--detach','--no-build','keycloak','gateway','auth-service','patient-service','appointment-service','clinical-service','notification-service','frontend'))
-    foreach ($Service in @('auth-service','patient-service','appointment-service','clinical-service','notification-service')) {
+    Invoke-SecurityTool docker ($Compose + @('build','postgres','postgres-bootstrap','keycloak','gateway','patient-service','appointment-service','clinical-service','notification-service','frontend','zap'))
+    Invoke-SecurityTool docker ($Compose + @('up','--detach','--no-build','keycloak','gateway','patient-service','appointment-service','clinical-service','notification-service','frontend'))
+    foreach ($Service in @('patient-service','appointment-service','clinical-service','notification-service')) {
         $Deadline = [DateTimeOffset]::UtcNow.AddSeconds(240)
         do {
             & docker @Compose exec -T gateway wget -T 5 -q -O /dev/null "http://${Service}:9000/actuator/health" 2>$null

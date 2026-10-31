@@ -25,11 +25,14 @@ global:
       database: clinicflow-keycloak-database
       admin: clinicflow-keycloak-admin
       client: clinicflow-bff-oidc
+      # The read-only Admin API client of the BFF's user lookup (ADR-031).
+      userLookup: clinicflow-user-lookup-oidc
     # Digests of those Secrets and of the realm file; a change rolls the pod.
     checksums:
       database: ""
       admin: ""
       client: ""
+      userLookup: ""
       realm: ""
 
 # The stable private-network URL, http://keycloak:8080, in Compose and Kubernetes alike.
@@ -41,7 +44,7 @@ networkPolicy:
   enabled: true
   gatewayNamespace: ingress-system
   monitoringNamespace: monitoring
-  # Pods that exchange codes or fetch keys on the private network. auth-service is not one (#90).
+  # Pods that exchange codes, fetch keys or read the Admin API on the private network.
   clients:
     - frontend
     - patient-service
@@ -66,6 +69,7 @@ keycloakx:
     checksum/database: "{{ .Values.global.clinicflow.checksums.database }}"
     checksum/admin: "{{ .Values.global.clinicflow.checksums.admin }}"
     checksum/client: "{{ .Values.global.clinicflow.checksums.client }}"
+    checksum/user-lookup: "{{ .Values.global.clinicflow.checksums.userLookup }}"
     checksum/realm: "{{ .Values.global.clinicflow.checksums.realm }}"
   # No KUBE_PING and no Kubernetes API access.
   serviceAccount:
@@ -119,7 +123,8 @@ keycloakx:
     - name: CLINICFLOW_DEMO_PASSWORD
       value: {{ . | quote }}
     {{- end }}
-  # KC_DB_USERNAME/KC_DB_PASSWORD, KC_BOOTSTRAP_ADMIN_* and CLINICFLOW_BFF_CLIENT_SECRET.
+  # KC_DB_USERNAME/KC_DB_PASSWORD, KC_BOOTSTRAP_ADMIN_*, CLINICFLOW_BFF_CLIENT_SECRET and
+  # CLINICFLOW_USER_LOOKUP_CLIENT_SECRET.
   extraEnvFrom: |
     - secretRef:
         name: {{ .Values.global.clinicflow.secrets.database | quote }}
@@ -127,6 +132,8 @@ keycloakx:
         name: {{ .Values.global.clinicflow.secrets.admin | quote }}
     - secretRef:
         name: {{ .Values.global.clinicflow.secrets.client | quote }}
+    - secretRef:
+        name: {{ .Values.global.clinicflow.secrets.userLookup | quote }}
   # The only writable paths: the JVM's temporary files; Keycloak's own, where it caches gzipped theme
   # resources (without it every compressed request for them gets 404); and the transaction object
   # store, without which every start waits on Narayana's recovery modules.

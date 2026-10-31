@@ -54,6 +54,8 @@ Write-Host "Keycloak credentials:"
 Write-EnvFile (Join-Path $keycloakDir "database.env") (New-Login KC_DB_USERNAME clinicflow_keycloak KC_DB_PASSWORD)
 Write-EnvFile (Join-Path $keycloakDir "admin.env") (New-Login KC_BOOTSTRAP_ADMIN_USERNAME clinicflow KC_BOOTSTRAP_ADMIN_PASSWORD)
 Write-EnvFile (Join-Path $keycloakDir "clinicflow-bff.env") ([ordered]@{ CLINICFLOW_BFF_CLIENT_SECRET = (New-Password) })
+# The BFF's read-only Admin API client for the administrator's user lookup (ADR-031).
+Write-EnvFile (Join-Path $keycloakDir "clinicflow-user-lookup.env") ([ordered]@{ CLINICFLOW_USER_LOOKUP_CLIENT_SECRET = (New-Password) })
 
 Write-Host "Service credentials:"
 foreach ($line in Get-Content $identitiesFile) {

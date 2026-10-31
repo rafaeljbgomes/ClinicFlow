@@ -49,7 +49,7 @@ describe("system health role check", () => {
       await GET();
 
       // Assert
-      expect(backendHealthGetMock).toHaveBeenCalledTimes(5);
+      expect(backendHealthGetMock).toHaveBeenCalledTimes(4);
     });
 
     it("responds with 200", async () => {

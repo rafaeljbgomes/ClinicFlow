@@ -1,9 +1,8 @@
 import { expect, test as base, type APIRequestContext, type APIResponse, type Browser, type PlaywrightWorkerArgs } from "@playwright/test";
+import { generateKeyPair, SignJWT } from "jose";
 import { keycloakAccessToken, provisionPsychologist, signInThroughBff, type StorageState } from "./keycloak";
 
 type DemoTokens = { psychologist: string; patient: string; administrator: string };
-// auth-service checks only its own tokens until it is removed (#90); the other services only Keycloak's.
-type AuthServiceTokens = { psychologist: string; administrator: string };
 type OwnedRecords = { owner: string; patientId: string; caseId: string };
 
 const uiBaseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
@@ -22,7 +21,6 @@ const demoAccounts = {
 // Sign-out tests use a session of their own, because sign-out ends the Keycloak session.
 const test = base.extend<{ bffRequest: APIRequestContext; ownBffRequest: APIRequestContext }, {
   demoTokens: DemoTokens;
-  authServiceTokens: AuthServiceTokens;
   ownedRecords: OwnedRecords;
   bffSession: StorageState;
 }>({
@@ -32,17 +30,6 @@ const test = base.extend<{ bffRequest: APIRequestContext; ownBffRequest: APIRequ
       patient: await apiToken(browser, playwright, demoAccounts.patient),
       administrator: await apiToken(browser, playwright, demoAccounts.administrator),
     });
-  }, { scope: "worker" }],
-  authServiceTokens: [async ({ playwright }, provide) => {
-    const request = await playwright.request.newContext(contextOptions());
-    try {
-      await provide({
-        psychologist: await authServiceLogin(request, demoAccounts.psychologist),
-        administrator: await authServiceLogin(request, demoAccounts.administrator),
-      });
-    } finally {
-      await request.dispose();
-    }
   }, { scope: "worker" }],
   ownedRecords: [async ({ browser, playwright }, provide) => {
     const request = await playwright.request.newContext(contextOptions());
@@ -85,7 +72,6 @@ test.use({
 
 test.describe("direct bearer APIs enforce backend roles and clinical/notification ownership", () => {
   for (const path of [
-    "/api/v1/auth/users/me",
     "/api/v1/patients",
     "/api/v1/appointments",
     "/api/v1/clinical/clinical-cases",
@@ -120,39 +106,6 @@ test.describe("direct bearer APIs enforce backend roles and clinical/notificatio
       expect(response.status()).toBe(403);
     });
   }
-
-  test("a psychologist can read their own profile", async ({ request, authServiceTokens }) => {
-    // Arrange
-    const headers = signed(authServiceTokens.psychologist);
-
-    // Act
-    const response = await request.get("/api/v1/auth/users/me", { headers });
-
-    // Assert
-    expect(response.status()).toBe(200);
-  });
-
-  test("a psychologist cannot look up a user by id", async ({ request, authServiceTokens }) => {
-    // Arrange
-    const userId = await currentUserId(request, authServiceTokens.psychologist);
-
-    // Act
-    const response = await request.get(`/api/v1/auth/users/${userId}`, { headers: signed(authServiceTokens.psychologist) });
-
-    // Assert
-    expect(response.status()).toBe(403);
-  });
-
-  test("an administrator can look up a user by id", async ({ request, authServiceTokens }) => {
-    // Arrange
-    const userId = await currentUserId(request, authServiceTokens.psychologist);
-
-    // Act
-    const response = await request.get(`/api/v1/auth/users/${userId}`, { headers: signed(authServiceTokens.administrator) });
-
-    // Assert
-    expect(response.status()).toBe(200);
-  });
 
   test("another psychologist cannot read the owner's clinical case", async ({ request, demoTokens, ownedRecords }) => {
     // Arrange
@@ -228,15 +181,19 @@ test.describe("direct bearer APIs enforce backend roles and clinical/notificatio
     expect(statuses).toEqual(notifications.map(() => 200));
   });
 
-  test("the resource servers reject an auth-service token", async ({ request, authServiceTokens }) => {
+  test("the resource servers reject a token signed outside the realm", async ({ request }) => {
+    // Arrange
+    const token = await foreignToken();
+
     // Act
-    const response = await request.get("/api/v1/patients", { headers: signed(authServiceTokens.psychologist) });
+    const response = await request.get("/api/v1/patients", { headers: signed(token) });
 
     // Assert
     expect(response.status()).toBe(401);
   });
 
-  for (const path of ["/actuator/health", "/api/v1/unknown", "/dashboard", "/api/v1/patients-other"]) {
+  // The retired /api/v1/auth routes are gone (ADR-031).
+  for (const path of ["/actuator/health", "/api/v1/unknown", "/dashboard", "/api/v1/patients-other", "/api/v1/auth/login", "/api/v1/auth/users/me"]) {
     test(`${path} is not routed on the API host`, async ({ request }) => {
       // Act
       const response = await request.get(path, { headers: apiHost });
@@ -384,19 +341,17 @@ async function arrangeStep(response: APIResponse, expectedStatus: number, step: 
   return response;
 }
 
-async function authServiceLogin(request: APIRequestContext, email: string, password = demoPassword) {
-  const response = await request.post("/api/v1/auth/login", { headers: apiHost, data: { email, password } });
-  await arrangeStep(response, 200, `auth-service login ${email}`);
-  return (await response.json()).accessToken as string;
-}
-
-async function currentUserId(request: APIRequestContext, token: string) {
-  const response = await arrangeStep(
-    await request.get("/api/v1/auth/users/me", { headers: signed(token) }),
-    200,
-    "read current user"
-  );
-  return (await response.json()).id as string;
+// A token in the realm's shape, issuer and audience included, signed by a key the realm never published.
+async function foreignToken() {
+  const { privateKey } = await generateKeyPair("RS256");
+  return new SignJWT({ roles: ["PSYCHOLOGIST"], azp: "clinicflow-bff", email: demoAccounts.psychologist })
+    .setProtectedHeader({ alg: "RS256", kid: "foreign-key", typ: "JWT" })
+    .setIssuer(process.env.CLINICFLOW_OIDC_ISSUER ?? "http://localhost:8180/realms/clinicflow")
+    .setAudience("clinicflow-api")
+    .setSubject("00000000-0000-4000-8000-000000000011")
+    .setIssuedAt()
+    .setExpirationTime("5m")
+    .sign(privateKey);
 }
 
 async function createOwnedRecords(browser: Browser, playwright: PlaywrightWorkerArgs["playwright"], request: APIRequestContext): Promise<OwnedRecords> {

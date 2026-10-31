@@ -101,11 +101,42 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "clinicflow-user-lookup",
+      "name": "ClinicFlow BFF user lookup",
+      "description": "Service account for the administrator's user lookup in the BFF (ADR-031). Read-only: view-users and nothing else.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "consentRequired": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${CLINICFLOW_USER_LOOKUP_CLIENT_SECRET}",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "frontchannelLogout": false,
+      "fullScopeAllowed": false,
+      "redirectUris": [],
+      "webOrigins": [],
+      "attributes": {
+        "oauth2.device.authorization.grant.enabled": "false",
+        "oidc.ciba.grant.enabled": "false"
+      },
+      "defaultClientScopes": [],
+      "optionalClientScopes": []
     }
   ],
   "scopeMappings": [
     { "client": "clinicflow-bff", "roles": ["ADMIN", "PSYCHOLOGIST", "PATIENT"] }
   ],
+  "clientScopeMappings": {
+    "realm-management": [
+      { "client": "clinicflow-user-lookup", "roles": ["view-users"] }
+    ]
+  },
   "users": [
     {
       "id": "00000000-0000-4000-8000-000000000001",
@@ -161,6 +192,13 @@
       "lastName": "Ferreira",
       "realmRoles": ["PATIENT"],
       "credentials": [{ "type": "password", "value": "${CLINICFLOW_DEMO_PASSWORD}", "temporary": false }]
+    },
+    {
+      "username": "service-account-clinicflow-user-lookup",
+      "enabled": true,
+      "serviceAccountClientId": "clinicflow-user-lookup",
+      "realmRoles": [],
+      "clientRoles": { "realm-management": ["view-users"] }
     }
   ]
 }

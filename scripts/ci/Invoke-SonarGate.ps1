@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([Parameter(Mandatory)][ValidateSet('auth-service','patient-service','appointment-service','clinical-service','notification-service','frontend')][string]$Component)
+param([Parameter(Mandatory)][ValidateSet('patient-service','appointment-service','clinical-service','notification-service','frontend')][string]$Component)
 
 # GitHub Actions entry point for the SonarQube Cloud gate. Sonar stays inactive until the repository
 # variable SONAR_ORGANIZATION exists; once active, a missing token fails closed except on fork PRs,
