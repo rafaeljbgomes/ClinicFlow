@@ -172,9 +172,14 @@ publication; real traffic must also converge within a bounded deadline.
 The live contract test clones the installed business HTTPRoute specifications into
 temporary routes selected by a unique request header, with isolated echo backends. It
 checks the same matrix as Compose through the actual Gateway API controller. Normal
-application routing remains available. It also briefly scales the real patient deployment
-to zero to verify BFF JSON 503 errors, unrelated service availability and recovery, then
-restores its original replica count in finally. Run it in the local acceptance environment.
+application routing remains available. It requires the auth quota on exactly the BFF
+`/api/auth/login` and `/api/auth/register` routes and Keycloak's `login-actions`, and
+clones the two BFF routes onto the fixture to check their quotas, refill and forged
+`X-Forwarded-For` handling, and that the private listener does not serve them. It then
+signs in through the BFF and Keycloak (one `login-actions` token) and briefly scales the
+real patient deployment to zero to verify BFF JSON 503 errors, unrelated service
+availability and recovery, restoring its original replica count in finally. Run it in the
+local acceptance environment.
 Override GATEWAY_TEST_RUNTIME_HOST if loopback does not reach the LoadBalancer.
 
 Isolation probes grant egress only to their temporary probe identities
