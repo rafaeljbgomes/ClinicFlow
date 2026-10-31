@@ -50,7 +50,6 @@ spec:
                 values: [frontend, patient-service, appointment-service, clinical-service, notification-service]
       ports:
         - {port: 3000, protocol: TCP}
-        - {port: 8081, protocol: TCP}
         - {port: 8082, protocol: TCP}
         - {port: 8083, protocol: TCP}
         - {port: 8084, protocol: TCP}

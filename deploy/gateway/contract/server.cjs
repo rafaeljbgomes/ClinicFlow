@@ -13,7 +13,7 @@ function listen(port) {
   }).listen(port,'0.0.0.0');
   servers.set(port,server);
 }
-for(const port of [3000,8081,8082,8083,8084,8085]) listen(port);
+for(const port of [3000,8082,8083,8084,8085]) listen(port);
 http.createServer((req,res)=>{
   const u=new URL(req.url,'http://fixture'),port=Number(u.searchParams.get('port'));
   if(u.pathname==='/stop') servers.get(port)?.close();
