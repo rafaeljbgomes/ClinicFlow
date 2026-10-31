@@ -55,6 +55,9 @@ const cases = [
   // The identity provider every component trusts (ADR-027): its release and its vendored chart.
   ['deploy/helm/keycloak/values.yaml', policy.components, true, true],
   ['deploy/helm/keycloak/charts/keycloakx-7.4.0.tgz', policy.components, true, true],
+  // Its login theme renders the pages every browser test signs in through.
+  ['docker/keycloak/themes/clinicflow/login/template.ftl', policy.components, true, true],
+  ['docker/keycloak/themes/clinicflow/login/resources/css/clinicflow.css', policy.components, true, true],
   ['.ci/security.json', policy.components, true, true],
   ['unknown-executable.sh', policy.components, true, true],
 ];
