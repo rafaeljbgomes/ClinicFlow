@@ -12,10 +12,19 @@ const ca = fs.readFileSync(path.join(root, 'secrets/edge/ca.crt'));
 const kubectl = (...args) => execFileSync('kubectl', args, {encoding:'utf8', timeout:180000});
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const apply = object => execFileSync('kubectl', ['apply','-f','-'], {input:JSON.stringify(object), encoding:'utf8'});
-function request(target, {host='api.clinicflow.localhost', method='GET', body='', headers={}, plain=false}={}) {
+// Requests carry the run marker, which selects the temporary routes; real BFF and Keycloak traffic omits it.
+// Docker Desktop's LoadBalancer resets a few percent of connections, so a reset is retried on a fresh
+// connection; any HTTP status is final.
+async function request(target, options={}) {
+  for(let attempt=1;;attempt++) {
+    try { return await requestOnce(target, options); }
+    catch(error) { if(error.code!=='ECONNRESET' || attempt===3) throw error; }
+  }
+}
+function requestOnce(target, {host='api.clinicflow.localhost', method='GET', body='', headers={}, plain=false, marker=true}={}) {
   return new Promise((resolve, reject) => {
-    const req = (plain ? http : https).request({hostname:address, port:plain ? 80 : 443, path:target,
-      servername:host, ca, method, headers:{host,'x-clinicflow-contract':run,...headers}}, response => {
+    const req = (plain ? http : https).request({hostname:address, port:plain ? 80 : 443, path:target, agent:false,
+      servername:host, ca, method, headers:{host,...(marker ? {'x-clinicflow-contract':run} : {}),...headers}}, response => {
       const chunks=[]; response.on('data',chunk=>chunks.push(chunk));
       response.on('end',()=>resolve({status:response.statusCode, headers:response.headers,text:Buffer.concat(chunks).toString()}));
     });
@@ -23,10 +32,34 @@ function request(target, {host='api.clinicflow.localhost', method='GET', body=''
     req.on('error',reject); req.end(body);
   });
 }
+const cookies = response => (response.headers['set-cookie'] ?? []).map(value=>value.split(';')[0]).filter(pair=>!pair.endsWith('=')).join('; ');
+// The BFF's authorization-code sign-in (ADR-027): its login redirect, Keycloak's form, then the callback
+// that sets the session cookies. The form post spends one token of the Keycloak login-actions quota.
+async function signIn(email, password) {
+  const unmarked = url => ({host:url.host, marker:false});
+  const start = await request('/api/auth/login', {host:'clinicflow.localhost', marker:false});
+  assert.equal(start.status, 303, 'The BFF login did not redirect to Keycloak');
+  const authorize = new URL(start.headers.location);
+  const page = await request(authorize.pathname+authorize.search, unmarked(authorize));
+  assert.equal(page.status, 200, 'The Keycloak login page did not load');
+  const action = new URL(page.text.match(/id="kc-form-login"[^>]*action="([^"]+)"/)[1].replaceAll('&amp;','&'));
+  const login = await request(action.pathname+action.search, {...unmarked(action), method:'POST', body:new URLSearchParams({username:email, password, credentialId:''}).toString(),
+    headers:{'content-type':'application/x-www-form-urlencoded', cookie:cookies(page)}});
+  assert.equal(login.status, 302, `The Keycloak credential post failed (${login.status})`);
+  const callback = new URL(login.headers.location);
+  const session = await request(callback.pathname+callback.search, {...unmarked(callback), headers:{cookie:cookies(start)}});
+  assert.equal(session.status, 303); assert(!new URL(session.headers.location).searchParams.has('error'), 'The BFF callback refused the sign-in');
+  return cookies(session);
+}
 async function main() {
   const original = JSON.parse(kubectl('get','httproutes','-n',namespace,'-o','json'));
   const routes = original.items.filter(item=>/^(public|internal)-/.test(item.metadata.name) && item.spec.rules[0].backendRefs);
   assert.equal(routes.length, matrix.length*2, 'Expected every installed public/private business route');
+  // The auth quota sits only on the BFF sign-in routes and on Keycloak's login actions.
+  const limited = original.items.filter(route=>route.spec.rules.some(rule=>rule.filters?.some(filter=>filter.extensionRef?.name==='auth-limit')));
+  assert.deepEqual(limited.map(route=>route.metadata.name).sort(), ['bff-login','bff-register','identity-login'], 'Unexpected auth-limited routes');
+  const signInRoutes = limited.filter(route=>route.metadata.name.startsWith('bff-'));
+  const fixturePorts = [3000, ...new Set(matrix.map(route=>route.port))];
   apply({apiVersion:'v1',kind:'ConfigMap',metadata:{name:run,namespace,labels},
     data:{'server.cjs':fs.readFileSync(path.join(root,'deploy/gateway/contract/server.cjs'),'utf8')}});
   apply({apiVersion:'v1',kind:'Pod',metadata:{name:run,namespace,labels:{...labels,'app.kubernetes.io/component':'patient-service'}},
@@ -37,13 +70,15 @@ async function main() {
       readinessProbe:{httpGet:{path:'/',port:9090}},volumeMounts:[{name:'fixture',mountPath:'/fixture',readOnly:true}]}],
       volumes:[{name:'fixture',configMap:{name:run}}]}});
   apply({apiVersion:'v1',kind:'Service',metadata:{name:run,namespace,labels},spec:{selector:labels,
-    ports:[8082,8083,8084,8085].map(port=>({name:`app-${port}`,port,targetPort:port}))}});
+    ports:fixturePorts.map(port=>({name:`app-${port}`,port,targetPort:port}))}});
   apply({apiVersion:'networking.k8s.io/v1',kind:'NetworkPolicy',metadata:{name:run,namespace,labels},
     spec:{podSelector:{matchLabels:labels},policyTypes:['Ingress','Egress'],egress:[],ingress:[{
       from:[{namespaceSelector:{matchLabels:{'kubernetes.io/metadata.name':ingress}},podSelector:{matchLabels:{'clinicflow.io/edge':'gateway'}}}],
-      ports:[8082,8083,8084,8085].map(port=>({port,protocol:'TCP'}))}]}});
+      ports:fixturePorts.map(port=>({port,protocol:'TCP'}))}]}});
   kubectl('wait','--for=condition=Ready',`pod/${run}`,'-n',namespace,'--timeout=120s');
-  for(const route of routes) {
+  // The sign-in clones keep their hostname, path and auth quota but answer from the fixture's port 3000.
+  const clones=[...routes, ...signInRoutes];
+  for(const route of clones) {
     const spec=structuredClone(route.spec);
     for(const rule of spec.rules) {
       for(const match of rule.matches) match.headers=[{type:'Exact',name:'x-clinicflow-contract',value:run}];
@@ -54,21 +89,27 @@ async function main() {
   let accepted=false;
   for(let i=0;i<90;i++) {
     const current=JSON.parse(kubectl('get','httproutes','-n',namespace,'-l',`clinicflow.io/contract=${run}`,'-o','json'));
-    accepted=current.items.length===routes.length && current.items.every(route=>route.status?.parents?.length &&
+    accepted=current.items.length===clones.length && current.items.every(route=>route.status?.parents?.length &&
       route.status.parents.every(parent=>['Accepted','ResolvedRefs'].every(type=>parent.conditions.some(condition=>
         condition.type===type && condition.status==='True' && condition.observedGeneration===route.metadata.generation))));
     if(accepted) break;
     await sleep(1000);
   }
   assert(accepted,'Temporary routes were not accepted at their current generations');
+  const signInTargets=signInRoutes.map(route=>({host:route.spec.hostnames[0], path:route.spec.rules[0].matches[0].path.value}));
   let serving=false;
   for(let i=0;i<30;i++) {
     serving=true;
     // A partial provider update can serve earlier routes while later ones still
-    // use their ordinary backend. Do not consume the auth buckets while waiting.
-    for(const route of matrix.filter(route=>route.policy!=='auth')) {
+    // use their ordinary backend. Probe the auth-limited clones only once the rest
+    // serve: each probe spends a token from a sign-in bucket.
+    for(const route of matrix) {
       const response=await request(`${route.path}?ready=1`);
       serving=serving && response.status===200 && JSON.parse(response.text).port===route.port;
+    }
+    for(const target of serving ? signInTargets : []) {
+      const response=await request(target.path,{host:target.host});
+      serving=serving && response.status===200 && JSON.parse(response.text).port===3000;
     }
     if(serving)break;
     await sleep(1000);
@@ -94,22 +135,28 @@ async function main() {
   const control=action=>kubectl('exec',run,'-n',namespace,'--','node','-e',`fetch('http://127.0.0.1:9090/${action}?port=8082').then(r=>r.text())`);
   control('stop'); assert.equal((await request('/api/v1/patients')).status,502);
   assert.equal((await request('/api/v1/appointments')).status,200); control('start');
-  const throttle=[];
-  // The auth quota guards the sign-in routes, served by the real BFF: it answers a login with a redirect
-  // to Keycloak, so the forwarded address is not echoed here; the Compose contract checks it.
-  const login=headers=>request('/api/auth/login',{host:'clinicflow.localhost',headers});
-  for(let i=0;i<8;i++) throttle.push(await login({'x-forwarded-for':`198.51.100.${i}`}));
-  assert(throttle.some(response=>response.status===429),'Forwarded addresses bypassed the public auth quota');
-  assert(throttle.some(response=>response.status===303),'Auth quota positive control missing');
+  // Each sign-in route has its own bucket, keyed on the observed client address, not a forwarded one.
+  let observed;
+  for(const target of signInTargets) {
+    const throttle=[];
+    for(let i=0;i<8;i++) throttle.push(await request(target.path,{host:target.host,headers:{'x-forwarded-for':`198.51.100.${i}`}}));
+    assert(throttle.some(response=>response.status===429),`Forwarded addresses bypassed the ${target.path} auth quota`);
+    const successful=throttle.find(response=>response.status===200);
+    assert(successful,`${target.path} auth quota positive control missing`);
+    observed=JSON.parse(successful.text).forwarded;
+    assert(!observed.startsWith('198.51.100.'),'Untrusted forwarded address was accepted');
+  }
+  console.log(`Observed live client address: ${observed}`);
+  // The private listener stays usable while the public sign-in buckets are empty, and serves no sign-in route.
   const frontend=JSON.parse(kubectl('get','pods','-n',namespace,'-l','app.kubernetes.io/component=frontend','-o','json')).items[0].metadata.name;
-  const privateCode=`fetch('http://clinicflow-gateway-api.${ingress}.svc.cluster.local:8080/api/v1/patients',{headers:{'x-clinicflow-contract':'${run}'}}).then(async r=>{if(r.status!==200)process.exit(1);console.log((await r.json()).port)})`;
-  assert.equal(kubectl('exec',frontend,'-n',namespace,'--','node','-e',privateCode).trim(),'8082');
-  await sleep(6500); assert.equal((await login()).status,303,'Auth bucket did not refill');
+  const privateCall=target=>kubectl('exec',frontend,'-n',namespace,'--','node','-e',
+    `fetch('http://clinicflow-gateway-api.${ingress}.svc.cluster.local:8080${target}',{headers:{'x-clinicflow-contract':'${run}'}}).then(async r=>console.log(r.status===200?(await r.json()).port:r.status))`).trim();
+  assert.equal(privateCall('/api/v1/patients'),'8082');
+  for(const target of signInTargets) assert.equal(privateCall(target.path),'404',`${target.path} is routed on the private listener`);
+  await sleep(6500); assert.equal((await request(signInTargets[0].path,{host:signInTargets[0].host})).status,200,'Auth bucket did not refill');
   // Fail the real patient deployment briefly; BFF calls have no fixture marker.
-  const session=await request('/api/auth/login',{host:'clinicflow.localhost',method:'POST',
-    headers:{'content-type':'application/json'},body:JSON.stringify({email:'sofia.almeida@demo.clinicflow.local',password:'ClinicFlowDemo!2026'})});
-  assert.equal(session.status,200,'BFF outage-test login failed');
-  const cookie=session.headers['set-cookie'].map(value=>value.split(';')[0]).join('; ');
+  const bff={host:'clinicflow.localhost',marker:false};
+  const cookie=await signIn('sofia.almeida@demo.clinicflow.local',process.env.CLINICFLOW_DEMO_PASSWORD ?? 'ClinicFlowDemo!2026');
   const deployment=JSON.parse(kubectl('get','deployment','patient-service','-n',namespace,'-o','json'));
   try {
     kubectl('scale','deployment/patient-service','-n',namespace,'--replicas=0');
@@ -123,21 +170,21 @@ async function main() {
     assert(empty,'Patient endpoints did not drain');
     let unavailable;
     for(let i=0;i<30;i++) {
-      unavailable=await request('/api/patients',{host:'clinicflow.localhost',headers:{cookie}});
+      unavailable=await request('/api/patients',{...bff,headers:{cookie}});
       if(unavailable.status===503)break;
       await sleep(1000);
     }
     assert.equal(unavailable.status,503,'BFF did not retain the gateway outage status');
     assert(unavailable.headers['content-type'].includes('application/json'));
     const problem=JSON.parse(unavailable.text);assert.equal(problem.status,503);assert(problem.message);
-    assert.equal((await request('/api/appointments',{host:'clinicflow.localhost',headers:{cookie}})).status,200,'Unrelated BFF service failed');
+    assert.equal((await request('/api/appointments',{...bff,headers:{cookie}})).status,200,'Unrelated BFF service failed');
   } finally {
     kubectl('scale','deployment/patient-service','-n',namespace,`--replicas=${deployment.spec.replicas}`);
     kubectl('rollout','status','deployment/patient-service','-n',namespace,'--timeout=5m');
   }
   let recovered=false;
   for(let i=0;i<30;i++) {
-    recovered=(await request('/api/patients',{host:'clinicflow.localhost',headers:{cookie}})).status===200;
+    recovered=(await request('/api/patients',{...bff,headers:{cookie}})).status===200;
     if(recovered)break;
     await sleep(1000);
   }
@@ -149,7 +196,7 @@ async function main() {
   assert(access.length>cases,'No live access log evidence');
   for(const entry of access) for(const key of Object.keys(entry)) assert(['StartUTC','RequestMethod','RouterName','ServiceName','DownstreamStatus','OriginStatus','Duration','level','time','message','msg'].includes(key),`Unexpected access-log field ${key}`);
   for(const sentinel of ['live-redaction-token','live-secret-cookie','live-redaction-marker','live-redaction-correlation']) assert(!logs.includes(sentinel),`Unredacted log content: ${sentinel}`);
-  console.log(`PASS Kubernetes HTTPS: ${cases} shared route cases; current-generation route conditions; strict CA/SAN; headers; quotas/refill/XFF/private quota; 404; timeout/outage/no retry; JSON log redaction.`);
+  console.log(`PASS Kubernetes HTTPS: ${cases} shared route cases; current-generation route conditions; strict CA/SAN; headers; sign-in quotas/refill/XFF/private listener; 404; timeout/outage/no retry; Keycloak sign-in; JSON log redaction.`);
 }
 main().catch(error=>{console.error(error.message);process.exitCode=1;}).finally(async()=>{
   kubectl('delete','httproutes','-n',namespace,'-l',`clinicflow.io/contract=${run}`,'--ignore-not-found');
