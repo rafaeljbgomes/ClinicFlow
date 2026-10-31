@@ -75,7 +75,7 @@ The vulnerability baseline is `.ci/security-baseline.json`. Its entries use:
 
 ```json
 {
-  "component": "auth-service",
+  "component": "patient-service",
   "target": "dependencies",
   "id": "CVE-REPLACE-WITH-AN-ACTUAL-FINDING",
   "package": "exact-package-name",
@@ -129,31 +129,32 @@ secrets. Active scans mutate only disposable synthetic data.
 
 ZAP's pinned image runs the Automation Framework. Discovery exercises the bearer
 APIs and the corresponding BFF routes as psychologist, patient and
-administrator, plus psychologist SSR pages and representative JSON writes. The
-scanner reads the synthetic password from the bootstrap fixture that creates the
-disposable accounts. The request manifest is CI-only; no production Swagger
+administrator, plus psychologist SSR pages, the administrator's system page and
+user lookup, and representative JSON writes. The scanner reads the realm's
+synthetic demo password from `CLINICFLOW_DEMO_PASSWORD`, the variable the realm
+import uses. The request manifest is CI-only; no production Swagger
 endpoint is added. This is bounded API/BFF and HTML coverage, not exhaustive
 browser or business-logic testing, so the role, ownership and CSRF Playwright
 tests remain necessary.
 
-The patient, appointment, clinical and notification APIs accept only Keycloak
-access tokens (ADR-027). For them the scanner signs in to the realm on the
+Every API on the API host accepts only Keycloak access tokens (ADR-027). The
+scanner signs in to the realm on the
 private network (`keycloak:8080`) with the authorization-code flow and PKCE as
 the BFF client. It uses the generated client secret and the realm's demo
 password, and requires the token's `roles` to be exactly the scanned role.
 Keycloak traffic bypasses the ZAP proxy, so it is neither scanned nor reported.
-`auth-service` routes keep its own bearer token until it is removed (#90).
 The BFF session comes from the BFF's own sign-in: the scanner follows
 `/api/auth/login` to Keycloak, signs in, returns through `/api/auth/callback`,
 and requires HttpOnly token cookies and Secure, `SameSite=Lax` cookies.
 
 Bearer tokens and BFF sessions are renewed periodically. The runner verifies
-certificate identity and protected API/BFF access before and after each role
-scan, and rejects automation errors or warnings and missing endpoint coverage.
+certificate identity and protected BFF access before and after each role scan,
+requires API traffic for every role that has an API endpoint in scope (the
+patient role and out-of-scope APIs are covered through the BFF only), and rejects automation errors or warnings and missing endpoint coverage.
 A diagnostic smoke scan cannot satisfy the gate. High ZAP alerts block unless
 narrowly excepted; Medium/Low alerts remain visible.
 
-PR scans cover auth-service plus the affected components, with a two-minute
+PR scans cover the affected components, with a two-minute
 active-scan budget per role. Scheduled and manual runs scan every component with
 a twelve-minute budget per role. A scan the budget stops still has to end
 normally, and the coverage report records how far it got; a scan that is still
@@ -174,8 +175,8 @@ python -m unittest discover -s scripts/ci/tests -p test_dast.py -v
 The scanner scripts also run locally when Trivy, the Sonar scanner and Docker
 are installed. Set `TRIVY_CACHE_DIR` outside the repository and
 `CLINICFLOW_SECURITY_MODE` first, then run, for example,
-`.\scripts\ci\Invoke-ComponentSecurity.ps1 -Component auth-service -Phase Dependencies`
-after `node scripts/ci/security-policy.cjs prepare auth-service --force`.
+`.\scripts\ci\Invoke-ComponentSecurity.ps1 -Component patient-service -Phase Dependencies`
+after `node scripts/ci/security-policy.cjs prepare patient-service --force`.
 
 ## Sources
 

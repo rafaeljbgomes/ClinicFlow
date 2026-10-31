@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([Parameter(Mandatory)][ValidateSet('auth-service','patient-service','appointment-service','clinical-service','notification-service','frontend')][string]$Component)
+param([Parameter(Mandatory)][ValidateSet('patient-service','appointment-service','clinical-service','notification-service','frontend')][string]$Component)
 . (Join-Path $PSScriptRoot 'Security-Common.ps1')
 if (-not $env:SONAR_TOKEN -or -not $env:SONAR_ORGANIZATION) { throw 'Sonar credentials and organization are required.' }
 $Context = Get-Content -Raw (Join-Path $SecurityReportRoot 'context.json') | ConvertFrom-Json

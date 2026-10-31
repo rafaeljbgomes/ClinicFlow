@@ -2,7 +2,6 @@
 param(
     [Parameter(Mandatory)]
     [ValidateSet(
-        "auth-service",
         "patient-service",
         "appointment-service",
         "clinical-service",

@@ -31,7 +31,6 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Pinned gateway CRD/schema/contract validation failed.' }
 
     $serviceReleases = [ordered]@{
-        auth = "auth-service"
         patient = "patient-service"
         appointment = "appointment-service"
         clinical = "clinical-service"
@@ -116,8 +115,6 @@ try {
     if ($LASTEXITCODE -eq 0) { throw "Service schema accepted mutable image tag 'latest'." }
     & helm template invalid ./deploy/helm/service --set-string image.tag= --set-string image.digest= *> $null
     if ($LASTEXITCODE -eq 0) { throw "Service schema accepted an empty image reference." }
-    & helm template invalid ./deploy/helm/service --set jwt.enabled=true *> $null
-    if ($LASTEXITCODE -eq 0) { throw "Service schema accepted a release that trusts two token issuers." }
     & helm template invalid ./deploy/helm/service --set oidc.enabled=false *> $null
     if ($LASTEXITCODE -eq 0) { throw "Service schema accepted a release that trusts no token issuer." }
     & helm template invalid ./deploy/helm/service --set-string oidc.issuer=clinicflow-auth *> $null

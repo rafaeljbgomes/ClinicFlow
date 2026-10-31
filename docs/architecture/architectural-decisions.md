@@ -18,14 +18,17 @@ Small duplication is acceptable when it protects service autonomy.
 
 ## ADR-002: Service Boundaries
 
-Decision: implement five services: auth, patient, appointment, clinical, and
-notification.
+Decision: implement four domain services: patient, appointment, clinical, and
+notification. Identity is not a ClinicFlow service: Keycloak signs users in and
+issues tokens (ADR-027).
 
-Rationale: these boundaries match the MVP flows and demonstrate authentication,
-domain CRUD, scheduling lifecycle events, clinical workflow ownership, and
-asynchronous event consumption.
+Rationale: these boundaries match the MVP flows and demonstrate domain CRUD,
+scheduling lifecycle events, clinical workflow ownership, and asynchronous event
+consumption.
 
-Consequences: each service owns its own persistence model and database.
+Consequences: each service owns its own persistence model and database. The
+original fifth service, `auth-service`, was retired once Keycloak replaced it
+(ADR-031).
 
 ## ADR-003: Clean Architecture per Service
 
@@ -74,7 +77,7 @@ Consequences: local development requires generating development RSA keys.
 Status: superseded for token issuance by ADR-027. Keycloak signs the tokens and
 publishes its keys through JWKS. Validating tokens locally in each resource
 server, without a shared signing secret, still holds. This entry describes the
-system until the migration lands (#86 to #90).
+system before the migration (#86 to #90); ADR-031 removed the RSA key pair.
 
 ## ADR-007: Structured Logging
 
@@ -175,8 +178,8 @@ installation. Prometheus and Grafana are exposed locally through
 
 ## ADR-014: Separate Management Port for Internal Metrics
 
-Decision: Spring Boot services keep their application ports on 8081 through
-8085 and expose Actuator probes and Prometheus metrics on management port 9000
+Decision: Spring Boot services keep their application ports on 8082 through
+8085 (8081 belonged to the retired `auth-service`) and expose Actuator probes and Prometheus metrics on management port 9000
 when the `kubernetes` profile is active.
 
 Rationale: separating operational endpoints from API traffic makes it easier to
@@ -211,7 +214,7 @@ libphonenumber.
 
 ## ADR-016: Role-Aware Frontend and Notification Ownership
 
-Decision: treat the Next.js frontend as a role-aware BFF rather than a generic dashboard. The dashboard layout obtains the full user profile from auth-service, while sensitive BFF routes verify RS256 JWT claims locally for their role check; login resolves the role-specific home and mutating routes enforce CSRF. Notification records carry the owning psychologist id from domain events through RabbitMQ and persistence.
+Decision: treat the Next.js frontend as a role-aware BFF rather than a generic dashboard. The dashboard layout and sensitive BFF routes verify the Keycloak access token locally and read the profile and role from its claims (ADR-027); login resolves the role-specific home and mutating routes enforce CSRF. Notification records carry the owning psychologist id from domain events through RabbitMQ and persistence.
 
 Rationale: psychologists need a quiet clinical workspace, administrators need operational controls, and patient accounts must not fall through into clinician screens. A notification list shared by all psychologists would leak practice activity even if the visible UI hid technical fields.
 
@@ -536,3 +539,21 @@ fix on `main`, not to every unrelated PR. The reference comes only from `main`
 runs, and without one the gate blocks as before. See
 [ADR-030](decisions/ADR-030-pr-scoped-security-gates.md) for the trust rules
 and trade-offs.
+
+## ADR-031: Retire auth-service; User Lookup through a Keycloak Service Account
+
+Decision: remove `auth-service` with its database, RSA key pair, gateway routes,
+CI pipeline and required check (`clinicflow/auth`). The administrator's user
+lookup stays: the BFF reads `GET /admin/realms/clinicflow/users/{id}` and the
+account's effective realm roles with a dedicated confidential client,
+`clinicflow-user-lookup`, that allows only the client-credentials grant and
+holds only `realm-management/view-users`. The BFF checks the administrator role
+and a UUID id before calling Keycloak, and maps an account without exactly one
+ClinicFlow role to `role: null`.
+
+Rationale: nothing trusted `auth-service` tokens after ADR-027, and a second
+user store would drift from the realm. A separate read-only client keeps the
+login client's privileges unchanged and makes the Admin API right explicit in
+the realm file. See [ADR-031](decisions/ADR-031-auth-service-retirement.md) for
+the alternatives, the DAST and required-check changes, and the upgrade steps for
+existing environments.

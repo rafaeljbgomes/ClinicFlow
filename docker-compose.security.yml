@@ -53,7 +53,7 @@ services:
         required: false
     environment:
       CLINICFLOW_DEMO_PASSWORD: ${CLINICFLOW_DEMO_PASSWORD:-ClinicFlowDemo!2026}
-      DAST_COMPONENTS: ${DAST_COMPONENTS:-auth-service,patient-service,appointment-service,clinical-service,notification-service,frontend}
+      DAST_COMPONENTS: ${DAST_COMPONENTS:-patient-service,appointment-service,clinical-service,notification-service,frontend}
       DAST_FULL_SCAN: ${DAST_FULL_SCAN:-false}
       DAST_SMOKE_ONLY: ${DAST_SMOKE_ONLY:-false}
     volumes:

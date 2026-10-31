@@ -4,7 +4,6 @@ import { verifyAccessToken } from "@/lib/server/jwt";
 import type { ServiceHealth, SystemHealth } from "@/lib/types";
 
 const services = [
-  { service: "auth", label: "Auth Service" },
   { service: "patient", label: "Patient Service" },
   { service: "appointment", label: "Appointment Service" },
   { service: "clinical", label: "Clinical Service" },

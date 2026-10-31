@@ -119,6 +119,11 @@ if(frontend) {
   assert(!Object.keys(config.data).some(k=>k.endsWith('_SERVICE_URL')),'Deployed BFF must not have direct business URLs');
   assert(frontend.spec.template.metadata.annotations['checksum/config']);
   assert('checksum/client-secret' in frontend.spec.template.metadata.annotations,'A rotated BFF client secret must roll the BFF');
+  assert('checksum/user-lookup-secret' in frontend.spec.template.metadata.annotations,'A rotated user lookup secret must roll the BFF');
+  // ADR-031: both Keycloak client secrets come from Secrets, never from the ConfigMap.
+  const secretEnv=Object.fromEntries(frontend.spec.template.spec.containers[0].env.map(e=>[e.name,e.valueFrom?.secretKeyRef?.name]));
+  assert.deepEqual(secretEnv,{CLINICFLOW_BFF_CLIENT_SECRET:'clinicflow-bff-oidc',CLINICFLOW_USER_LOOKUP_CLIENT_SECRET:'clinicflow-user-lookup-oidc'});
+  assert(!Object.keys(config.data).some(k=>/SECRET/.test(k)),'Client secrets must not be in the ConfigMap');
   const policies=docs.filter(d=>d.kind==='NetworkPolicy');
   const selects=(policy,pod)=>Object.keys(policy.spec.podSelector.matchLabels||{}).length>0 && Object.entries(policy.spec.podSelector.matchLabels||{}).every(([k,v])=>pod.spec.template.metadata.labels[k]===v);
   const policy=policies.find(p=>selects(p,frontend));
@@ -176,7 +181,7 @@ if(keycloak) {
   assert(certificateHosts.includes(authHost),'The development certificate must cover the auth host');
   // Credentials come from Secrets only; the demo password is synthetic and documented.
   for(const e of container.env) if(/PASSWORD|SECRET/.test(e.name)&&e.name!=='CLINICFLOW_DEMO_PASSWORD') assert(!('value' in e),`${e.name} must come from a Secret`);
-  assert.deepEqual(container.envFrom.map(s=>s.secretRef?.name).sort(),['clinicflow-bff-oidc','clinicflow-keycloak-admin','clinicflow-keycloak-database']);
+  assert.deepEqual(container.envFrom.map(s=>s.secretRef?.name).sort(),['clinicflow-bff-oidc','clinicflow-keycloak-admin','clinicflow-keycloak-database','clinicflow-user-lookup-oidc']);
   assert.deepEqual(container.resources,{requests:{cpu:'250m',memory:'512Mi'},limits:{cpu:'1',memory:'768Mi'}});
   const startup=container.startupProbe;
   assert((startup.initialDelaySeconds||0)+startup.periodSeconds*startup.failureThreshold>=90,'The first start needs at least 90 s');

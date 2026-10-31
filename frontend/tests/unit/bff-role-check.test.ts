@@ -98,10 +98,10 @@ describe("proxyRequest role checks", () => {
 
     it("responds with 403", async () => {
       // Arrange
-      const request = userLookupRequest();
+      const request = notificationsRequest();
 
       // Act
-      const response = await proxyRequest(request, "auth", "/users/123", { csrf: false, roles: ["ADMIN"] });
+      const response = await proxyRequest(request, "notification", "/notifications", { csrf: false, roles: ["ADMIN"] });
 
       // Assert
       expect(response.status).toBe(403);
@@ -109,10 +109,10 @@ describe("proxyRequest role checks", () => {
 
     it("rejects before any downstream request", async () => {
       // Arrange
-      const request = userLookupRequest();
+      const request = notificationsRequest();
 
       // Act
-      await proxyRequest(request, "auth", "/users/123", { csrf: false, roles: ["ADMIN"] });
+      await proxyRequest(request, "notification", "/notifications", { csrf: false, roles: ["ADMIN"] });
 
       // Assert
       expect(fetchMock).not.toHaveBeenCalled();
@@ -125,10 +125,10 @@ describe("proxyRequest role checks", () => {
   ] as const)("fails closed with %s token verification as %i", async (status, expectedStatus) => {
     // Arrange
     verifyAccessTokenMock.mockResolvedValue({ status });
-    const request = userLookupRequest();
+    const request = notificationsRequest();
 
     // Act
-    const response = await proxyRequest(request, "auth", "/users/123", { csrf: false, roles: ["ADMIN"] });
+    const response = await proxyRequest(request, "notification", "/notifications", { csrf: false, roles: ["ADMIN"] });
 
     // Assert
     expect(response.status).toBe(expectedStatus);
@@ -139,10 +139,10 @@ describe("proxyRequest role checks", () => {
     async (status) => {
       // Arrange
       verifyAccessTokenMock.mockResolvedValue({ status });
-      const request = userLookupRequest();
+      const request = notificationsRequest();
 
       // Act
-      await proxyRequest(request, "auth", "/users/123", { csrf: false, roles: ["ADMIN"] });
+      await proxyRequest(request, "notification", "/notifications", { csrf: false, roles: ["ADMIN"] });
 
       // Assert
       expect(fetchMock).not.toHaveBeenCalled();
@@ -152,8 +152,4 @@ describe("proxyRequest role checks", () => {
 
 function notificationsRequest() {
   return new NextRequest("http://localhost/api/notifications");
-}
-
-function userLookupRequest() {
-  return new NextRequest("http://localhost/api/users/123");
 }

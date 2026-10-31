@@ -5,8 +5,6 @@ afterEach(() => vi.unstubAllEnvs());
 
 describe("gateway routing", () => {
   it.each([
-    ["auth", "/auth/login", "/api/v1/auth/login"],
-    ["auth", "/users/me", "/api/v1/auth/users/me"],
     ["patient", "/patients/id%20value", "/api/v1/patients/id%20value"],
     ["appointment", "/appointments/id/complete", "/api/v1/appointments/id/complete"],
     ["clinical", "/clinical-cases?patientId=a&status=OPEN", "/api/v1/clinical/clinical-cases?patientId=a&status=OPEN"],

@@ -1,6 +1,8 @@
 # ADR-022: GitHub Actions as the PR gate of record
 
 Status: implemented; required checks are activated after live acceptance. Date: 2026-10-20.
+Amended by ADR-031: `auth-service` and `clinicflow/auth` were retired, leaving four backend workflows
+and seven required checks.
 
 ## Context
 

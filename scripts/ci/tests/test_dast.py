@@ -73,9 +73,24 @@ class AutomationContractTest(unittest.TestCase):
             return {"messagesById": [
                 {"requestHeader": "GET / HTTP/1.1\r\nHost: api.clinicflow.localhost:8443\r\n", "responseHeader": "HTTP/1.1 200 OK"},
                 {"requestHeader": "GET / HTTP/1.1\r\nHost: clinicflow.localhost:8443\r\n", "responseHeader": "HTTP/1.1 200 OK"},
-                {"requestHeader": "POST /api/v1/auth/login HTTP/1.1\r\nHost: api.clinicflow.localhost:8443\r\n", "responseHeader": "HTTP/1.1 401 Unauthorized"}]}
+                {"requestHeader": "POST /api/auth/login HTTP/1.1\r\nHost: clinicflow.localhost:8443\r\n", "responseHeader": "HTTP/1.1 401 Unauthorized"}]}
         with patch.object(dast, "zap_api", side_effect=api):
-            self.assertEqual(dast.verify_traffic(set(), [dast.API])["requests"], 3)
+            self.assertEqual(dast.verify_traffic(set(), [dast.API, dast.UI])["requests"], 3)
+
+    def bff_only_traffic(self, section, operation, **params):
+        if operation == "view/scans":
+            return {"scans": [{"id": "1", "progress": "100", "state": "FINISHED"}]}
+        if operation == "view/messagesIds":
+            return {"messagesIds": ["1", "2", "3"]}
+        return {"messagesById": [{"requestHeader": "GET /api/auth/me HTTP/1.1\r\nHost: clinicflow.localhost:8443\r\n", "responseHeader": "HTTP/1.1 200 OK"}]}
+
+    def test_a_role_without_api_endpoints_in_scope_needs_only_bff_traffic(self):
+        with patch.object(dast, "zap_api", side_effect=self.bff_only_traffic):
+            self.assertEqual(dast.verify_traffic(set(), [dast.UI + "/api/auth/me"])["sampleSize"], 1)
+
+    def test_an_api_endpoint_in_scope_needs_api_traffic(self):
+        with patch.object(dast, "zap_api", side_effect=self.bff_only_traffic), self.assertRaises(RuntimeError):
+            dast.verify_traffic(set(), [dast.UI + "/api/auth/me", dast.API + "/api/v1/patients"])
 
     def test_budget_stopped_scan_reports_partial_progress(self):
         def api(section, operation, **params):
@@ -114,13 +129,22 @@ class AutomationContractTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             dast.login_form_action("<p>We are sorry...</p>")
 
-    def test_resource_servers_and_auth_service_get_separate_tokens(self):
-        cases = {"/api/v1/patients": (True, False), "/api/v1/clinical/clinical-cases?page=1": (True, False),
-                 "/api/v1/auth/users/me": (False, True), "/api/v1/auth/login": (False, False), "/api/v1/auth/register?x=1": (False, False)}
-        for path, (resource_server, auth_service) in cases.items():
-            with self.subTest(path=path):
-                self.assertEqual(re.fullmatch(dast.RESOURCE_SERVER_PATHS, dast.API + path) is not None, resource_server)
-                self.assertEqual(re.fullmatch(dast.AUTH_SERVICE_PATHS, dast.API + path) is not None, auth_service)
+    def test_the_keycloak_token_goes_to_every_api_route_and_nowhere_else(self):
+        cases = {dast.API + "/api/v1/patients": True, dast.API + "/api/v1/clinical/clinical-cases?page=1": True,
+                 dast.API + "/api/v1/notifications/x": True, dast.UI + "/api/v1/patients": False, dast.UI + "/api/patients": False}
+        for url, expected in cases.items():
+            with self.subTest(url=url):
+                self.assertEqual(re.fullmatch(dast.RESOURCE_SERVER_PATHS, url) is not None, expected)
+
+    def test_authentication_sets_keycloak_and_bff_rules_only(self):
+        token = "e30." + dast.b64url(json.dumps({"sub": "00000000-0000-4000-8000-000000000001"}).encode()) + ".sig"
+        cookies = {"clinicflow_access_token": "a1", "clinicflow_refresh_token": "r1", "clinicflow_csrf": "c1"}
+        with patch.object(dast, "keycloak_token", return_value=token), patch.object(dast, "bff_session", return_value=cookies), \
+                patch.object(dast, "set_rule") as rule, patch.object(dast, "request") as probe:
+            user_id = dast.authenticate("administrator")
+        self.assertEqual([call.args[0] for call in rule.call_args_list], ["api-auth", "bff-cookie", "bff-csrf"])
+        self.assertEqual([call.args[1] for call in probe.call_args_list], [dast.UI + "/api/auth/me"])
+        self.assertEqual(user_id, "00000000-0000-4000-8000-000000000001")
 
 
 class KeycloakLoginTest(unittest.TestCase):

@@ -141,7 +141,7 @@ services:
 
   # Identity provider (ADR-027), built from the official image with the clinicflow realm inside.
   # The realm is imported on the first start only; scripts/reset-keycloak-realm.ps1 applies changes.
-  # Its database login, bootstrap administrator and BFF client secret are generated (ADR-026).
+  # Its database login, bootstrap administrator and client secrets are generated (ADR-026).
   keycloak:
     build:
       context: ./docker/keycloak
@@ -152,6 +152,8 @@ services:
       - path: ./secrets/keycloak/admin.env
         required: false
       - path: ./secrets/keycloak/clinicflow-bff.env
+        required: false
+      - path: ./secrets/keycloak/clinicflow-user-lookup.env
         required: false
     environment:
       KC_DB_URL: jdbc:postgresql://postgres:5432/clinicflow_keycloak
@@ -184,30 +186,8 @@ services:
       postgres-bootstrap:
         condition: service_completed_successfully
 
-  # auth-service and the BFF mount only the JWT files they need, never the whole secrets/ directory.
-  # The other services trust Keycloak only (ADR-027): iss is the public issuer, keys come from the
+  # The services trust Keycloak only (ADR-027): iss is the public issuer, keys come from the
   # private-network JWKS, fetched on the first request, so they do not wait for Keycloak to start.
-  auth-service:
-    build:
-      context: .
-      dockerfile: auth-service/Dockerfile
-    env_file:
-      - path: ./secrets/services/auth-service.env
-        required: false
-    environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/clinicflow_auth
-      CLINICFLOW_SECURITY_JWT_ISSUER: clinicflow-auth
-      CLINICFLOW_SECURITY_JWT_PRIVATE_KEY_PATH: /run/secrets/clinicflow/jwt-private.pem
-      CLINICFLOW_SECURITY_JWT_PUBLIC_KEY_PATH: /run/secrets/clinicflow/jwt-public.pem
-      CLINICFLOW_DEMO_BOOTSTRAP_ENABLED: "true"
-      MANAGEMENT_SERVER_PORT: "9000"
-    volumes:
-      - {type: bind, source: ./secrets/jwt-private.pem, target: /run/secrets/clinicflow/jwt-private.pem, read_only: true}
-      - {type: bind, source: ./secrets/jwt-public.pem, target: /run/secrets/clinicflow/jwt-public.pem, read_only: true}
-    depends_on:
-      postgres-bootstrap:
-        condition: service_completed_successfully
-
   patient-service:
     build:
       context: .
@@ -297,7 +277,6 @@ services:
       dockerfile: Dockerfile
     environment:
       GATEWAY_URL: http://gateway:8080
-      AUTH_SERVICE_HEALTH_URL: http://auth-service:9000
       PATIENT_SERVICE_HEALTH_URL: http://patient-service:9000
       APPOINTMENT_SERVICE_HEALTH_URL: http://appointment-service:9000
       CLINICAL_SERVICE_HEALTH_URL: http://clinical-service:9000
@@ -312,8 +291,10 @@ services:
     env_file:
       - path: ./secrets/keycloak/clinicflow-bff.env
         required: false
+      # The administrator's user lookup reads the Admin API with this read-only client (ADR-031).
+      - path: ./secrets/keycloak/clinicflow-user-lookup.env
+        required: false
     depends_on:
-      - auth-service
       - patient-service
       - appointment-service
       - clinical-service

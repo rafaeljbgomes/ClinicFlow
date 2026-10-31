@@ -33,7 +33,7 @@
     },
     "oidc": {
       "type": "object",
-      "required": ["issuer", "internalIssuer", "publicUrl", "clientSecretName", "clientSecretKey", "component", "port"],
+      "required": ["issuer", "internalIssuer", "publicUrl", "clientSecretName", "clientSecretKey", "userLookupSecretName", "userLookupSecretKey", "component", "port"],
       "additionalProperties": false,
       "properties": {
         "issuer": { "type": "string", "pattern": "^https?://[^/ ]+(/[^/ ]+)*/realms/[^/ ]+$" },
@@ -42,6 +42,9 @@
         "clientSecretName": { "type": "string", "minLength": 1 },
         "clientSecretKey": { "type": "string", "minLength": 1 },
         "clientSecretChecksum": { "type": "string" },
+        "userLookupSecretName": { "type": "string", "minLength": 1 },
+        "userLookupSecretKey": { "type": "string", "minLength": 1 },
+        "userLookupSecretChecksum": { "type": "string" },
         "component": { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" },
         "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
       }

@@ -51,14 +51,6 @@ spec:
             - name: SPRING_RABBITMQ_PORT
               value: {{ .Values.rabbitmq.port | quote }}
             {{- end }}
-            {{- if .Values.jwt.enabled }}
-            - name: CLINICFLOW_SECURITY_JWT_PUBLIC_KEY_PATH
-              value: /run/secrets/clinicflow/jwt-public.pem
-            {{- if .Values.jwt.privateKeyEnabled }}
-            - name: CLINICFLOW_SECURITY_JWT_PRIVATE_KEY_PATH
-              value: /run/secrets/clinicflow/jwt-private.pem
-            {{- end }}
-            {{- end }}
           startupProbe:
             httpGet:
               path: /actuator/health/liveness
@@ -78,26 +70,9 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
-            {{- if .Values.jwt.enabled }}
-            - name: jwt
-              mountPath: /run/secrets/clinicflow
-              readOnly: true
-            {{- end }}
             # The root filesystem is read-only; Tomcat and the JVM write only to /tmp.
             - name: tmp
               mountPath: /tmp
       volumes:
         - name: tmp
           emptyDir: {}
-        {{- if .Values.jwt.enabled }}
-        - name: jwt
-          secret:
-            secretName: {{ .Values.jwt.secretName }}
-            items:
-              - key: {{ .Values.jwt.publicKeyKey }}
-                path: jwt-public.pem
-              {{- if .Values.jwt.privateKeyEnabled }}
-              - key: {{ .Values.jwt.privateKeyKey }}
-                path: jwt-private.pem
-              {{- end }}
-        {{- end }}

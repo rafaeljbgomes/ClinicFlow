@@ -6,9 +6,10 @@ This directory splits ClinicFlow's deployment modernization into isolated,
 reviewable changes. It implements ADR-017, not a simultaneous rewrite of CI,
 CD, Helm, Kubernetes, and local development.
 
-The intended end state is independent delivery of `auth-service`,
-`patient-service`, `appointment-service`, `clinical-service`,
-`notification-service`, and `frontend`. It does **not** require an independent
+The intended end state is independent delivery of `patient-service`,
+`appointment-service`, `clinical-service`, `notification-service`, and
+`frontend`. `auth-service` was part of the original set and was retired in
+ADR-031. It does **not** require an independent
 Jenkins controller, Kubernetes cluster, broker, observability stack, or
 physical server for each service. Those are shared platform capabilities with
 explicit access and ownership boundaries.

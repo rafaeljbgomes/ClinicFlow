@@ -8,6 +8,10 @@ export type UserView = {
   enabled: boolean;
 };
 
+// An account as the administrator's user lookup reads it from Keycloak (ADR-031). role is null when the
+// account holds no ClinicFlow role or several, so it cannot sign in.
+export type DirectoryUser = Omit<UserView, "role"> & { role: Role | null };
+
 export type PatientStatus = "ACTIVE" | "INACTIVE" | "ARCHIVED";
 export type ConsentStatus = "GRANTED" | "PENDING" | "REVOKED";
 export type ContactPreference = "EMAIL" | "PHONE" | "SMS";
@@ -165,7 +169,7 @@ export type PatientClinicalHistory = {
 };
 
 export type ServiceHealth = {
-  service: "auth" | "patient" | "appointment" | "clinical" | "notification";
+  service: "patient" | "appointment" | "clinical" | "notification";
   label: string;
   status: "UP" | "DOWN" | "UNKNOWN";
   latencyMs?: number;

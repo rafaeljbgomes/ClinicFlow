@@ -2,45 +2,6 @@
 {{ $tls := ne (env "CLINICFLOW_GATEWAY_TLS") "false" }}
 http:
   routers:
-    public-auth-login:
-      rule: "Host(`api.clinicflow.localhost`) && Path(`/api/v1/auth/login`)"
-      entryPoints: [{{ if $tls }}websecure{{ else }}web{{ end }}]
-      service: auth-service
-      middlewares: [{{ if $tls }}secure-headers{{ else }}headers{{ end }}, auth-login-rewrite, auth-limit]
-{{ if $tls }}
-      tls: {}
-{{ end }}
-    internal-auth-login:
-      rule: "Path(`/api/v1/auth/login`)"
-      entryPoints: [api]
-      service: auth-service
-      middlewares: [headers, auth-login-rewrite, internal-limit]
-    public-auth-register:
-      rule: "Host(`api.clinicflow.localhost`) && Path(`/api/v1/auth/register`)"
-      entryPoints: [{{ if $tls }}websecure{{ else }}web{{ end }}]
-      service: auth-service
-      middlewares: [{{ if $tls }}secure-headers{{ else }}headers{{ end }}, auth-register-rewrite, auth-limit]
-{{ if $tls }}
-      tls: {}
-{{ end }}
-    internal-auth-register:
-      rule: "Path(`/api/v1/auth/register`)"
-      entryPoints: [api]
-      service: auth-service
-      middlewares: [headers, auth-register-rewrite, internal-limit]
-    public-auth-users:
-      rule: "Host(`api.clinicflow.localhost`) && (Path(`/api/v1/auth/users`) || PathPrefix(`/api/v1/auth/users/`))"
-      entryPoints: [{{ if $tls }}websecure{{ else }}web{{ end }}]
-      service: auth-service
-      middlewares: [{{ if $tls }}secure-headers{{ else }}headers{{ end }}, auth-users-rewrite, public-limit]
-{{ if $tls }}
-      tls: {}
-{{ end }}
-    internal-auth-users:
-      rule: "(Path(`/api/v1/auth/users`) || PathPrefix(`/api/v1/auth/users/`))"
-      entryPoints: [api]
-      service: auth-service
-      middlewares: [headers, auth-users-rewrite, internal-limit]
     public-patients:
       rule: "Host(`api.clinicflow.localhost`) && (Path(`/api/v1/patients`) || PathPrefix(`/api/v1/patients/`))"
       entryPoints: [{{ if $tls }}websecure{{ else }}web{{ end }}]
@@ -136,6 +97,7 @@ http:
       rule: "Host(`clinicflow.localhost`){{ if not $tls }} || Host(`127.0.0.1`) || Host(`host.docker.internal`) || Host(`localhost`){{ end }}"
       entryPoints: [{{ if $tls }}websecure{{ else }}web{{ end }}]
       service: frontend
+      priority: 1
       middlewares: [{{ if $tls }}secure-headers{{ else }}headers{{ end }}]
 {{ if $tls }}
       tls: {}
@@ -175,16 +137,6 @@ http:
       middlewares: [https-redirect]
 {{ end }}
   middlewares:
-    auth-login-rewrite:
-      replacePath:
-        path: /auth/login
-    auth-register-rewrite:
-      replacePath:
-        path: /auth/register
-    auth-users-rewrite:
-      replacePathRegex:
-        regex: "^/api/v1/auth/users(/.*)?$"
-        replacement: "/users${1}"
     patients-rewrite:
       replacePathRegex:
         regex: "^/api/v1/patients(/.*)?$"
@@ -248,10 +200,6 @@ http:
       loadBalancer:
         servers:
           - url: http://appointment-service:8083
-    auth-service:
-      loadBalancer:
-        servers:
-          - url: http://auth-service:8081
     clinical-service:
       loadBalancer:
         servers:

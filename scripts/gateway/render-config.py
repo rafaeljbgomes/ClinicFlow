@@ -29,6 +29,8 @@ def dynamic():
                 lines += ['{{ if $tls }}', '      tls: {}', '{{ end }}']
     lines += ['    ui:', '      rule: "Host(`clinicflow.localhost`){{ if not $tls }} || Host(`127.0.0.1`) || Host(`host.docker.internal`) || Host(`localhost`){{ end }}"',
               '      entryPoints: [{{ if $tls }}websecure{{ else }}web{{ end }}]', '      service: frontend',
+              # The catch-all's default priority is its rule length, which reaches the BFF routes' priorities over HTTP.
+              '      priority: 1',
               '      middlewares: [{{ if $tls }}secure-headers{{ else }}headers{{ end }}]', '{{ if $tls }}', '      tls: {}', '{{ end }}']
     for name, path, policy in [('bff-api','/api','public'),('bff-login','/api/auth/login','auth'),('bff-register','/api/auth/register','auth')]:
         route_match = f'Path(`{path}`)' if policy == 'auth' else '(Path(`/api`) || PathPrefix(`/api/`))'

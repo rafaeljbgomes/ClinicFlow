@@ -47,7 +47,7 @@ spec:
             matchExpressions:
               - key: app.kubernetes.io/component
                 operator: In
-                values: [frontend, auth-service, patient-service, appointment-service, clinical-service, notification-service]
+                values: [frontend, patient-service, appointment-service, clinical-service, notification-service]
       ports:
         - {port: 3000, protocol: TCP}
         - {port: 8081, protocol: TCP}

@@ -65,7 +65,7 @@ node --test scripts/ci/tests/*.test.cjs               # after routing or policy 
 ```
 
 Say which checks you ran and which you could not run. A green local subset is
-not full acceptance; the eight `clinicflow/*` GitHub Actions checks are.
+not full acceptance; the seven `clinicflow/*` GitHub Actions checks are.
 
 ## Git and pull requests
 

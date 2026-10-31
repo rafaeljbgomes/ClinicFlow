@@ -13,7 +13,7 @@ if ($Dependencies) { $Phase = 'Dependencies' }
 Push-Location $SecurityRoot
 try {
     if ($Phase -eq 'Dependencies') {
-        foreach ($Component in @('auth-service','patient-service','appointment-service','clinical-service','notification-service','frontend')) {
+        foreach ($Component in @('patient-service','appointment-service','clinical-service','notification-service','frontend')) {
             & (Join-Path $PSScriptRoot 'Invoke-ComponentSecurity.ps1') -Component $Component -Phase Dependencies
         }
         return
@@ -26,7 +26,7 @@ try {
         catch { $Violations.Add($_.Exception.Message) }
     }
     if ($Phase -in @('Configuration','All')) {
-        if (-not (Test-Path 'reports/platform/auth-rendered.yaml')) { throw 'Rendered platform manifests missing.' }
+        if (-not (Test-Path 'reports/platform/platform-rendered.yaml')) { throw 'Rendered platform manifests missing.' }
         Invoke-CollectedGate manifests misconfiguration @('config','reports/platform')
         # Helm templates are covered by the rendered manifests above; this target is the deploy Dockerfiles.
         Invoke-CollectedGate dockerfiles misconfiguration @('config','--misconfig-scanners','dockerfile','deploy')

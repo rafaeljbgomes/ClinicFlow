@@ -6,7 +6,7 @@ const os = require('node:os');
 const { execFileSync } = require('node:child_process');
 const policy = require('../security-policy.cjs');
 const now = new Date('2026-10-15T12:00:00Z');
-const finding = { component: 'auth-service', target: 'dependencies', id: 'CVE-TEST-1', package: 'example', version: '1.0', severity: 'HIGH' };
+const finding = { component: 'patient-service', target: 'dependencies', id: 'CVE-TEST-1', package: 'example', version: '1.0', severity: 'HIGH' };
 const entry = { ...finding, owner: 'maintainer', reason: 'Synthetic test exception', issue: 'https://github.com/rafaeljbgomes/ClinicFlow/issues/1', reviewedAt: '2026-10-10', expiresAt: '2026-10-20' };
 const empty = { schemaVersion: 1, entries: [] };
 test('new high and critical findings block, including unfixed dependencies', () => {
@@ -45,7 +45,7 @@ test('configuration exceptions are tied to the affected file', () => {
 const cases = [
   ['docs/change.md', [], false, false],
   ['frontend/src/app/dashboard/clinical/page.tsx', ['frontend'], false, false],
-  ['auth-service/src/main/java/Controller.java', ['auth-service'], false, true],
+  ['patient-service/src/main/java/Controller.java', ['patient-service'], false, true],
   ['patient-service/src/test/java/PatientTest.java', ['patient-service'], false, false],
   ['event-contracts/src/main/resources/contracts/a.json', ['patient-service','appointment-service','clinical-service','notification-service'], true, false],
   ['frontend/src/lib/server/jwt.ts', ['frontend'], true, true],
@@ -78,30 +78,30 @@ test('PRs cannot use candidate acceptances or mix code with exemption changes', 
   const targetSha=git(['rev-parse','HEAD']);
   fs.writeFileSync(path.join(root,'.ci/security-baseline.json'),JSON.stringify({schemaVersion:1,entries:[entry]}));
   assert.deepEqual(policy.trustedBaseline(root,{pullRequest:true,targetSha,baselineOnly:false}).entries,[]);
-  fs.mkdirSync(path.join(root,'auth-service'));fs.writeFileSync(path.join(root,'auth-service/change.java'),'test');
+  fs.mkdirSync(path.join(root,'patient-service'));fs.writeFileSync(path.join(root,'patient-service/change.java'),'test');
   git(['add','.']);git(['commit','-m','test: forbidden mixed exception']);
   const old={CHANGE_ID:process.env.CHANGE_ID,CHANGE_TARGET:process.env.CHANGE_TARGET,CHANGE_FORK:process.env.CHANGE_FORK};
   process.env.CHANGE_ID='1';process.env.CHANGE_TARGET='main';delete process.env.CHANGE_FORK;
   try {
-    assert.throws(()=>policy.prepare(root,'auth-service'),/separate policy-only PR/);
+    assert.throws(()=>policy.prepare(root,'patient-service'),/separate policy-only PR/);
     process.env.CHANGE_FORK='untrusted'; assert.throws(()=>policy.prepare(root,'repository'),/same-repository/);
   } finally { for(const [key,value] of Object.entries(old)) { if(value===undefined) delete process.env[key]; else process.env[key]=value; } }
 });
 
 test('baseline additions and renewals must be observed in the current main scan', () => {
-  assert.throws(()=>policy.validateAdditions([],{schemaVersion:1,entries:[entry]},empty,'auth-service','dependencies'),/absent/);
-  assert.doesNotThrow(()=>policy.validateAdditions([finding],{schemaVersion:1,entries:[entry]},empty,'auth-service','dependencies'));
+  assert.throws(()=>policy.validateAdditions([],{schemaVersion:1,entries:[entry]},empty,'patient-service','dependencies'),/absent/);
+  assert.doesNotThrow(()=>policy.validateAdditions([finding],{schemaVersion:1,entries:[entry]},empty,'patient-service','dependencies'));
   const renewed={...entry,reason:'Renewed after review'};
-  assert.throws(()=>policy.validateAdditions([],{schemaVersion:1,entries:[renewed]},{schemaVersion:1,entries:[entry]},'auth-service','dependencies'));
+  assert.throws(()=>policy.validateAdditions([],{schemaVersion:1,entries:[renewed]},{schemaVersion:1,entries:[entry]},'patient-service','dependencies'));
 });
 
 const trivyReport = (packages, vulnerabilities = []) => ({ SchemaVersion: 2, Results: [{ Target: 'bom.json', Packages: packages.map(([Name, Version]) => ({ Name, Version })), Vulnerabilities: vulnerabilities }] });
 test('PR findings already shipped by main are inherited instead of blocking', () => {
-  const inherited = policy.trivyInheritance(trivyReport([['example', '1.0']]), 'auth-service', 'dependencies', 'vulnerability');
+  const inherited = policy.trivyInheritance(trivyReport([['example', '1.0']]), 'patient-service', 'dependencies', 'vulnerability');
   assert.deepEqual(policy.evaluate([finding, { ...finding, id: 'CVE-TEST-2' }], empty, now, inherited).map(f => f.disposition), ['inherited','inherited']);
 });
 test('a PR that changes a package version cannot inherit main findings', () => {
-  const inherited = policy.trivyInheritance(trivyReport([['example', '1.0']]), 'auth-service', 'dependencies', 'vulnerability');
+  const inherited = policy.trivyInheritance(trivyReport([['example', '1.0']]), 'patient-service', 'dependencies', 'vulnerability');
   assert.equal(policy.evaluate([{ ...finding, version: '2.0' }], empty, now, inherited)[0].disposition, 'blocking');
   assert.equal(policy.evaluate([{ ...finding, package: 'other' }], empty, now, inherited)[0].disposition, 'blocking');
 });
@@ -141,7 +141,7 @@ test('main runs and unusable references never inherit findings', t => {
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const file = path.join(root, 'image.json');
   fs.writeFileSync(file, JSON.stringify(trivyReport([['example', '1.0']])));
-  const build = reference => policy.trivyInheritance(reference, 'auth-service', 'dependencies', 'vulnerability');
+  const build = reference => policy.trivyInheritance(reference, 'patient-service', 'dependencies', 'vulnerability');
   assert.equal(policy.loadInheritance({ pullRequest: false }, file, build)(finding), false);
   assert.equal(policy.loadInheritance({ pullRequest: true }, file, build)(finding), true);
   assert.equal(policy.loadInheritance({ pullRequest: true }, undefined, build)(finding), false);

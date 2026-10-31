@@ -9,9 +9,6 @@ data:
   CLINICFLOW_OIDC_ISSUER: {{ .Values.oidc.issuer | quote }}
   CLINICFLOW_OIDC_JWKS_URI: {{ .Values.oidc.jwksUri | quote }}
   {{- end }}
-  {{- if .Values.jwt.enabled }}
-  CLINICFLOW_SECURITY_JWT_ISSUER: {{ .Values.jwt.issuer | quote }}
-  {{- end }}
   {{- range $name, $value := .Values.environment }}
   {{ $name }}: {{ $value | quote }}
   {{- end }}

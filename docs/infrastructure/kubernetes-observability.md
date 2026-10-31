@@ -24,9 +24,10 @@ resources until the timeout before continuing a fresh installation.
 - `clinicflow-platform`, installed in `clinicflow`, owns local PostgreSQL,
   RabbitMQ, their credentials, namespace-wide policy, RabbitMQ monitoring, and
   shared Grafana dashboards.
-- `clinicflow-auth`, `clinicflow-patient`, `clinicflow-appointment`,
-  `clinicflow-clinical`, and `clinicflow-notification` each install the reusable
-  Spring-service chart with service-specific values.
+- `clinicflow-patient`, `clinicflow-appointment`, `clinicflow-clinical`, and
+  `clinicflow-notification` each install the reusable Spring-service chart with
+  service-specific values.
+- `clinicflow-keycloak` runs the identity provider (ADR-027).
 - `clinicflow-frontend` owns the Next.js frontend and BFF resources.
 - `clinicflow-gateway-controller` in `ingress-system` owns the pinned Traefik edge.
 - `clinicflow-gateway` owns Gateway API routes and policy in `clinicflow`.
@@ -59,15 +60,15 @@ and troubleshooting.
 
 ## Kubernetes Concepts Used
 
-- `Deployment`: runs each stateless service: frontend, auth, patient,
-  appointment, and notification.
+- `Deployment`: runs each stateless service: frontend, patient, appointment,
+  clinical, and notification.
 - `StatefulSet`: runs local PostgreSQL and RabbitMQ with stable identities and
   persistent volume claims.
-- `Service`: provides stable in-cluster DNS names such as `auth-service`,
-  `postgres`, and `rabbitmq`.
+- `Service`: provides stable in-cluster DNS names such as `patient-service`,
+  `keycloak`, `postgres`, and `rabbitmq`.
 - `ConfigMap`: stores non-secret runtime configuration and Grafana dashboard
   JSON.
-- `Secret`: stores JWT key material and local infrastructure credentials.
+- `Secret`: stores local infrastructure credentials and Keycloak client secrets.
 - `Probe`: Spring services use `/actuator/health/liveness` and
   `/actuator/health/readiness` on management port `9000`.
 - `NetworkPolicy`: declares default-deny traffic and then allows only the
@@ -86,16 +87,15 @@ and troubleshooting.
 
 ## Commands
 
-Generate local JWT keys if needed:
+Generate local credentials if needed:
 
 ```powershell
-.\scripts\generate-dev-jwt-keys.ps1
+.\scripts\generate-dev-credentials.ps1
 ```
 
 Build application images:
 
 ```powershell
-docker build -t clinicflow/auth-service:0.1.0-local -f auth-service/Dockerfile .
 docker build -t clinicflow/patient-service:0.1.0-local -f patient-service/Dockerfile .
 docker build -t clinicflow/appointment-service:0.1.0-local -f appointment-service/Dockerfile .
 docker build -t clinicflow/clinical-service:0.1.0-local -f clinical-service/Dockerfile .
@@ -103,11 +103,10 @@ docker build -t clinicflow/notification-service:0.1.0-local -f notification-serv
 docker build -t clinicflow/frontend:0.1.0-local -f frontend/Dockerfile frontend
 ```
 
-Create the application namespace and JWT Secret. Only `auth-service` mounts it.
-The patient, appointment, clinical and notification services and the BFF trust
-the Keycloak realm instead (ADR-027, `oidc.*` in the service and frontend
-charts). Keycloak runs as its own release, `clinicflow-keycloak`, installed after
-the platform; its Secrets, install command and realm reset are in
+Create the application namespace. The services and the BFF trust the Keycloak
+realm (ADR-027, `oidc.*` in the service and frontend charts). Keycloak runs as
+its own release, `clinicflow-keycloak`, installed after the platform; its
+Secrets, install command and realm reset are in
 [local development](../development/local-development.md#run-locally-with-docker-desktop-kubernetes).
 Its admin console has no gateway route:
 `kubectl port-forward svc/keycloak 8180:8080 -n clinicflow`, then
@@ -115,10 +114,6 @@ Its admin console has no gateway route:
 
 ```powershell
 kubectl create namespace clinicflow
-kubectl create secret generic clinicflow-jwt `
-  --from-file=jwt-private.pem=secrets/jwt-private.pem `
-  --from-file=jwt-public.pem=secrets/jwt-public.pem `
-  -n clinicflow
 ```
 
 Install observability:
@@ -141,7 +136,7 @@ helm upgrade --install clinicflow-platform deploy/helm/platform `
   --rollback-on-failure --wait=watcher --server-side=false --timeout 5m
 
 $imageTag = "git-<commit>-<timestamp>"
-foreach ($service in "auth", "patient", "appointment", "clinical", "notification") {
+foreach ($service in "patient", "appointment", "clinical", "notification") {
   helm lint deploy/helm/service -f "deploy/helm/services/$service.yaml"
   helm upgrade --install "clinicflow-$service" deploy/helm/service `
     -n clinicflow -f "deploy/helm/services/$service.yaml" `
@@ -168,7 +163,7 @@ For a complete removal, uninstall applications before the shared platform:
 
 ```powershell
 helm uninstall clinicflow-frontend clinicflow-notification clinicflow-clinical `
-  clinicflow-appointment clinicflow-patient clinicflow-auth -n clinicflow
+  clinicflow-appointment clinicflow-patient clinicflow-keycloak -n clinicflow
 helm uninstall clinicflow-platform -n clinicflow
 helm uninstall clinicflow-observability -n monitoring
 ```
@@ -179,7 +174,6 @@ Validate rollouts:
 kubectl get pods -n clinicflow
 kubectl rollout status statefulset/postgres -n clinicflow
 kubectl rollout status statefulset/rabbitmq -n clinicflow
-kubectl rollout status deployment/auth-service -n clinicflow
 kubectl rollout status deployment/patient-service -n clinicflow
 kubectl rollout status deployment/appointment-service -n clinicflow
 kubectl rollout status deployment/clinical-service -n clinicflow
@@ -196,7 +190,7 @@ kubectl port-forward svc/clinicflow-observability-grafana 3001:80 -n monitoring
 ## Metrics and Dashboards
 
 Spring services expose metrics on `/actuator/prometheus` only when the
-`kubernetes` profile is active. The application API ports remain `8081` through
+`kubernetes` profile is active. The application API ports are `8082` through
 `8085`; management traffic uses port `9000`.
 
 Expected Prometheus queries:
@@ -214,9 +208,10 @@ through the dashboard sidecar configured in kube-prometheus-stack.
 
 ## Troubleshooting
 
-- If the `auth-service` pod fails to start with missing JWT files, recreate the
-  `clinicflow-jwt` Secret in the `clinicflow` namespace. If the frontend pod
-  fails with a missing secret, recreate `clinicflow-bff-oidc`.
+- If the frontend pod fails with a missing secret, recreate
+  `clinicflow-bff-oidc` or `clinicflow-user-lookup-oidc`. An environment that
+  still runs `auth-service` from before ADR-031 is cleaned up with the steps in
+  [Retiring auth-service](../development/local-development.md#retiring-auth-service).
 - If image pulls fail, rebuild the local images and confirm Docker Desktop
   Kubernetes is the active cluster.
 - If Prometheus targets are missing, confirm the observability release is
@@ -236,7 +231,7 @@ contract, but replace local persistence and local secrets:
 - use managed PostgreSQL or a PostgreSQL operator instead of the local
   StatefulSet;
 - use managed RabbitMQ or a RabbitMQ operator instead of the local StatefulSet;
-- use External Secrets, Sealed Secrets, or a cloud secret manager for JWT and
-  infrastructure credentials;
+- use External Secrets, Sealed Secrets, or a cloud secret manager for Keycloak
+  client secrets and infrastructure credentials;
 - add Ingress/TLS, HSTS, image scanning, SBOM generation, and registry-based
   image promotion in CI/CD.

@@ -10,11 +10,11 @@ same `scripts/ci` entry points, so a stage fails or passes the same way in eithe
 | Workflow | Final check | Scope |
 | --- | --- | --- |
 | `repository.yml` | `clinicflow/repository` | Secret and path hygiene, CI policy regression tests, configuration parsing, actionlint and zizmor. Runs for every change. |
-| `auth-service.yml` … `notification-service.yml` | `clinicflow/auth` … `clinicflow/notification` | Build, unit and integration tests, JaCoCo evidence, SonarQube Cloud, SBOM/dependency scan, image build and scan, Dockerfile scan, PIT outside PRs. |
+| `patient-service.yml` … `notification-service.yml` | `clinicflow/patient` … `clinicflow/notification` | Build, unit and integration tests, JaCoCo evidence, SonarQube Cloud, SBOM/dependency scan, image build and scan, Dockerfile scan, PIT outside PRs. |
 | `frontend.yml` | `clinicflow/frontend` | `npm ci`, Vitest with LCOV, lint, type check, production build, standalone package, SonarQube Cloud, dependency/image/Dockerfile scans. |
 | `system.yml` | `clinicflow/system` | Helm/kubeconform platform validation, gateway contract (HTTP and TLS), composed stack with Playwright, platform configuration and image scans, authenticated HTTPS ZAP DAST. |
 
-The five service workflows are thin callers of `_backend-service.yml`. Every
+The four service workflows are thin callers of `_backend-service.yml`. Every
 workflow starts with `_route.yml`, which runs `security-policy.cjs prepare` to
 decide whether the change affects the component. Routing is shared with Jenkins
 and covered by `scripts/ci/tests/security-policy.test.cjs`:
@@ -35,7 +35,7 @@ are skipped and the final `clinicflow/<component>` job succeeds with "Not
 affected by this change". This matters because GitHub leaves checks from a
 workflow skipped by `on.paths` pending forever, and a pending required check
 blocks the merge. The final job fails when routing fails or any selected job
-fails or is cancelled. Bind required checks to these eight names only.
+fails or is cancelled. Bind required checks to these seven names only.
 
 System acceptance does not repeat the backend and frontend suites. Any change
 that needs full-system acceptance also selects the affected component
@@ -98,7 +98,7 @@ outward.
 
 1. **Run the failing script locally.** Every step is a `scripts/ci` call with
    explicit parameters, for example
-   `.\scripts\ci\Invoke-ServiceBackend.ps1 -Service auth-service -Phase Integration`.
+   `.\scripts\ci\Invoke-ServiceBackend.ps1 -Service patient-service -Phase Integration`.
    The run page shows the exact command for each step.
 2. **Lint before pushing.** `.\scripts\ci\Test-Workflows.ps1` runs actionlint
    (with shellcheck) and zizmor. It uses local binaries when present and
@@ -138,7 +138,7 @@ outward.
    forced run.
 
 Because routing treats `.github/` and `scripts/ci/` changes as affecting
-everything, a CI change is validated by all eight checks before it can merge.
+everything, a CI change is validated by all seven checks before it can merge.
 
 ## Activation
 
@@ -151,15 +151,15 @@ maintainer:
    configuration errors still fail. Remove the variable to enforce again.
 2. **SonarQube Cloud.** Sonar stays inactive, with a warning on each run, until
    the repository variable `SONAR_ORGANIZATION` exists. Import the public
-   repository into a SonarQube Cloud organization as a monorepo with six
-   projects keyed `rafaeljbgomes_clinicflow_<auth|patient|appointment|clinical|notification|frontend>`,
+   repository into a SonarQube Cloud organization as a monorepo with five
+   projects keyed `rafaeljbgomes_clinicflow_<patient|appointment|clinical|notification|frontend>`,
    disable automatic analysis, and add the `SONAR_TOKEN` secret. Then run each
-   component workflow once on `main` (`gh workflow run auth-service.yml --ref main`)
+   component workflow once on `main` (`gh workflow run patient-service.yml --ref main`)
    so PR analyses have a fresh baseline. From then on a missing token fails
    closed on same-repository PRs.
 3. **Code scanning and Dependabot.** Enable Dependabot alerts and security
    updates. Code scanning accepts the Trivy SARIF uploads without CodeQL.
-4. **Required checks.** After all eight checks pass on a commit, generate a
+4. **Required checks.** After all seven checks pass on a commit, generate a
    reviewable ruleset proposal that binds the checks to the GitHub Actions app:
 
    ```powershell
@@ -171,7 +171,9 @@ maintainer:
    require branches to be up to date (`-Strict`): this is a single-maintainer
    repository merged with merge commits, so stale-base breakage is rare, and the
    `push` run on `main` re-validates every merge result. Add `-Strict` if
-   parallel PRs become common.
+   parallel PRs become common. When a check is retired, as `clinicflow/auth`
+   was in ADR-031, apply the new list from the retiring PR's head commit before
+   merging it; otherwise the PR waits for a check that no longer runs.
 
 See [PR quality and security gates](pr-quality-security.md) for the vulnerability
 policy, exception workflow and DAST scope.

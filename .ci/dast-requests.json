@@ -2,16 +2,6 @@
   "schemaVersion": 1,
   "requests": [
     {
-      "component": "auth-service",
-      "path": "/api/v1/auth/users/me",
-      "roles": [
-        "psychologist",
-        "patient",
-        "administrator"
-      ],
-      "bff": "/api/auth/me"
-    },
-    {
       "component": "patient-service",
       "path": "/api/v1/patients",
       "roles": [

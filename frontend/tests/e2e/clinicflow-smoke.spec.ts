@@ -26,6 +26,11 @@ const demoAccounts: Record<DemoRole, { email: string; home: string }> = {
   patient: { email: "ana.martins@demo.clinicflow.local", home: "/dashboard/access-limited" },
   administrator: { email: "admin@demo.clinicflow.local", home: "/dashboard/system" },
 };
+// The realm's fixed demo ids (ADR-027).
+const demoUserIds = {
+  psychologist: "00000000-0000-4000-8000-000000000011",
+  patient: "00000000-0000-4000-8000-000000000021",
+};
 const workspaceName = "ClinicFlow Demo Psychologist";
 const therapeuticFocus = "Stabilize routines and reduce acute stress triggers.";
 const sessionSummary = "Reviewed weekly routine and agreed on sleep hygiene homework.";
@@ -212,7 +217,38 @@ test.describe("role isolation", () => {
     });
   }
 
-  test("reports the user lookup as unavailable until it moves to Keycloak", async ({ pageAs }) => {
+  test("lets administrators look up an account on the system page", async ({ pageAs }) => {
+    // Arrange
+    const page = await pageAs("administrator");
+    await page.goto("/dashboard/system");
+    await page.getByPlaceholder("User UUID").fill(demoUserIds.psychologist);
+
+    // Act
+    await page.getByRole("button", { name: "Inspect" }).click();
+
+    // Assert
+    // The account comes from Keycloak's Admin API through the BFF's read-only service account (ADR-031).
+    await expect(page.getByText(demoAccounts.psychologist.email, { exact: true })).toBeVisible();
+  });
+
+  test("reports the role and state Keycloak holds for a looked-up account", async ({ pageAs }) => {
+    // Arrange
+    const page = await pageAs("administrator");
+
+    // Act
+    const response = await page.request.get(`/api/users/${demoUserIds.patient}`);
+
+    // Assert
+    expect(await response.json()).toEqual({
+      id: demoUserIds.patient,
+      email: demoAccounts.patient.email,
+      fullName: "Ana Martins",
+      role: "PATIENT",
+      enabled: true,
+    });
+  });
+
+  test("reports an unknown account as not found", async ({ pageAs }) => {
     // Arrange
     const page = await pageAs("administrator");
 
@@ -220,7 +256,18 @@ test.describe("role isolation", () => {
     const response = await page.request.get("/api/users/9b38f432-6b8f-4d75-9e6a-e775cc4b0175");
 
     // Assert
-    expect(response.status()).toBe(501);
+    expect(response.status()).toBe(404);
+  });
+
+  test("forbids psychologists from looking up accounts", async ({ pageAs }) => {
+    // Arrange
+    const page = await pageAs("psychologist");
+
+    // Act
+    const response = await page.request.get(`/api/users/${demoUserIds.patient}`);
+
+    // Assert
+    expect(response.status()).toBe(403);
   });
 
   test("forbids patients from reading system health", async ({ pageAs }) => {

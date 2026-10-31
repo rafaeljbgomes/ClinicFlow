@@ -14,6 +14,7 @@ spec:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
         checksum/client-secret: {{ .Values.oidc.clientSecretChecksum | quote }}
+        checksum/user-lookup-secret: {{ .Values.oidc.userLookupSecretChecksum | quote }}
       labels:
         {{- include "clinicflow-frontend.labels" . | nindent 8 }}
         app.kubernetes.io/component: {{ .Values.name }}
@@ -38,6 +39,11 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.oidc.clientSecretName }}
                   key: {{ .Values.oidc.clientSecretKey }}
+            - name: CLINICFLOW_USER_LOOKUP_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.oidc.userLookupSecretName }}
+                  key: {{ .Values.oidc.userLookupSecretKey }}
           volumeMounts:
             # The root filesystem is read-only; Next.js writes its cache and temporary files here.
             - name: next-cache

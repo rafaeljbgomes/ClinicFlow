@@ -30,7 +30,6 @@ spec:
               - key: app.kubernetes.io/component
                 operator: In
                 values:
-                  - auth-service
                   - patient-service
                   - appointment-service
                   - clinical-service

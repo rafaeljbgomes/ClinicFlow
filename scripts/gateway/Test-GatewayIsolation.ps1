@@ -53,7 +53,7 @@ try {
         & kubectl wait --for=condition=Ready "pod/$Run-$($Source.Name)" -n $Source.Namespace --timeout=90s
         if ($LASTEXITCODE -ne 0) { throw 'Probe pod did not become ready.' }
     }
-    foreach ($Backend in @(@('auth-service',8081,'/users/me'),@('patient-service',8082,'/patients'),@('appointment-service',8083,'/appointments'),@('notification-service',8084,'/notifications'),@('clinical-service',8085,'/clinical-cases'))) {
+    foreach ($Backend in @(@('patient-service',8082,'/patients'),@('appointment-service',8083,'/appointments'),@('notification-service',8084,'/notifications'),@('clinical-service',8085,'/clinical-cases'))) {
         $Url="http://$($Backend[0]).$Namespace.svc.cluster.local:$($Backend[1])$($Backend[2])"
         Probe gateway $Url $true '401'
         Probe denied $Url $false ''

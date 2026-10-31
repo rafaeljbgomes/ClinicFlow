@@ -57,8 +57,8 @@ application behaviour, run it for the affected service before asking for review:
 ## Pull requests and CI
 
 Open the pull request against `main`; a draft is fine while CI iterates.
-GitHub Actions reports eight checks, one per component plus `system` and
-`repository`. Unaffected components report "not affected" and pass. All eight
+GitHub Actions reports seven checks, one per component plus `system` and
+`repository`. Unaffected components report "not affected" and pass. All seven
 must pass before merging; see [GitHub Actions CI](docs/development/github-actions.md)
 for what each one runs and how to debug a failure.
 

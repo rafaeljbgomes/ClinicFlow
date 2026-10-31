@@ -14,8 +14,6 @@ passed on 2026-10-02 for the tested local prototype. See the
 
 | Facade prefix/path | Service | Rewrite |
 | --- | --- | --- |
-| `/api/v1/auth/login`, `/api/v1/auth/register` | auth:8081 | `/auth/login`, `/auth/register` |
-| `/api/v1/auth/users/**` | auth:8081 | `/users/**` |
 | `/api/v1/patients/**` | patient:8082 | `/patients/**` |
 | `/api/v1/appointments/**` | appointment:8083 | `/appointments/**` |
 | `/api/v1/clinical/clinical-cases/**` | clinical:8085 | `/clinical-cases/**` |
@@ -59,7 +57,7 @@ Prerequisites: Docker/Compose, PowerShell 7, OpenSSL. Port 80/443 must be free; 
 if another local application uses them. The HTTPS override also controls redirect ports.
 
 ```powershell
-./scripts/generate-dev-jwt-keys.ps1
+./scripts/generate-dev-credentials.ps1
 ./scripts/gateway/New-DevelopmentCertificate.ps1
 # Trust secrets/edge/ca.crt manually in the browser's certificate settings if desired.
 docker compose up --build --detach
@@ -72,7 +70,7 @@ On Unix the CA key is owner-only; the leaf key is owner/group-readable. The scri
 sets CLINICFLOW_TLS_GROUP to the caller group for the non-root proxy. If running the
 script in a separate process, pass that group ID to Compose explicitly. Only the leaf
 certificate/key are mounted; the gateway cannot read the CA key. Management 9000, ping 9001, metrics
-9100, private 8080, and application 3000/8081–8085 have no host port mappings. PostgreSQL
+9100, private 8080, and application 3000/8082–8085 have no host port mappings. PostgreSQL
 and RabbitMQ local tools keep their existing published development ports.
 
 For a host-run `npm run dev` with host-run Spring services, existing direct URL variables

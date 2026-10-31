@@ -10,13 +10,13 @@ component "Traefik public HTTPS\nUI and bearer API hosts" as edge
 component "Traefik private API\nBFF listener" as privateEdge
 component "Next.js frontend\nApp Router + BFF" as bff
 
-component "auth-service\nIdentity, profiles, JWT issuance" as auth
+component "Keycloak\nclinicflow realm, token issuance" as keycloak
 component "patient-service\nPatient records" as patient
 component "appointment-service\nAppointment lifecycle" as appointment
 component "clinical-service\nClinical workflow" as clinical
 component "notification-service\nSimulated delivery history" as notification
 
-database "Auth PostgreSQL" as authdb
+database "Keycloak PostgreSQL" as keycloakdb
 database "Patient PostgreSQL" as patientdb
 database "Appointment PostgreSQL" as appointmentdb
 database "Clinical PostgreSQL" as clinicaldb
@@ -27,27 +27,26 @@ user --> browser
 browser --> edge : HTTPS
 edge --> bff : UI host / same-origin BFF
 bff --> privateEdge : GATEWAY_URL + Bearer JWT
-edge --> auth : API host / facade rewrite
-edge --> patient
+edge --> keycloak : auth host / sign-in
+edge --> patient : API host / facade rewrite
 edge --> appointment
 edge --> clinical
 edge --> notification
-privateEdge --> auth
 privateEdge --> patient
 privateEdge --> appointment
 privateEdge --> clinical
 privateEdge --> notification
 
-auth --> authdb
+keycloak --> keycloakdb
 patient --> patientdb
 appointment --> appointmentdb
 clinical --> clinicaldb
 notification --> notificationdb
 
-auth --> bff : signed RS256 JWT
+bff --> keycloak : code exchange, refresh,\nuser lookup (Admin API)
 note on link
-  auth-service signs with its private RSA key.
-  BFF and resource services validate with public-key material.
+  Keycloak signs RS256 access tokens.
+  BFF and resource services validate them against the realm JWKS.
 end note
 
 patient ..> broker : patient lifecycle events

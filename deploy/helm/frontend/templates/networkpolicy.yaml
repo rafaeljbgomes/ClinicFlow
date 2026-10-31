@@ -35,7 +35,7 @@ spec:
             matchExpressions:
               - key: app.kubernetes.io/component
                 operator: In
-                values: [auth-service, patient-service, appointment-service, clinical-service, notification-service]
+                values: [patient-service, appointment-service, clinical-service, notification-service]
       ports: [{port: 9000, protocol: TCP}]
     # Code exchange, refresh, keys and back-channel logout on the realm (ADR-027).
     - to:

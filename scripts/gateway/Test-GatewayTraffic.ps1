@@ -25,6 +25,6 @@ foreach ($Case in @(@{HostName='clinicflow.localhost';Path='/login';Status='200'
     } while([DateTimeOffset]::UtcNow -lt $Deadline)
     if (-not $Succeeded) { throw "Traffic check failed: $Url returned '$Status', expected $($Case.Status)." }
 }
-$Redirect=& $Curl --silent --show-error --max-time 10 --output $Sink --write-out '%{http_code}' --request POST --resolve "api.clinicflow.localhost:80:$Address" http://api.clinicflow.localhost/api/v1/auth/login
+$Redirect=& $Curl --silent --show-error --max-time 10 --output $Sink --write-out '%{http_code}' --request POST --resolve "api.clinicflow.localhost:80:$Address" http://api.clinicflow.localhost/api/v1/patients
 if ($LASTEXITCODE -ne 0 -or $Redirect -ne '308') { throw "Mutation HTTP-to-HTTPS redirect did not return 308: '$Redirect'" }
 Write-Host 'Gateway HTTPS, business and identity routing, authentication, management isolation, and method-preserving redirect checks passed.'

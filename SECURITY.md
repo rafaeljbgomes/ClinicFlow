@@ -170,15 +170,17 @@ workload-isolation vulnerability.
 - TLS, HSTS, and production ingress controls remain future hardening work.
   CI generates CycloneDX SBOMs and scans dependencies and images with Trivy,
   but images are not published, signed, or attested.
-- Auth services currently use configured RSA public-key material; dynamic JWKS
-  discovery and other identity-provider improvements remain roadmap work.
+- Keycloak is the only token issuer; services and the BFF read its JWKS, so
+  keys can rotate. The realm runs one Keycloak node without MFA, email
+  verification or a ClinicFlow login theme.
 - RabbitMQ event publication does not yet provide the full reliability
   guarantees of a transactional outbox.
 - OWASP ASVS Level 2 is an implementation baseline and evidence map, not a
   certification or compliance claim.
 
-Compensating controls in the current prototype include BCrypt password hashing,
-short-lived asymmetric JWTs, HttpOnly BFF cookies, CSRF checks, service-level
+Compensating controls in the current prototype include Keycloak's Argon2
+password hashing and brute-force lockout, short-lived asymmetric JWTs with
+rotating refresh tokens, HttpOnly BFF cookies, CSRF checks, service-level
 ownership authorization, sanitized errors, separate service databases,
 structured logging, local-only observability access, and Kubernetes
 NetworkPolicies.
