@@ -2,6 +2,7 @@
   "realm": "clinicflow",
   "enabled": true,
   "displayName": "ClinicFlow",
+  "loginTheme": "clinicflow",
   "sslRequired": "external",
   "registrationAllowed": true,
   "registrationEmailAsUsername": true,

@@ -22,6 +22,9 @@ COPY --from=builder /opt/keycloak/ /opt/keycloak/
 COPY --chmod=0555 healthcheck.sh /opt/clinicflow/healthcheck.sh
 # The realm is imported only when it does not exist yet; see docs/development/local-development.md.
 COPY realm/clinicflow-realm.json /opt/keycloak/data/import/clinicflow-realm.json
+# The realm's login theme. Folder themes are read at runtime, so they need no `kc.sh build`; owned by
+# root, they stay read-only to the Keycloak user.
+COPY themes/ /opt/keycloak/themes/
 
 USER 1000
 ENTRYPOINT ["/opt/keycloak/bin/kc.sh"]

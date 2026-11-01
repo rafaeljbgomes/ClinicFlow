@@ -184,6 +184,31 @@ adopted. It would add a second image and JVM run to every `docker compose up`
 for a realm that only changes through reviewed commits, and the reset gives the
 same end state for a local, synthetic-data stack.
 
+### Login theme
+
+Keycloak's sign-in, registration and other login pages use the `clinicflow`
+theme in [`docker/keycloak/themes/clinicflow`](../../docker/keycloak/themes/clinicflow)
+(ADR-032), which the realm file selects. A realm imported before the theme
+existed keeps Keycloak's default pages until you run
+`./scripts/reset-keycloak-realm.ps1` (or `-Target Kubernetes`).
+
+The theme is built into the image, and Keycloak caches templates and
+stylesheets. To iterate on it without rebuilding, run Keycloak with the theme
+mounted and caching off, for example with a Compose override:
+
+```yaml
+services:
+  keycloak:
+    volumes:
+      - ./docker/keycloak/themes/clinicflow:/opt/keycloak/themes/clinicflow:ro
+    command: ["start", "--optimized", "--import-realm", "--spi-theme--cache-themes=false",
+              "--spi-theme--cache-templates=false", "--spi-theme--static-max-age=-1"]
+```
+
+Keep the override out of commits. The theme's colours must match the light
+tokens in `frontend/src/app/globals.css`; `node --test scripts/ci/tests/*.test.cjs`
+fails when they drift.
+
 ### Demo accounts and checks
 
 The realm holds the demo users that `auth-service` used to seed, with the same

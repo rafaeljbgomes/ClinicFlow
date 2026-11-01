@@ -557,3 +557,18 @@ login client's privileges unchanged and makes the Admin API right explicit in
 the realm file. See [ADR-031](decisions/ADR-031-auth-service-retirement.md) for
 the alternatives, the DAST and required-check changes, and the upgrade steps for
 existing environments.
+
+## ADR-032: A ClinicFlow Login Theme for Keycloak
+
+Decision: Keycloak renders its sign-in, registration and other login pages with
+a `clinicflow` folder theme that extends `keycloak.v2`. Its layout template adds
+the app's brand panel, card eyebrow and page subtitles, and its stylesheet maps
+PatternFly 5 onto the frontend's light tokens and self-hosted Instrument fonts.
+Page templates, forms and field ids stay upstream's, and the pages stay light.
+
+Rationale: the app's `/login` and `/register` pages and Keycloak's default theme
+looked like two products in one sign-in. A layout-level override reaches every
+Keycloak page without touching the forms the BFF and the tests drive, and a
+repository test keeps the theme's colours equal to the frontend's. See
+[ADR-032](decisions/ADR-032-keycloak-login-theme.md) for the alternatives and
+the upgrade obligations.
