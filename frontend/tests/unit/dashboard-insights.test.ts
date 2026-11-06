@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveFollowUps, practiceMetrics } from "@/lib/dashboard-insights";
+import { deriveFollowUps, practiceMetrics, upcomingQueryStart } from "@/lib/dashboard-insights";
 import type { ClinicalCase, Patient } from "@/lib/types";
 
 const now = new Date("2026-09-10T09:00:00.000Z").getTime();
@@ -104,5 +104,30 @@ describe("dashboard insights", () => {
 
     // Assert
     expect(followUps.map((item) => item.id)).toEqual(["consent-pending", "consent-revoked", "case-intake-1"]);
+  });
+});
+
+describe("upcomingQueryStart", () => {
+  it("gives the same start to visits within one five-minute step", () => {
+    // Arrange
+    const firstVisit = new Date("2026-09-10T09:01:12.345Z").getTime();
+    const laterVisit = new Date("2026-09-10T09:04:59.999Z").getTime();
+
+    // Act
+    const starts = [upcomingQueryStart(firstVisit), upcomingQueryStart(laterVisit)];
+
+    // Assert
+    expect(starts).toEqual(Array(2).fill(new Date("2026-09-10T09:00:00.000Z").getTime()));
+  });
+
+  it("moves on when the next step begins", () => {
+    // Arrange
+    const nextStep = new Date("2026-09-10T09:05:00.000Z").getTime();
+
+    // Act
+    const start = upcomingQueryStart(nextStep);
+
+    // Assert
+    expect(start).toBe(nextStep);
   });
 });

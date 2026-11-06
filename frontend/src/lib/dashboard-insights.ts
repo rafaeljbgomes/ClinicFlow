@@ -19,8 +19,16 @@ export const OPEN_APPOINTMENT_STATUSES = ["SCHEDULED", "RESCHEDULED"] as const;
 // Messages in these statuses need the psychologist's attention.
 export const ATTENTION_NOTIFICATION_STATUSES = ["PENDING", "FAILED"] as const;
 export const UPCOMING_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const UPCOMING_QUERY_STEP_MS = 5 * 60 * 1000;
 // The follow-up card shows at most this many items, so it never needs more intake cases than this.
 export const FOLLOW_UP_LIMIT = 3;
+
+// The upcoming-session queries start on a five-minute step rather than at the exact time. The time is part
+// of the SWR key, so an exact one would never match and coming back to the dashboard could not reuse a read.
+// A session that began a few minutes ago can stay listed, which is harmless while it is still open.
+export function upcomingQueryStart(now: number) {
+  return now - (now % UPCOMING_QUERY_STEP_MS);
+}
 
 // Appointments, messages and clinical cases are paged (ADR-029), so their metrics arrive as server-side
 // totals rather than being counted from a full list in the browser.
