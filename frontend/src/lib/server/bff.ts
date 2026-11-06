@@ -13,6 +13,9 @@ type ProxyOptions = {
 };
 
 const BACKEND_TIMEOUT_MS = 10_000;
+// These responses can carry personal and clinical data, so browsers and proxies must not keep a copy.
+// The only client cache is SWR's, which lives in memory and is gone after a full page load.
+const NO_STORE = { "Cache-Control": "no-store" };
 
 export type ApiError = {
   status: number;
@@ -25,7 +28,7 @@ export type ApiError = {
 type SafeProblemFields = Omit<ApiError, "status" | "message">;
 
 export function jsonError(status: number, message: string, fields: SafeProblemFields = {}) {
-  return NextResponse.json<ApiError>({ status, message, ...fields }, { status });
+  return NextResponse.json<ApiError>({ status, message, ...fields }, { status, headers: NO_STORE });
 }
 
 export async function proxyRequest(
@@ -163,7 +166,7 @@ async function normalizeBackendResponse(response: Response) {
 }
 
 function responseHeaders(response: Response) {
-  const forwardedHeaders = new Headers();
+  const forwardedHeaders = new Headers(NO_STORE);
   for (const name of ["retry-after", "x-correlation-id", "etag"]) {
     const value = response.headers.get(name);
     if (value) forwardedHeaders.set(name, value);
@@ -249,7 +252,7 @@ const VERSION_TAG = /^"\d{1,18}"$/;
 
 // Writes name the version they replace (ADR-024): If-Match carries one version tag and If-None-Match: *
 // creates a record that must not exist yet. Only these exact forms reach the services. Reads forward
-// neither header, because browsers add If-None-Match to GET revalidations on their own.
+// neither header: they are never conditional, because the browser keeps no copy to revalidate.
 export function versionPreconditions(request: NextRequest): Record<string, string> | null {
   if (!isMutating(request.method)) return {};
   const preconditions: Record<string, string> = {};
