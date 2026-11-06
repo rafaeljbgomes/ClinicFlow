@@ -4,8 +4,9 @@ COPY . .
 RUN mvn -q -pl notification-service -am package -DskipTests
 
 FROM eclipse-temurin:21.0.12.1_1-jre-alpine@sha256:b48e02e0ea88d7bfb305335df94923bdef394905f4147dccd52e873cf17b1088
-# brotli-libs 1.2.1 fixes CVE-2026-111497; drop this once the pinned base image ships it.
-RUN apk upgrade --no-cache brotli-libs \
+# brotli-libs 1.2.1 fixes CVE-2026-111497 and libexpat 2.10.0 fixes CVE-2026-113351, CVE-2026-115506,
+# CVE-2026-117610 and CVE-2026-118370; drop each once the pinned base image ships it.
+RUN apk upgrade --no-cache brotli-libs libexpat \
     && addgroup -S -g 10001 clinicflow \
     && adduser -S -D -H -u 10001 -G clinicflow clinicflow
 WORKDIR /app
