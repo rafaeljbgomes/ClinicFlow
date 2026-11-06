@@ -180,6 +180,30 @@
       "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/111",
       "reviewedAt": "2026-10-28",
       "expiresAt": "2026-11-19"
+    },
+    {
+      "component": "platform",
+      "target": "keycloak",
+      "id": "CVE-2026-119373",
+      "package": "sqlite-libs",
+      "version": "3.34.1-11.el9_8",
+      "owner": "rafaeljbgomes",
+      "reason": "No fixed build exists: Red Hat lists sqlite in RHEL 9 as affected with no fixed package, so no quay.io/keycloak/keycloak:26.8.1 rebuild can ship one; Keycloak uses PostgreSQL; local synthetic-data identity provider only.",
+      "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/123",
+      "reviewedAt": "2026-11-06",
+      "expiresAt": "2026-12-06"
+    },
+    {
+      "component": "platform",
+      "target": "keycloak",
+      "id": "CVE-2026-119586",
+      "package": "sqlite-libs",
+      "version": "3.34.1-11.el9_8",
+      "owner": "rafaeljbgomes",
+      "reason": "No fixed build exists: Red Hat lists sqlite in RHEL 9 as affected with no fixed package, so no quay.io/keycloak/keycloak:26.8.1 rebuild can ship one; Keycloak uses PostgreSQL; local synthetic-data identity provider only.",
+      "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/123",
+      "reviewedAt": "2026-11-06",
+      "expiresAt": "2026-12-06"
     }
   ]
 }
