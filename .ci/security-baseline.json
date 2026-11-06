@@ -159,18 +159,6 @@
     },
     {
       "component": "platform",
-      "target": "gateway",
-      "id": "CVE-2026-116587",
-      "package": "github.com/go-jose/go-jose/v4",
-      "version": "v4.1.5",
-      "owner": "rafaeljbgomes",
-      "reason": "No fixed release exists: go-jose 4.1.6 is merged on Traefik's v3.7 branch but v3.7.16 is still the latest release; local synthetic-data gateway without ACME or JWT middleware. Short expiry until v3.7.17 ships.",
-      "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/110",
-      "reviewedAt": "2026-10-28",
-      "expiresAt": "2026-11-07"
-    },
-    {
-      "component": "platform",
       "target": "keycloak",
       "id": "CVE-2026-102554",
       "package": "com.google.guava:guava",
@@ -180,6 +168,30 @@
       "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/111",
       "reviewedAt": "2026-10-28",
       "expiresAt": "2026-11-19"
+    },
+    {
+      "component": "platform",
+      "target": "keycloak",
+      "id": "CVE-2026-119373",
+      "package": "sqlite-libs",
+      "version": "3.34.1-11.el9_8",
+      "owner": "rafaeljbgomes",
+      "reason": "No fixed build exists: Red Hat lists sqlite in RHEL 9 as affected with no fixed package, so no quay.io/keycloak/keycloak:26.8.1 rebuild can ship one; Keycloak uses PostgreSQL; local synthetic-data identity provider only.",
+      "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/123",
+      "reviewedAt": "2026-11-06",
+      "expiresAt": "2026-12-06"
+    },
+    {
+      "component": "platform",
+      "target": "keycloak",
+      "id": "CVE-2026-119586",
+      "package": "sqlite-libs",
+      "version": "3.34.1-11.el9_8",
+      "owner": "rafaeljbgomes",
+      "reason": "No fixed build exists: Red Hat lists sqlite in RHEL 9 as affected with no fixed package, so no quay.io/keycloak/keycloak:26.8.1 rebuild can ship one; Keycloak uses PostgreSQL; local synthetic-data identity provider only.",
+      "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/123",
+      "reviewedAt": "2026-11-06",
+      "expiresAt": "2026-12-06"
     }
   ]
 }
