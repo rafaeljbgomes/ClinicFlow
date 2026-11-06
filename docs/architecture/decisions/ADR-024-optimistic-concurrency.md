@@ -69,7 +69,7 @@ was based on.
   so another psychologist's id still gets `404`, never `412`.
 - **BFF and UI.** The BFF forwards only well-formed `If-Match` and
   `If-None-Match: *` on writes, and returns the `ETag`. Reads forward neither
-  header, because browsers add `If-None-Match` to revalidations on their own.
+  header: BFF responses are `no-store`, so the browser has no copy to revalidate.
   A form sends the version of the snapshot it opened with, not of data that
   SWR refreshed since. On `412` the form keeps what was typed and offers
   **Reload latest**, which replaces it with the stored version. Nothing is
