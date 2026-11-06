@@ -96,7 +96,7 @@ services:
     restart: "no"
 
   rabbitmq:
-    image: rabbitmq:4.3.6-management-alpine@sha256:3505b6096cdbc083bcc363e74366f575ecd0c1a55be4dadcbc60fa08e34647e1
+    image: rabbitmq:4.3.7-management-alpine@sha256:eb338b3fc8f5c251028c0022ac0de3fe1db2d599d1c6a08b45898f756f248881
     env_file:
       - path: ./secrets/platform/rabbitmq.env
         required: false
@@ -118,7 +118,7 @@ services:
       retries: 5
 
   rabbitmq-bootstrap:
-    image: rabbitmq:4.3.6-management-alpine@sha256:3505b6096cdbc083bcc363e74366f575ecd0c1a55be4dadcbc60fa08e34647e1
+    image: rabbitmq:4.3.7-management-alpine@sha256:eb338b3fc8f5c251028c0022ac0de3fe1db2d599d1c6a08b45898f756f248881
     env_file:
       - path: ./secrets/platform/rabbitmq.env
         required: false
