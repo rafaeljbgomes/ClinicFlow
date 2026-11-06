@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { apiFetch, isStaleVersion, swrFetcher } from "@/lib/api-client";
+import { apiFetch, isStaleVersion, referenceDataOptions, swrFetcher } from "@/lib/api-client";
 import type { PracticeProfile, UserView } from "@/lib/types";
 
 export default function SettingsPage() {
@@ -29,7 +29,7 @@ export default function SettingsPage() {
     data: user,
     error: userError,
     isLoading: isUserLoading,
-  } = useSWR<UserView>("/api/auth/me", swrFetcher);
+  } = useSWR<UserView>("/api/auth/me", swrFetcher, referenceDataOptions);
   // The form follows this data, so it only refreshes on an explicit save or reload: a background
   // revalidation must not swap the profile, and its version, under an edit in progress.
   const practiceProfile = useSWR<PracticeProfile>(

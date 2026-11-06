@@ -25,7 +25,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { swrFetcher } from "@/lib/api-client";
+import { referenceDataOptions, swrFetcher } from "@/lib/api-client";
 import {
   ATTENTION_NOTIFICATION_STATUSES,
   deriveFollowUps,
@@ -48,7 +48,7 @@ export default function DashboardPage() {
   const [renderedAt] = useState(() => Date.now());
   const [todayText] = useState(() => todayLabel());
   const upcomingFrom = upcomingQueryStart(renderedAt);
-  const patients = useSWR<Patient[]>("/api/patients", swrFetcher);
+  const patients = useSWR<Patient[]>("/api/patients", swrFetcher, referenceDataOptions);
   // Each paged request asks the server for exactly what one card shows, so nothing scales with history.
   const upcoming = useSWR<Page<Appointment>>(listPath("/api/appointments", {
     from: new Date(upcomingFrom).toISOString(), status: OPEN_APPOINTMENT_STATUSES, size: UPCOMING_LIMIT,
