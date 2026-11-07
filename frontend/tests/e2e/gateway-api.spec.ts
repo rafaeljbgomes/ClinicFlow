@@ -258,6 +258,15 @@ test.describe("BFF session cookies respect transport configuration and mutations
     expect(response.status()).toBe(200);
   });
 
+  test("a list read with an undocumented parameter is rejected before the service", async ({ bffRequest }) => {
+    // Act
+    const response = await bffRequest.get("/api/notifications?query=query");
+
+    // Assert
+    expect(response.status()).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "unsupported_parameter" });
+  });
+
   test("logout succeeds with the CSRF token", async ({ ownBffRequest }) => {
     // Arrange
     const csrf = await csrfToken(ownBffRequest);

@@ -42,10 +42,10 @@ describe("clinical list routes", () => {
     vi.clearAllMocks();
   });
 
-  it("forwards only the case filters and paging parameters", async () => {
+  it("forwards the case filters and paging parameters", async () => {
     // Arrange
     const request = new NextRequest(
-      `http://localhost/api/clinical-cases?patientId=${patientId}&status=INTAKE&status=ACTIVE&page=1&size=5&psychologistId=x`
+      `http://localhost/api/clinical-cases?patientId=${patientId}&status=INTAKE&status=ACTIVE&page=1&size=5`
     );
 
     // Act
@@ -57,10 +57,10 @@ describe("clinical list routes", () => {
     );
   });
 
-  it("forwards only paging parameters for a case's session records", async () => {
+  it("forwards the paging parameters for a case's session records", async () => {
     // Arrange
     const request = new NextRequest(
-      `http://localhost/api/clinical-cases/${caseId}/session-records?page=2&size=10&status=SIGNED`
+      `http://localhost/api/clinical-cases/${caseId}/session-records?page=2&size=10`
     );
 
     // Act
@@ -70,5 +70,29 @@ describe("clinical list routes", () => {
     expect(fetchMock.mock.calls[0][0]).toBe(
       `http://localhost:8085/clinical-cases/${caseId}/session-records?page=2&size=10`
     );
+  });
+  it("rejects a case list request with a parameter the route does not document", async () => {
+    // Arrange
+    const request = new NextRequest(`http://localhost/api/clinical-cases?status=INTAKE&psychologistId=x`);
+
+    // Act
+    const response = await listCases(request);
+
+    // Assert
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "unsupported_parameter" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a session-record request with a filter the route does not take", async () => {
+    // Arrange
+    const request = new NextRequest(`http://localhost/api/clinical-cases/${caseId}/session-records?status=SIGNED`);
+
+    // Act
+    const response = await listSessionRecords(request, { params: Promise.resolve({ id: caseId }) });
+
+    // Assert
+    expect(response.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
