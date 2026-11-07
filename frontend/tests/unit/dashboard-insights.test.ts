@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveFollowUps, practiceMetrics, upcomingQueryStart } from "@/lib/dashboard-insights";
+import { deriveFollowUps, practiceMetrics, startOfMonth, upcomingQueryStart } from "@/lib/dashboard-insights";
 import type { ClinicalCase, Patient } from "@/lib/types";
 
 const now = new Date("2026-09-10T09:00:00.000Z").getTime();
@@ -44,12 +44,41 @@ function clinicalCase(overrides: Partial<ClinicalCase> = {}): ClinicalCase {
 }
 
 describe("dashboard insights", () => {
-  it("combines server-side totals with patient context", () => {
+  it("starts the month at local midnight on its first day", () => {
+    // Act
+    const start = new Date(startOfMonth(now));
+
+    // Assert
+    expect([start.getFullYear(), start.getMonth(), start.getDate(), start.getHours(), start.getMinutes()])
+      .toEqual([2026, 8, 1, 0, 0]);
+  });
+
+  it("names intake follow-ups from the patient lookup", () => {
     // Arrange
-    const patients = [patient()];
+    const named = patient({ id: "patient-7", fullName: "Rita Gomes" });
+    const cases = [clinicalCase({ id: "intake-7", patientId: "patient-7", status: "INTAKE" })];
 
     // Act
-    const metrics = practiceMetrics(patients, 1, 4, 2, 1, now);
+    const followUps = deriveFollowUps([], cases, new Map([[named.id, named]]));
+
+    // Assert
+    expect(followUps).toEqual([expect.objectContaining({ id: "case-intake-7", description: "Rita Gomes" })]);
+  });
+
+  it("falls back to a generic label when the lookup has no name", () => {
+    // Arrange
+    const cases = [clinicalCase({ id: "intake-8", patientId: "unknown", status: "INTAKE" })];
+
+    // Act
+    const followUps = deriveFollowUps([], cases, new Map());
+
+    // Assert
+    expect(followUps).toEqual([expect.objectContaining({ description: "Patient" })]);
+  });
+
+  it("combines server-side totals with patient context", () => {
+    // Act
+    const metrics = practiceMetrics({ total: 1, newThisMonth: 1 }, 1, 4, 2, 1);
 
     // Assert
     expect(metrics).toEqual([
@@ -62,7 +91,7 @@ describe("dashboard insights", () => {
 
   it("reports quiet states when the server totals are zero", () => {
     // Act
-    const metrics = practiceMetrics([], 0, 0, 0, 0, now);
+    const metrics = practiceMetrics({ total: 0, newThisMonth: 0 }, 0, 0, 0, 0);
 
     // Assert
     expect(metrics).toEqual([
@@ -79,7 +108,7 @@ describe("dashboard insights", () => {
     const cases = [clinicalCase({ status: "INTAKE" })];
 
     // Act
-    const followUps = deriveFollowUps(patients, cases);
+    const followUps = deriveFollowUps(patients, cases, new Map());
 
     // Assert
     expect(followUps).toEqual([
@@ -100,7 +129,7 @@ describe("dashboard insights", () => {
     ];
 
     // Act
-    const followUps = deriveFollowUps(patients, intakeCases);
+    const followUps = deriveFollowUps(patients, intakeCases, new Map());
 
     // Assert
     expect(followUps.map((item) => item.id)).toEqual(["consent-pending", "consent-revoked", "case-intake-1"]);

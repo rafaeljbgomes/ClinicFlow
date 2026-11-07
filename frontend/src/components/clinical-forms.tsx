@@ -5,7 +5,6 @@ import {
   Controller,
   useFieldArray,
   useForm,
-  useWatch,
   type UseFormRegisterReturn,
 } from "react-hook-form";
 import { z } from "zod";
@@ -27,13 +26,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { PatientPicker } from "@/components/patient-picker";
 import { formatEnum } from "@/lib/format";
 import type {
   AttendanceStatus,
   CarePlan,
   EditableNoteStatus,
   GoalStatus,
-  Patient,
   PracticeProfile,
   SessionModality,
   SessionRecord,
@@ -86,27 +85,17 @@ export type SessionRecordFormValues = z.infer<typeof sessionRecordSchema>;
 export type PracticeProfileFormValues = z.infer<typeof practiceProfileSchema>;
 
 export function ClinicalCaseForm({
-  patients,
   onSubmit,
 }: {
-  patients: Patient[];
   onSubmit: (values: ClinicalCaseFormValues) => Promise<void>;
 }) {
   const form = useForm<ClinicalCaseFormValues>({
     resolver: zodResolver(clinicalCaseSchema),
     defaultValues: {
-      patientId: patients[0]?.id ?? "",
+      patientId: "",
       presentingConcern: "",
     },
   });
-
-  const selectedPatientId = useWatch({
-    control: form.control,
-    name: "patientId",
-  });
-  const selectedPatientName = patients.find(
-    (patient) => patient.id === selectedPatientId
-  )?.fullName;
 
   return (
     <form className="@container/clinical-form" onSubmit={form.handleSubmit(onSubmit)}>
@@ -117,22 +106,11 @@ export function ClinicalCaseForm({
           render={({ field }) => (
             <Field data-invalid={!!form.formState.errors.patientId}>
               <FieldLabel>Patient</FieldLabel>
-              <Select value={field.value} onValueChange={field.onChange}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select patient">
-                    {selectedPatientName}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {patients.map((patient) => (
-                      <SelectItem key={patient.id} value={patient.id}>
-                        {patient.fullName}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
+              <PatientPicker
+                value={field.value}
+                onChange={field.onChange}
+                invalid={!!form.formState.errors.patientId}
+              />
               <FieldError>{form.formState.errors.patientId?.message}</FieldError>
             </Field>
           )}

@@ -321,7 +321,8 @@ def main():
                         request(PROXY, UI + item["bff"])
                         urls.append(UI + item["bff"])
                         if role == "psychologist" and item.get("fixture") == "patients":
-                            patients = json.loads(raw)
+                            # The patient list is paged (ADR-029); the first page is enough to pick a fixture.
+                            patients = json.loads(raw).get("content")
                             require(isinstance(patients, list) and patients, "Synthetic patient discovery is empty")
                             patient_id = patients[0]["id"]
                             urls += [API + "/api/v1/patients/" + patient_id,
@@ -336,7 +337,7 @@ def main():
                 if role == "psychologist":
                     # Exercise JSON mutation bodies so active scanning covers more than collection GETs.
                     raw, _ = request(PROXY, API + "/api/v1/patients")
-                    existing = json.loads(raw)
+                    existing = json.loads(raw).get("content")
                     require(isinstance(existing, list) and existing, "Synthetic patient fixtures missing")
                     patient_id = existing[0]["id"]
                     stamp = str(time.time_ns())

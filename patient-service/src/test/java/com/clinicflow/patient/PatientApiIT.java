@@ -318,17 +318,32 @@ class PatientApiIT {
     }
 
     @Test
-    void listsThePsychologistPatients() {
+    void listsThePsychologistPatientsAsAPage() {
         // Arrange
         createPatient();
         var request = new HttpEntity<>(bearer("psychologist-token"));
 
         // Act
-        var response = exchange("/patients", HttpMethod.GET, request, Object[].class);
+        var response = exchange("/patients", HttpMethod.GET, request, Map.class);
 
         // Assert
         assertThat(response.getStatus()).isEqualTo(HttpStatus.OK);
-        assertThat(response.getResponseBody()).hasSize(1);
+        assertThat((List<?>) response.getResponseBody().get("content")).hasSize(1);
+        assertThat(((Map<?, ?>) response.getResponseBody().get("page")).get("totalElements")).isEqualTo(1);
+    }
+
+    @Test
+    void searchNarrowsThePatientList() {
+        // Arrange
+        createPatient();
+        var request = new HttpEntity<>(bearer("psychologist-token"));
+
+        // Act
+        var response = exchange("/patients?q=no-such-patient", HttpMethod.GET, request, Map.class);
+
+        // Assert
+        assertThat(response.getStatus()).isEqualTo(HttpStatus.OK);
+        assertThat((List<?>) response.getResponseBody().get("content")).isEmpty();
     }
 
     @Test

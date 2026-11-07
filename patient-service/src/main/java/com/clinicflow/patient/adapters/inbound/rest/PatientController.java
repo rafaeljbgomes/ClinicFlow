@@ -2,12 +2,17 @@ package com.clinicflow.patient.adapters.inbound.rest;
 
 import com.clinicflow.patient.adapters.inbound.rest.dto.ChangePatientStatusRequest;
 import com.clinicflow.patient.adapters.inbound.rest.dto.CreatePatientRequest;
+import com.clinicflow.patient.adapters.inbound.rest.dto.PageResponse;
 import com.clinicflow.patient.adapters.inbound.rest.dto.PatientResponse;
 import com.clinicflow.patient.adapters.inbound.rest.dto.UpdatePatientRequest;
 import com.clinicflow.patient.application.PatientService;
+import com.clinicflow.patient.application.queries.PageQuery;
+import com.clinicflow.patient.domain.ConsentStatus;
+import com.clinicflow.patient.domain.PatientStatus;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -16,7 +21,8 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
+import java.time.Instant;
+import java.util.Set;
 import java.util.UUID;
 
 @RestController
@@ -40,9 +46,20 @@ public class PatientController {
         return ResponseEntity.status(HttpStatus.CREATED).eTag(EntityTags.of(patient.version())).body(patient);
     }
 
+    // Patients list by name (ADR-029). q searches names and email; status, consent and id are repeatable; id looks
+    // up specific patients for screens that show names next to other services' records.
     @GetMapping
-    public List<PatientResponse> list(@AuthenticationPrincipal Jwt jwt) {
-        return patientService.list(mapper.toListQuery(userId(jwt))).stream().map(mapper::toResponse).toList();
+    public PageResponse<PatientResponse> list(@AuthenticationPrincipal Jwt jwt,
+                                              @RequestParam(required = false) String q,
+                                              @RequestParam(required = false) Set<PatientStatus> status,
+                                              @RequestParam(required = false) Set<ConsentStatus> consent,
+                                              @RequestParam(required = false)
+                                              @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant createdFrom,
+                                              @RequestParam(required = false) Set<UUID> id,
+                                              @RequestParam(defaultValue = "0") int page,
+                                              @RequestParam(defaultValue = "" + PageQuery.DEFAULT_SIZE) int size) {
+        return PageResponse.of(patientService.list(
+                mapper.toListQuery(userId(jwt), q, status, consent, createdFrom, id, page, size)), mapper::toResponse);
     }
 
     @GetMapping("/{id}")

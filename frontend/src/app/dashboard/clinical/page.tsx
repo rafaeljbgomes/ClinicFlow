@@ -83,6 +83,7 @@ import {
 import { ApiClientError, apiFetch, isStaleVersion, referenceDataOptions, swrFetcher } from "@/lib/api-client";
 import { formatDateTime, formatEnum } from "@/lib/format";
 import { listPath } from "@/lib/list-path";
+import { PATIENT_COUNT_PATH, usePatientLookup } from "@/lib/patient-lookup";
 import type {
   CarePlan,
   ClinicalCase,
@@ -108,7 +109,7 @@ const SESSION_PAGE_SIZE = 20;
 export default function ClinicalPage() {
   // The switcher offers the most recently opened cases; older ones are reached through the case browser.
   const cases = useSWR<Page<ClinicalCase>>(listPath("/api/clinical-cases", { size: CASE_PAGE_SIZE }), swrFetcher);
-  const patients = useSWR<Patient[]>("/api/patients", swrFetcher, referenceDataOptions);
+  const patientCount = useSWR<Page<Patient>>(PATIENT_COUNT_PATH, swrFetcher, referenceDataOptions);
   const profile = useSWR<PracticeProfile>("/api/practice-profile", swrFetcher, referenceDataOptions);
   const currentUser = useSWR<UserView>("/api/auth/me", swrFetcher, referenceDataOptions);
   const [createCaseOpen, setCreateCaseOpen] = useState(false);
@@ -142,12 +143,15 @@ export default function ClinicalPage() {
     swrFetcher
   );
 
-  const patientById = useMemo(
-    () => new Map((patients.data ?? []).map((patient) => [patient.id, patient])),
-    [patients.data]
-  );
-
   const recentCases = useMemo(() => cases.data?.content ?? [], [cases.data]);
+
+  // Names for the cases on screen only; the patient list itself is paged (ADR-029).
+  const patients = usePatientLookup([
+    ...recentCases,
+    ...(browsedCases.data?.content ?? []),
+    ...(pickedCase ? [pickedCase] : []),
+  ].map((clinicalCase) => clinicalCase.patientId));
+  const patientById = patients.byId;
 
   // Patient names live in the patient service, so the text search narrows the page on screen.
   const visibleCases = useMemo(() => {
@@ -345,7 +349,7 @@ export default function ClinicalPage() {
         description="Coordinate cases, care plans, and session records with clarity."
         actions={
           <Button
-            disabled={(patients.data ?? []).length === 0}
+            disabled={!patientCount.data?.page.totalElements}
             onClick={() => setCreateCaseOpen(true)}
           >
             <PlusIcon data-icon="inline-start" />
@@ -482,7 +486,7 @@ export default function ClinicalPage() {
               Start a clinical record for an existing patient.
             </DialogDescription>
           </DialogHeader>
-          <ClinicalCaseForm patients={patients.data ?? []} onSubmit={createCase} />
+          <ClinicalCaseForm onSubmit={createCase} />
         </DialogContent>
       </Dialog>
 

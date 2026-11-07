@@ -940,8 +940,10 @@ async function highlightOption(page: Page, option: Locator) {
   }, { timeout: 5_000 }).toBe(true);
 }
 
+// The picker offers one page of patients by name (ADR-029), so search for the patient before choosing it.
 async function choosePatient(page: Page, dialog: Locator, patientName: string) {
-  await dialog.getByRole("combobox").first().click();
+  await dialog.getByRole("searchbox", { name: "Search patients" }).fill(patientName);
+  await dialog.getByRole("combobox", { name: "Patient" }).click();
   await page.getByRole("option", { name: patientName, exact: true }).click();
 }
 

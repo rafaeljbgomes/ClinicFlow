@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Controller, useForm, useWatch } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import useSWR from "swr";
 import { z } from "zod";
 import { MoreHorizontalIcon, PlusIcon } from "lucide-react";
@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { ErrorAlert } from "@/components/error-alert";
 import { ListPager } from "@/components/list-pager";
 import { LoadingTable } from "@/components/loading-table";
+import { PatientPicker } from "@/components/patient-picker";
 import { SectionHeader } from "@/components/section-header";
 import { STALE_VERSION_MESSAGE, StaleVersionAlert } from "@/components/stale-version-alert";
 import { StatusBadge } from "@/components/status-badge";
@@ -57,6 +58,7 @@ import {
 import { apiFetch, isStaleVersion, referenceDataOptions, swrFetcher } from "@/lib/api-client";
 import { formatDateTime, formatEnum } from "@/lib/format";
 import { listPath } from "@/lib/list-path";
+import { PATIENT_COUNT_PATH, usePatientLookup } from "@/lib/patient-lookup";
 import type { Appointment, AppointmentStatus, AppointmentType, Page, Patient } from "@/lib/types";
 
 const PAGE_SIZE = 20;
@@ -103,13 +105,10 @@ export default function AppointmentsPage() {
     page: pageNumber,
     size: PAGE_SIZE,
   }), swrFetcher, { keepPreviousData: true });
-  const patients = useSWR<Patient[]>("/api/patients", swrFetcher, referenceDataOptions);
-
-  const patientById = useMemo(
-    () => new Map((patients.data ?? []).map((patient) => [patient.id, patient])),
-    [patients.data]
-  );
   const visibleAppointments = appointments.data?.content ?? [];
+  // Names for the sessions on this page only; the patient list itself is paged (ADR-029).
+  const patients = usePatientLookup(visibleAppointments.map((appointment) => appointment.patientId));
+  const patientCount = useSWR<Page<Patient>>(PATIENT_COUNT_PATH, swrFetcher, referenceDataOptions);
 
   async function schedule(values: ScheduleValues) {
     await apiFetch<Appointment>("/api/appointments", {
@@ -122,7 +121,7 @@ export default function AppointmentsPage() {
     });
     toast.success("Appointment scheduled");
     setCreateOpen(false);
-    await Promise.all([appointments.mutate(), patients.mutate()]);
+    await appointments.mutate();
   }
 
   async function complete(appointment: Appointment) {
@@ -148,7 +147,7 @@ export default function AppointmentsPage() {
         description="Schedule sessions and keep the clinical day easy to scan."
         actions={
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-            <DialogTrigger render={<Button disabled={(patients.data ?? []).length === 0} />}>
+            <DialogTrigger render={<Button disabled={!patientCount.data?.page.totalElements} />}>
               <PlusIcon data-icon="inline-start" />
               Schedule session
             </DialogTrigger>
@@ -159,7 +158,7 @@ export default function AppointmentsPage() {
                   Choose the patient, time, and session format.
                 </DialogDescription>
               </DialogHeader>
-              <ScheduleForm patients={patients.data ?? []} onSubmit={schedule} />
+              <ScheduleForm onSubmit={schedule} />
             </DialogContent>
           </Dialog>
         }
@@ -171,7 +170,7 @@ export default function AppointmentsPage() {
         />
       ) : null}
 
-      {(appointments.isLoading && !appointments.data) || patients.isLoading ? (
+      {appointments.isLoading && !appointments.data ? (
         <LoadingTable />
       ) : (
         <Card>
@@ -209,7 +208,7 @@ export default function AppointmentsPage() {
                 <SessionRow
                   key={appointment.id}
                   appointment={appointment}
-                  patient={patientById.get(appointment.patientId)}
+                  patient={patients.byId.get(appointment.patientId)}
                   showDivider={index < visibleAppointments.length - 1}
                   onCancel={() => setCancelling(appointment)}
                   onComplete={() => complete(appointment)}
@@ -317,27 +316,18 @@ function SessionRow({
 }
 
 function ScheduleForm({
-  patients,
   onSubmit,
 }: {
-  patients: Patient[];
   onSubmit: (values: ScheduleValues) => Promise<void>;
 }) {
   const form = useForm<ScheduleValues>({
     resolver: zodResolver(scheduleSchema),
     defaultValues: {
-      patientId: patients[0]?.id ?? "",
+      patientId: "",
       scheduledAt: "",
       type: "ONLINE",
     },
   });
-  const selectedPatientId = useWatch({
-    control: form.control,
-    name: "patientId",
-  });
-  const selectedPatientName = patients.find(
-    (patient) => patient.id === selectedPatientId
-  )?.fullName;
 
   return (
     <form onSubmit={form.handleSubmit(onSubmit)}>
@@ -348,22 +338,11 @@ function ScheduleForm({
           render={({ field }) => (
             <Field data-invalid={!!form.formState.errors.patientId}>
               <FieldLabel>Patient</FieldLabel>
-              <Select value={field.value} onValueChange={field.onChange}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select patient">
-                    {selectedPatientName}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {patients.map((patient) => (
-                      <SelectItem key={patient.id} value={patient.id}>
-                        {patient.fullName}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
+              <PatientPicker
+                value={field.value}
+                onChange={field.onChange}
+                invalid={!!form.formState.errors.patientId}
+              />
               <FieldError>{form.formState.errors.patientId?.message}</FieldError>
             </Field>
           )}

@@ -22,6 +22,8 @@ export const UPCOMING_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const UPCOMING_QUERY_STEP_MS = 5 * 60 * 1000;
 // The follow-up card shows at most this many items, so it never needs more intake cases than this.
 export const FOLLOW_UP_LIMIT = 3;
+// Patients whose consent needs a follow-up.
+export const CONSENT_FOLLOW_UP_STATUSES = ["PENDING", "REVOKED"] as const;
 
 // The upcoming-session queries start on a five-minute step rather than at the exact time. The time is part
 // of the SWR key, so an exact one would never match and coming back to the dashboard could not reuse a read.
@@ -32,33 +34,40 @@ export function upcomingQueryStart(now: number) {
 
 // Appointments, messages and clinical cases are paged (ADR-029), so their metrics arrive as server-side
 // totals rather than being counted from a full list in the browser.
+// The first instant of the local month containing `now`, as the patient list's createdFrom filter.
+export function startOfMonth(now: number): string {
+  const start = new Date(now);
+  start.setDate(1);
+  start.setHours(0, 0, 0, 0);
+  return start.toISOString();
+}
+
+// Patients are paged too, so their count and this month's new patients are server-side totals.
 export function practiceMetrics(
-  patients: Patient[],
+  patients: { total: number; newThisMonth: number },
   upcomingThisWeek: number,
   activeCases: number,
   intakeCases: number,
-  attentionMessages: number,
-  now: number
+  attentionMessages: number
 ): PracticeMetric[] {
-  const startOfMonth = new Date(now);
-  startOfMonth.setDate(1);
-  startOfMonth.setHours(0, 0, 0, 0);
-  const newPatients = patients.filter((patient) => new Date(patient.createdAt).getTime() >= startOfMonth.getTime()).length;
+  const newPatients = patients.newThisMonth;
 
   return [
-    { label: "Patients", value: patients.length, context: newPatients ? `+${newPatients} this month` : "No new patients this month" },
+    { label: "Patients", value: patients.total, context: newPatients ? `+${newPatients} this month` : "No new patients this month" },
     { label: "Upcoming", value: upcomingThisWeek, context: "Next 7 days" },
     { label: "Cases", value: activeCases, context: intakeCases ? `${intakeCases} in intake` : "No cases in intake" },
     { label: "Messages", value: attentionMessages, context: attentionMessages ? "Need attention" : "All clear" },
   ];
 }
 
-// `intakeCases` is the server-filtered first page of INTAKE cases, most recently opened first.
+// `consentPatients` is the server-filtered first page of patients whose consent needs a follow-up, and
+// `intakeCases` the first page of INTAKE cases, most recently opened first. `patientById` names the cases.
 export function deriveFollowUps(
-  patients: Patient[],
-  intakeCases: ClinicalCase[]
+  consentPatients: Patient[],
+  intakeCases: ClinicalCase[],
+  patientById: ReadonlyMap<string, Patient>
 ): FollowUp[] {
-  const consent = patients
+  const consent = consentPatients
     .filter((patient) => patient.consentStatus === "PENDING" || patient.consentStatus === "REVOKED")
     .map((patient) => ({
       id: `consent-${patient.id}`,
@@ -70,7 +79,7 @@ export function deriveFollowUps(
   const intake = intakeCases.map((clinicalCase) => ({
     id: `case-${clinicalCase.id}`,
     title: "Complete case intake",
-    description: patients.find((patient) => patient.id === clinicalCase.patientId)?.fullName ?? "Patient",
+    description: patientById.get(clinicalCase.patientId)?.fullName ?? "Patient",
     href: "/dashboard/clinical",
     tone: "info" as const,
   }));

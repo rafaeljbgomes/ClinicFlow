@@ -4,10 +4,15 @@ import com.clinicflow.patient.application.PatientService;
 import com.clinicflow.patient.application.commands.UpdatePatientCommand;
 import com.clinicflow.patient.application.exceptions.PatientNotFoundException;
 import com.clinicflow.patient.application.exceptions.StaleResourceVersionException;
+import com.clinicflow.patient.application.queries.ListPatientsQuery;
+import com.clinicflow.patient.application.queries.PageQuery;
+import com.clinicflow.patient.application.results.PageResult;
 import com.clinicflow.patient.application.results.PatientResult;
 import com.clinicflow.patient.domain.ConsentStatus;
 import com.clinicflow.patient.domain.ContactPreference;
+import com.clinicflow.patient.domain.PatientId;
 import com.clinicflow.patient.domain.PatientStatus;
+import com.clinicflow.patient.domain.PsychologistId;
 import com.clinicflow.patient.infrastructure.security.SecurityConfig;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -26,6 +31,7 @@ import org.springframework.test.web.servlet.ResultActions;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -145,9 +151,11 @@ class PatientControllerTest {
     }
 
     @Test
-    void listReturnsPsychologistPatients() throws Exception {
+    void listReturnsTheFirstPageOfPsychologistPatients() throws Exception {
         // Arrange
-        when(patientService.list(any())).thenReturn(List.of(result()));
+        var query = new ListPatientsQuery(new PsychologistId(PSYCHOLOGIST_ID), null, null, null, null, null,
+                new PageQuery(0, PageQuery.DEFAULT_SIZE));
+        when(patientService.list(query)).thenReturn(new PageResult<>(List.of(result()), 0, PageQuery.DEFAULT_SIZE, 41));
         var request = get("/patients").with(jwtFor("ROLE_PSYCHOLOGIST"));
 
         // Act
@@ -155,8 +163,82 @@ class PatientControllerTest {
 
         // Assert
         response.andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value(PATIENT_ID.toString()))
-                .andExpect(jsonPath("$[0].version").value(VERSION));
+                .andExpect(jsonPath("$.content[0].id").value(PATIENT_ID.toString()))
+                .andExpect(jsonPath("$.content[0].version").value(VERSION))
+                .andExpect(jsonPath("$.page.number").value(0))
+                .andExpect(jsonPath("$.page.size").value(PageQuery.DEFAULT_SIZE))
+                .andExpect(jsonPath("$.page.totalElements").value(41))
+                .andExpect(jsonPath("$.page.totalPages").value(3));
+    }
+
+    @Test
+    void listPassesEveryFilterAndThePage() throws Exception {
+        // Arrange
+        UUID other = UUID.fromString("cccccccc-cccc-cccc-cccc-cccccccccccc");
+        var query = new ListPatientsQuery(new PsychologistId(PSYCHOLOGIST_ID), "ana",
+                Set.of(PatientStatus.ACTIVE, PatientStatus.INACTIVE), Set.of(ConsentStatus.PENDING),
+                Instant.parse("2026-11-01T00:00:00Z"), Set.of(new PatientId(PATIENT_ID), new PatientId(other)),
+                new PageQuery(2, 50));
+        when(patientService.list(query)).thenReturn(new PageResult<>(List.of(), 2, 50, 0));
+        var request = get("/patients").param("q", "ana").param("status", "ACTIVE", "INACTIVE")
+                .param("consent", "PENDING").param("createdFrom", "2026-11-01T00:00:00Z")
+                .param("id", PATIENT_ID.toString(), other.toString()).param("page", "2").param("size", "50")
+                .with(jwtFor("ROLE_PSYCHOLOGIST"));
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isEmpty())
+                .andExpect(jsonPath("$.page.number").value(2));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"size=101", "size=0", "page=-1"})
+    void listRejectsPagesOutsideTheLimits(String parameter) throws Exception {
+        // Arrange
+        String[] pair = parameter.split("=");
+        var request = get("/patients").param(pair[0], pair[1]).with(jwtFor("ROLE_PSYCHOLOGIST"));
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("invalid_request"));
+        verifyNoInteractions(patientService);
+    }
+
+    @Test
+    void listRejectsSearchesLongerThanTheLimit() throws Exception {
+        // Arrange
+        var request = get("/patients").param("q", "a".repeat(ListPatientsQuery.MAX_SEARCH_LENGTH + 1))
+                .with(jwtFor("ROLE_PSYCHOLOGIST"));
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("invalid_request"));
+        verifyNoInteractions(patientService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"status=UNKNOWN", "consent=MAYBE", "id=not-a-uuid", "createdFrom=yesterday"})
+    void listRejectsMalformedFilters(String parameter) throws Exception {
+        // Arrange
+        String[] pair = parameter.split("=");
+        var request = get("/patients").param(pair[0], pair[1]).with(jwtFor("ROLE_PSYCHOLOGIST"));
+
+        // Act
+        ResultActions response = mvc.perform(request);
+
+        // Assert
+        response.andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("invalid_parameter"));
+        verifyNoInteractions(patientService);
     }
 
     @Test
