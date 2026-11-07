@@ -69,9 +69,15 @@ the server.
   Data's `Pageable`, `Page` and `Specification` stay inside the persistence
   adapters, so the application ports keep their own types.
 - **BFF.** List routes forward only an allowlist of query parameters
-  (`forwardedQuery`), never the raw query string. The psychologist projection
-  of notifications now maps `content`, and anything that is not a page is
-  withheld instead of passed through unprojected.
+  (`forwardedQuery`), never the raw query string. A parameter outside the
+  allowlist is a `400` problem with code `unsupported_parameter`, answered
+  before the service is called and without echoing the name. It used to be
+  dropped silently, so a mistyped filter returned an unfiltered list, and two
+  requests that differed only in an unknown parameter could get different
+  pages because the list changed in between; the authenticated DAST scan read
+  that difference as a boolean SQL injection on `/api/notifications`. The
+  psychologist projection of notifications now maps `content`, and anything
+  that is not a page is withheld instead of passed through unprojected.
 - **UI.** The dashboard asks the server for what each card shows: the next
   eight open sessions, `totalElements` of open sessions in the next seven days,
   the three newest messages, and `totalElements` of `PENDING`/`FAILED`
