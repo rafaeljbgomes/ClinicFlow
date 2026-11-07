@@ -17,14 +17,14 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { apiFetch, swrFetcher } from "@/lib/api-client";
+import { apiFetch, referenceDataOptions, swrFetcher } from "@/lib/api-client";
 import type { DirectoryUser, SystemHealth, UserView } from "@/lib/types";
 
 export default function SystemPage() {
   const [userId, setUserId] = useState("");
   const [inspectedUser, setInspectedUser] = useState<DirectoryUser | null>(null);
   const [lookupError, setLookupError] = useState<string | null>(null);
-  const currentUser = useSWR<UserView>("/api/auth/me", swrFetcher);
+  const currentUser = useSWR<UserView>("/api/auth/me", swrFetcher, referenceDataOptions);
   const { data, error, isLoading, isValidating, mutate } = useSWR<SystemHealth>(
     "/api/system/health",
     swrFetcher,

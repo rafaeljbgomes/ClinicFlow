@@ -54,7 +54,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { apiFetch, isStaleVersion, swrFetcher } from "@/lib/api-client";
+import { apiFetch, isStaleVersion, referenceDataOptions, swrFetcher } from "@/lib/api-client";
 import { formatDateTime, formatEnum } from "@/lib/format";
 import { listPath } from "@/lib/list-path";
 import type { Appointment, AppointmentStatus, AppointmentType, Page, Patient } from "@/lib/types";
@@ -103,7 +103,7 @@ export default function AppointmentsPage() {
     page: pageNumber,
     size: PAGE_SIZE,
   }), swrFetcher, { keepPreviousData: true });
-  const patients = useSWR<Patient[]>("/api/patients", swrFetcher);
+  const patients = useSWR<Patient[]>("/api/patients", swrFetcher, referenceDataOptions);
 
   const patientById = useMemo(
     () => new Map((patients.data ?? []).map((patient) => [patient.id, patient])),

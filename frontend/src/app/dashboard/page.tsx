@@ -25,13 +25,14 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { swrFetcher } from "@/lib/api-client";
+import { referenceDataOptions, swrFetcher } from "@/lib/api-client";
 import {
   ATTENTION_NOTIFICATION_STATUSES,
   deriveFollowUps,
   FOLLOW_UP_LIMIT,
   OPEN_APPOINTMENT_STATUSES,
   practiceMetrics,
+  upcomingQueryStart,
   UPCOMING_WINDOW_MS,
   type FollowUp,
   type PracticeMetric,
@@ -46,13 +47,14 @@ const RECENT_MESSAGE_LIMIT = 3;
 export default function DashboardPage() {
   const [renderedAt] = useState(() => Date.now());
   const [todayText] = useState(() => todayLabel());
-  const patients = useSWR<Patient[]>("/api/patients", swrFetcher);
+  const upcomingFrom = upcomingQueryStart(renderedAt);
+  const patients = useSWR<Patient[]>("/api/patients", swrFetcher, referenceDataOptions);
   // Each paged request asks the server for exactly what one card shows, so nothing scales with history.
   const upcoming = useSWR<Page<Appointment>>(listPath("/api/appointments", {
-    from: new Date(renderedAt).toISOString(), status: OPEN_APPOINTMENT_STATUSES, size: UPCOMING_LIMIT,
+    from: new Date(upcomingFrom).toISOString(), status: OPEN_APPOINTMENT_STATUSES, size: UPCOMING_LIMIT,
   }), swrFetcher);
   const upcomingThisWeek = useSWR<Page<Appointment>>(listPath("/api/appointments", {
-    from: new Date(renderedAt).toISOString(), to: new Date(renderedAt + UPCOMING_WINDOW_MS).toISOString(),
+    from: new Date(upcomingFrom).toISOString(), to: new Date(upcomingFrom + UPCOMING_WINDOW_MS).toISOString(),
     status: OPEN_APPOINTMENT_STATUSES, size: 1,
   }), swrFetcher);
   // One page of intake cases feeds both the follow-ups and the intake count.

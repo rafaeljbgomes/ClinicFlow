@@ -35,5 +35,5 @@ export async function GET() {
     })
   );
 
-  return NextResponse.json<SystemHealth>({ services: results });
+  return NextResponse.json<SystemHealth>({ services: results }, { headers: { "Cache-Control": "no-store" } });
 }

@@ -81,6 +81,11 @@ export async function apiFetch<T>(
 
 export const swrFetcher = <T>(path: string) => apiFetch<T>(path);
 
+// For data that changes rarely and that several screens read: the patient lookup, the practice profile and
+// the signed-in user. Moving between screens reuses a read for a minute. A write's mutate() still refetches
+// at once, and refocusing the tab picks up changes made elsewhere once that minute has passed.
+export const referenceDataOptions = { dedupingInterval: 60_000 };
+
 function readCookie(name: string) {
   if (typeof document === "undefined") {
     return null;
