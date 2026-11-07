@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useDeferredValue, useState } from "react";
 import useSWR from "swr";
 import { MoreHorizontalIcon, PlusIcon, SearchIcon } from "lucide-react";
 import { toast } from "sonner";
 import { ErrorAlert } from "@/components/error-alert";
+import { ListPager } from "@/components/list-pager";
 import { LoadingTable } from "@/components/loading-table";
 import { PatientForm, type PatientFormValues } from "@/components/patient-form";
 import { SectionHeader } from "@/components/section-header";
@@ -53,37 +54,42 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { apiFetch, isStaleVersion, swrFetcher } from "@/lib/api-client";
+import { listPath } from "@/lib/list-path";
 import Link from "next/link";
-import type { Patient, PatientStatus } from "@/lib/types";
+import type { Page, Patient, PatientStatus } from "@/lib/types";
 import { formatDateTime, formatEnum } from "@/lib/format";
 import { toPatientPayload } from "@/components/patient-form";
 
+const PAGE_SIZE = 20;
+
 export default function PatientsPage() {
-  const { data, error, isLoading, mutate } = useSWR<Patient[]>(
-    "/api/patients",
-    swrFetcher
-  );
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<Patient | null>(null);
   const [editConflict, setEditConflict] = useState(false);
   const [archiving, setArchiving] = useState<Patient | null>(null);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<PatientStatus | "ALL">("ALL");
-  const visiblePatients = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
-    return (data ?? []).filter((patient) =>
-      (status === "ALL" || patient.status === status) &&
-      (!normalized || `${patient.fullName} ${patient.preferredName ?? ""} ${patient.email}`.toLowerCase().includes(normalized))
-    );
-  }, [data, query, status]);
+  const [pageNumber, setPageNumber] = useState(0);
+  const deferredQuery = useDeferredValue(query);
+  // The service searches names and email, filters by status and pages the registry by name (ADR-029).
+  const { data, error, isLoading, isValidating, mutate } = useSWR<Page<Patient>>(listPath("/api/patients", {
+    q: deferredQuery.trim() || undefined,
+    status: status === "ALL" ? undefined : status,
+    page: pageNumber,
+    size: PAGE_SIZE,
+  }), swrFetcher, { keepPreviousData: true });
+  const visiblePatients = data?.content ?? [];
 
   async function createPatient(values: PatientFormValues) {
-    await apiFetch<Patient>("/api/patients", {
+    const created = await apiFetch<Patient>("/api/patients", {
       method: "POST",
       body: toPatientPayload(values),
     });
     toast.success("Patient created");
     setCreateOpen(false);
+    // The registry pages by name, so the new patient may sort onto a later page; search for it instead.
+    setQuery(created.fullName);
+    setPageNumber(0);
     await mutate();
   }
 
@@ -107,9 +113,11 @@ export default function PatientsPage() {
   }
 
   async function reloadEditedPatient() {
-    const latest = (await mutate())?.find((patient) => patient.id === editing?.id);
-    setEditing(latest ?? null);
+    if (!editing) return;
+    const latest = await apiFetch<Patient>(`/api/patients/${editing.id}`);
+    setEditing(latest);
     setEditConflict(false);
+    await mutate();
   }
 
   function closeEditor() {
@@ -159,7 +167,7 @@ export default function PatientsPage() {
       />
 
       {error ? <ErrorAlert message={error.message} /> : null}
-      {isLoading ? (
+      {isLoading && !data ? (
         <LoadingTable />
       ) : (
         <Card>
@@ -173,10 +181,10 @@ export default function PatientsPage() {
             <div className="mb-5 grid gap-3 sm:grid-cols-[minmax(0,1fr)_12rem]">
               <label className="relative">
                 <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search patients" className="pl-9" />
+                <Input value={query} onChange={(event) => { setQuery(event.target.value); setPageNumber(0); }} placeholder="Search patients" className="pl-9" />
                 <span className="sr-only">Search patients</span>
               </label>
-              <Select value={status} onValueChange={(value) => setStatus(value as PatientStatus | "ALL")}>
+              <Select value={status} onValueChange={(value) => { setStatus(value as PatientStatus | "ALL"); setPageNumber(0); }}>
                 <SelectTrigger aria-label="Filter patients by status" className="w-full"><SelectValue>{status === "ALL" ? "All statuses" : formatEnum(status)}</SelectValue></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="ALL">All statuses</SelectItem>
@@ -323,6 +331,7 @@ export default function PatientsPage() {
               </TableBody>
             </Table>
             </div>
+            <ListPager page={data?.page} noun="patients" onPageChange={setPageNumber} disabled={isValidating} />
           </CardContent>
         </Card>
       )}

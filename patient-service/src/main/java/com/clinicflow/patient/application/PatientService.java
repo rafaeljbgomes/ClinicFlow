@@ -10,6 +10,7 @@ import com.clinicflow.patient.application.ports.PatientEventPublisher;
 import com.clinicflow.patient.application.ports.PatientRepository;
 import com.clinicflow.patient.application.queries.GetPatientQuery;
 import com.clinicflow.patient.application.queries.ListPatientsQuery;
+import com.clinicflow.patient.application.results.PageResult;
 import com.clinicflow.patient.application.results.PatientResult;
 import com.clinicflow.patient.domain.Patient;
 import com.clinicflow.patient.domain.PatientId;
@@ -22,7 +23,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
-import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -53,9 +53,8 @@ public class PatientService {
     }
 
     @Transactional(readOnly = true)
-    public List<PatientResult> list(ListPatientsQuery query) {
-        return patientRepository.findByPsychologistId(query.psychologistId()).stream()
-                .map(mapper::toResult).toList();
+    public PageResult<PatientResult> list(ListPatientsQuery query) {
+        return patientRepository.findPage(query).map(mapper::toResult);
     }
 
     @Transactional(readOnly = true)

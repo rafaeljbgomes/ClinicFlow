@@ -28,16 +28,19 @@ import { Separator } from "@/components/ui/separator";
 import { swrFetcher } from "@/lib/api-client";
 import {
   ATTENTION_NOTIFICATION_STATUSES,
+  CONSENT_FOLLOW_UP_STATUSES,
   deriveFollowUps,
   FOLLOW_UP_LIMIT,
   OPEN_APPOINTMENT_STATUSES,
   practiceMetrics,
+  startOfMonth,
   UPCOMING_WINDOW_MS,
   type FollowUp,
   type PracticeMetric,
 } from "@/lib/dashboard-insights";
 import { formatDateTime, formatEnum } from "@/lib/format";
 import { listPath } from "@/lib/list-path";
+import { PATIENT_COUNT_PATH, usePatientLookup } from "@/lib/patient-lookup";
 import type { Appointment, ClinicalCase, Notification, Page, Patient } from "@/lib/types";
 
 const UPCOMING_LIMIT = 8;
@@ -46,7 +49,14 @@ const RECENT_MESSAGE_LIMIT = 3;
 export default function DashboardPage() {
   const [renderedAt] = useState(() => Date.now());
   const [todayText] = useState(() => todayLabel());
-  const patients = useSWR<Patient[]>("/api/patients", swrFetcher);
+  // Patients are paged as well (ADR-029): two one-row pages count them, and one page lists consent follow-ups.
+  const patientTotal = useSWR<Page<Patient>>(PATIENT_COUNT_PATH, swrFetcher);
+  const newPatients = useSWR<Page<Patient>>(listPath("/api/patients", {
+    createdFrom: startOfMonth(renderedAt), size: 1,
+  }), swrFetcher);
+  const consentPatients = useSWR<Page<Patient>>(listPath("/api/patients", {
+    consent: CONSENT_FOLLOW_UP_STATUSES, size: FOLLOW_UP_LIMIT,
+  }), swrFetcher);
   // Each paged request asks the server for exactly what one card shows, so nothing scales with history.
   const upcoming = useSWR<Page<Appointment>>(listPath("/api/appointments", {
     from: new Date(renderedAt).toISOString(), status: OPEN_APPOINTMENT_STATUSES, size: UPCOMING_LIMIT,
@@ -64,29 +74,30 @@ export default function DashboardPage() {
   const attentionMessages = useSWR<Page<Notification>>(listPath("/api/notifications", {
     status: ATTENTION_NOTIFICATION_STATUSES, size: 1,
   }), swrFetcher);
-  const requests = [patients, upcoming, upcomingThisWeek, intakeCases, activeCases, recentMessages, attentionMessages];
+  const requests = [patientTotal, newPatients, consentPatients, upcoming, upcomingThisWeek, intakeCases, activeCases, recentMessages, attentionMessages];
 
   const isLoading = requests.some((request) => request.isLoading);
   const error = requests.find((request) => request.error)?.error;
-  const patientById = useMemo(
-    () => new Map((patients.data ?? []).map((patient) => [patient.id, patient])),
-    [patients.data]
-  );
   const upcomingAppointments = upcoming.data?.content ?? [];
+  // Names for the sessions and intake cases on the cards only.
+  const patients = usePatientLookup([
+    ...upcomingAppointments.map((appointment) => appointment.patientId),
+    ...(intakeCases.data?.content ?? []).map((clinicalCase) => clinicalCase.patientId),
+  ]);
+  const patientById = patients.byId;
   const followUps = useMemo(
-    () => deriveFollowUps(patients.data ?? [], intakeCases.data?.content ?? []),
-    [intakeCases.data, patients.data]
+    () => deriveFollowUps(consentPatients.data?.content ?? [], intakeCases.data?.content ?? [], patientById),
+    [consentPatients.data, intakeCases.data, patientById]
   );
   const metrics = useMemo(
     () => practiceMetrics(
-      patients.data ?? [],
+      { total: patientTotal.data?.page.totalElements ?? 0, newThisMonth: newPatients.data?.page.totalElements ?? 0 },
       upcomingThisWeek.data?.page.totalElements ?? 0,
       activeCases.data?.page.totalElements ?? 0,
       intakeCases.data?.page.totalElements ?? 0,
-      attentionMessages.data?.page.totalElements ?? 0,
-      renderedAt
+      attentionMessages.data?.page.totalElements ?? 0
     ),
-    [activeCases.data, attentionMessages.data, intakeCases.data, patients.data, renderedAt, upcomingThisWeek.data]
+    [activeCases.data, attentionMessages.data, intakeCases.data, newPatients.data, patientTotal.data, upcomingThisWeek.data]
   );
 
   if (isLoading) return <LoadingTable />;

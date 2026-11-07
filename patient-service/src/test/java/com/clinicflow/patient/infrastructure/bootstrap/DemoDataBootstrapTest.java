@@ -1,12 +1,13 @@
 package com.clinicflow.patient.infrastructure.bootstrap;
 
 import com.clinicflow.patient.application.ports.PatientRepository;
+import com.clinicflow.patient.application.queries.ListPatientsQuery;
+import com.clinicflow.patient.application.results.PageResult;
 import com.clinicflow.patient.domain.ConsentStatus;
 import com.clinicflow.patient.domain.ContactPreference;
 import com.clinicflow.patient.domain.Patient;
 import com.clinicflow.patient.domain.PatientId;
 import com.clinicflow.patient.domain.PatientStatus;
-import com.clinicflow.patient.domain.PsychologistId;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.core.env.MapPropertySource;
@@ -145,10 +146,11 @@ class DemoDataBootstrapTest {
         }
 
         @Override
-        public List<Patient> findByPsychologistId(PsychologistId psychologistId) {
-            return records.values().stream()
-                    .filter(patient -> patient.psychologistId().equals(psychologistId))
+        public PageResult<Patient> findPage(ListPatientsQuery query) {
+            List<Patient> owned = records.values().stream()
+                    .filter(patient -> patient.psychologistId().equals(query.psychologistId()))
                     .toList();
+            return new PageResult<>(owned, query.page().number(), query.page().size(), owned.size());
         }
 
         Map<PatientId, Patient> records() {

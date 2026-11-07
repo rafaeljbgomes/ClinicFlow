@@ -1,6 +1,9 @@
 package com.clinicflow.patient.adapters.outbound.persistence;
 
 import com.clinicflow.patient.application.exceptions.StaleResourceVersionException;
+import com.clinicflow.patient.application.queries.ListPatientsQuery;
+import com.clinicflow.patient.application.queries.PageQuery;
+import com.clinicflow.patient.application.results.PageResult;
 import com.clinicflow.patient.domain.ConsentStatus;
 import com.clinicflow.patient.domain.ContactPreference;
 import com.clinicflow.patient.domain.EmailAddress;
@@ -9,6 +12,7 @@ import com.clinicflow.patient.domain.Patient;
 import com.clinicflow.patient.domain.PatientId;
 import com.clinicflow.patient.domain.PatientStatus;
 import com.clinicflow.patient.domain.PhoneNumber;
+import com.clinicflow.patient.domain.PreferredName;
 import com.clinicflow.patient.domain.PsychologistId;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,7 +28,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.time.Instant;
 import java.time.OffsetDateTime;
-import java.util.List;
+import java.util.Set;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -39,6 +43,9 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 @Import({JpaPatientRepository.class, PatientPersistenceMapperImpl.class})
 @Testcontainers
 class JpaPatientRepositoryIT {
+    private static final Instant JUNE_1 = Instant.parse("2026-06-01T10:00:00Z");
+    private static final Instant JUNE_10 = Instant.parse("2026-06-10T10:00:00Z");
+
     @Container
     @ServiceConnection(name = "postgres")
     static final PostgreSQLContainer POSTGRES =
@@ -67,7 +74,7 @@ class JpaPatientRepositoryIT {
     }
 
     @Test
-    void findByPsychologistIdReturnsOnlyOwnedPatients() {
+    void findPageReturnsOnlyOwnedPatients() {
         // Arrange
         PsychologistId owner = new PsychologistId(UUID.randomUUID());
         Patient owned = patient(UUID.randomUUID(), owner, "owned@example.com");
@@ -75,10 +82,126 @@ class JpaPatientRepositoryIT {
         persist(owned, other);
 
         // Act
-        List<Patient> found = repository.findByPsychologistId(owner);
+        PageResult<Patient> found = repository.findPage(all(owner, new PageQuery(0, 20)));
 
         // Assert
-        assertThat(found).containsExactly(owned);
+        assertThat(found.items()).containsExactly(owned);
+        assertThat(found.totalElements()).isEqualTo(1);
+    }
+
+    @Test
+    void findPageOrdersByNameIgnoringCaseAndPagesThrough() {
+        // Arrange
+        PsychologistId owner = new PsychologistId(UUID.randomUUID());
+        Patient carla = named(owner, "carla Sousa", null, "carla@example.com", ConsentStatus.GRANTED, JUNE_1);
+        Patient ana = named(owner, "Ana Martins", null, "ana@example.com", ConsentStatus.GRANTED, JUNE_1);
+        Patient bruno = named(owner, "Bruno Costa", null, "bruno@example.com", ConsentStatus.GRANTED, JUNE_1);
+        persist(carla, ana, bruno);
+
+        // Act
+        PageResult<Patient> first = repository.findPage(all(owner, new PageQuery(0, 2)));
+        PageResult<Patient> second = repository.findPage(all(owner, new PageQuery(1, 2)));
+
+        // Assert
+        assertThat(first.items()).extracting(Patient::id).containsExactly(ana.id(), bruno.id());
+        assertThat(second.items()).extracting(Patient::id).containsExactly(carla.id());
+        assertThat(first.totalElements()).isEqualTo(3);
+        assertThat(first.totalPages()).isEqualTo(2);
+    }
+
+    @Test
+    void findPageBreaksNameTiesByIdSoPagesNeverOverlap() {
+        // Arrange
+        PsychologistId owner = new PsychologistId(UUID.randomUUID());
+        Patient higher = patient(UUID.fromString("00000000-0000-4000-8000-000000000002"), owner, "b@example.com");
+        Patient lower = patient(UUID.fromString("00000000-0000-4000-8000-000000000001"), owner, "a@example.com");
+        persist(higher, lower);
+
+        // Act
+        PageResult<Patient> first = repository.findPage(all(owner, new PageQuery(0, 1)));
+        PageResult<Patient> second = repository.findPage(all(owner, new PageQuery(1, 1)));
+
+        // Assert
+        assertThat(first.items()).extracting(Patient::id).containsExactly(lower.id());
+        assertThat(second.items()).extracting(Patient::id).containsExactly(higher.id());
+    }
+
+    @Test
+    void findPageSearchesNamesAndEmailIgnoringCase() {
+        // Arrange
+        PsychologistId owner = new PsychologistId(UUID.randomUUID());
+        Patient byName = named(owner, "Ana Martins", null, "first@example.com", ConsentStatus.GRANTED, JUNE_1);
+        Patient byPreferred = named(owner, "Joana Reis", "MARTINHA", "second@example.com", ConsentStatus.GRANTED,
+                JUNE_1);
+        Patient byEmail = named(owner, "Rui Lopes", null, "rui.martins@example.com", ConsentStatus.GRANTED, JUNE_1);
+        Patient unrelated = named(owner, "Bruno Costa", null, "bruno@example.com", ConsentStatus.GRANTED, JUNE_1);
+        persist(byName, byPreferred, byEmail, unrelated);
+
+        // Act
+        PageResult<Patient> found = repository.findPage(search(owner, "mArTi"));
+
+        // Assert
+        assertThat(found.items()).extracting(Patient::id)
+                .containsExactly(byName.id(), byPreferred.id(), byEmail.id());
+    }
+
+    @Test
+    void findPageMatchesLikeWildcardsInTheSearchLiterally() {
+        // Arrange
+        PsychologistId owner = new PsychologistId(UUID.randomUUID());
+        Patient percent = named(owner, "Ana 100% Martins", null, "percent@example.com", ConsentStatus.GRANTED, JUNE_1);
+        Patient underscore = named(owner, "Ana_Martins", null, "underscore@example.com", ConsentStatus.GRANTED, JUNE_1);
+        Patient plain = named(owner, "Ana Martins", null, "plain@example.com", ConsentStatus.GRANTED, JUNE_1);
+        persist(percent, underscore, plain);
+
+        // Act
+        PageResult<Patient> byPercent = repository.findPage(search(owner, "0%"));
+        PageResult<Patient> byUnderscore = repository.findPage(search(owner, "a_m"));
+        PageResult<Patient> byBackslash = repository.findPage(search(owner, "\\"));
+
+        // Assert
+        assertThat(byPercent.items()).extracting(Patient::id).containsExactly(percent.id());
+        assertThat(byUnderscore.items()).extracting(Patient::id).containsExactly(underscore.id());
+        assertThat(byBackslash.items()).isEmpty();
+    }
+
+    @Test
+    void findPageFiltersByStatusConsentAndCreationTime() {
+        // Arrange
+        PsychologistId owner = new PsychologistId(UUID.randomUUID());
+        Patient match = named(owner, "Ana Match", null, "match@example.com", ConsentStatus.PENDING, JUNE_10);
+        Patient tooEarly = named(owner, "Bruno Early", null, "early@example.com", ConsentStatus.PENDING, JUNE_1);
+        Patient granted = named(owner, "Carla Granted", null, "granted@example.com", ConsentStatus.GRANTED, JUNE_10);
+        Patient archived = named(owner, "Duarte Archived", null, "archived@example.com", ConsentStatus.PENDING,
+                JUNE_10);
+        archived.changeStatus(PatientStatus.ARCHIVED, JUNE_10);
+        persist(match, tooEarly, granted, archived);
+        var query = new ListPatientsQuery(owner, null, Set.of(PatientStatus.ACTIVE), Set.of(ConsentStatus.PENDING),
+                JUNE_10, null, new PageQuery(0, 20));
+
+        // Act
+        PageResult<Patient> found = repository.findPage(query);
+
+        // Assert
+        assertThat(found.items()).extracting(Patient::id).containsExactly(match.id());
+    }
+
+    @Test
+    void findPageLooksUpOwnedPatientsById() {
+        // Arrange
+        PsychologistId owner = new PsychologistId(UUID.randomUUID());
+        Patient wanted = patient(UUID.randomUUID(), owner, "wanted@example.com");
+        Patient unwanted = patient(UUID.randomUUID(), owner, "unwanted@example.com");
+        Patient foreign = patient(UUID.randomUUID(), new PsychologistId(UUID.randomUUID()), "foreign@example.com");
+        persist(wanted, unwanted, foreign);
+        var query = new ListPatientsQuery(owner, null, null, null, null, Set.of(wanted.id(), foreign.id()),
+                new PageQuery(0, 20));
+
+        // Act
+        PageResult<Patient> found = repository.findPage(query);
+
+        // Assert
+        assertThat(found.items()).extracting(Patient::id).containsExactly(wanted.id());
     }
 
     @Test
@@ -156,6 +279,21 @@ class JpaPatientRepositoryIT {
         return Patient.create(new PatientId(id), owner, new EmailAddress(email),
                 new FullName("Patient Name"), null, null, new PhoneNumber("+351912345678"),
                 null, ContactPreference.EMAIL, ConsentStatus.GRANTED,
-                Instant.parse("2026-06-01T10:00:00Z"));
+                JUNE_1);
+    }
+
+    private Patient named(PsychologistId owner, String fullName, String preferredName, String email,
+                          ConsentStatus consent, Instant createdAt) {
+        return Patient.create(new PatientId(UUID.randomUUID()), owner, new EmailAddress(email),
+                new FullName(fullName), preferredName == null ? null : new PreferredName(preferredName), null,
+                null, null, ContactPreference.EMAIL, consent, createdAt);
+    }
+
+    private static ListPatientsQuery all(PsychologistId owner, PageQuery page) {
+        return new ListPatientsQuery(owner, null, null, null, null, null, page);
+    }
+
+    private static ListPatientsQuery search(PsychologistId owner, String search) {
+        return new ListPatientsQuery(owner, search, null, null, null, null, new PageQuery(0, 20));
     }
 }

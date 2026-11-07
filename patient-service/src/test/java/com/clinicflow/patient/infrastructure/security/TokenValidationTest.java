@@ -4,8 +4,11 @@ import com.clinicflow.patient.adapters.inbound.rest.PatientController;
 import com.clinicflow.patient.adapters.inbound.rest.PatientRestMapperImpl;
 import com.clinicflow.patient.application.PatientService;
 import com.clinicflow.patient.application.queries.ListPatientsQuery;
+import com.clinicflow.patient.application.queries.PageQuery;
+import com.clinicflow.patient.application.results.PageResult;
 import com.clinicflow.patient.domain.PsychologistId;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -23,7 +26,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -42,6 +47,11 @@ class TokenValidationTest {
     @DynamicPropertySource
     static void realmKeys(DynamicPropertyRegistry registry) {
         registry.add("spring.security.oauth2.resourceserver.jwt.jwk-set-uri", KEYCLOAK::jwksUri);
+    }
+
+    @BeforeEach
+    void answerWithAnEmptyPage() {
+        when(patientService.list(any())).thenReturn(new PageResult<>(List.of(), 0, PageQuery.DEFAULT_SIZE, 0));
     }
 
     @AfterAll
@@ -70,7 +80,8 @@ class TokenValidationTest {
         listPatients(token);
 
         // Assert
-        verify(patientService).list(new ListPatientsQuery(new PsychologistId(CALLER_ID)));
+        verify(patientService).list(new ListPatientsQuery(new PsychologistId(CALLER_ID), null, null, null, null, null,
+                new PageQuery(0, PageQuery.DEFAULT_SIZE)));
     }
 
     @Test

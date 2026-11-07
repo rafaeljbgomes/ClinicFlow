@@ -10,6 +10,8 @@ import com.clinicflow.patient.application.ports.PatientEventPublisher;
 import com.clinicflow.patient.application.ports.PatientRepository;
 import com.clinicflow.patient.application.queries.GetPatientQuery;
 import com.clinicflow.patient.application.queries.ListPatientsQuery;
+import com.clinicflow.patient.application.queries.PageQuery;
+import com.clinicflow.patient.application.results.PageResult;
 import com.clinicflow.patient.domain.BirthDate;
 import com.clinicflow.patient.domain.ConsentStatus;
 import com.clinicflow.patient.domain.ContactPreference;
@@ -150,18 +152,22 @@ class PatientServiceTest {
     }
 
     @Test
-    void listsOnlyRepositoryResultsForPsychologist() {
+    void listsTheRepositoryPageForPsychologist() {
         // Arrange
-        when(repository.findByPsychologistId(OWNER)).thenReturn(List.of(patient()));
+        var query = new ListPatientsQuery(OWNER, null, null, null, null, null, new PageQuery(1, 20));
+        when(repository.findPage(query)).thenReturn(new PageResult<>(List.of(patient()), 1, 20, 21));
 
         // Act
-        var results = service.list(new ListPatientsQuery(OWNER));
+        var results = service.list(query);
 
         // Assert
-        assertThat(results).singleElement().satisfies(result -> {
+        assertThat(results.items()).singleElement().satisfies(result -> {
             assertThat(result.id()).isEqualTo(PATIENT_ID.value());
             assertThat(result.psychologistId()).isEqualTo(OWNER.value());
         });
+        assertThat(results.number()).isEqualTo(1);
+        assertThat(results.totalElements()).isEqualTo(21);
+        assertThat(results.totalPages()).isEqualTo(2);
     }
 
     @Test

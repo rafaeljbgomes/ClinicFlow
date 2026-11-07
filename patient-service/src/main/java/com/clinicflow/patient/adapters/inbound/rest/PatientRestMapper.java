@@ -10,20 +10,26 @@ import com.clinicflow.patient.application.commands.UpdatePatientCommand;
 import com.clinicflow.patient.application.mapping.MapperConfiguration;
 import com.clinicflow.patient.application.queries.GetPatientQuery;
 import com.clinicflow.patient.application.queries.ListPatientsQuery;
+import com.clinicflow.patient.application.queries.PageQuery;
 import com.clinicflow.patient.application.results.PatientResult;
 import com.clinicflow.patient.domain.BirthDate;
+import com.clinicflow.patient.domain.ConsentStatus;
 import com.clinicflow.patient.domain.ContactPreference;
 import com.clinicflow.patient.domain.EmailAddress;
 import com.clinicflow.patient.domain.EmergencyContact;
 import com.clinicflow.patient.domain.FullName;
 import com.clinicflow.patient.domain.PatientId;
+import com.clinicflow.patient.domain.PatientStatus;
 import com.clinicflow.patient.domain.PhoneNumber;
 import com.clinicflow.patient.domain.PreferredName;
 import com.clinicflow.patient.domain.PsychologistId;
 import org.mapstruct.Mapper;
 
+import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Mapper(config = MapperConfiguration.class)
 public abstract class PatientRestMapper {
@@ -69,8 +75,12 @@ public abstract class PatientRestMapper {
         return new GetPatientQuery(new PsychologistId(psychologistId), new PatientId(patientId));
     }
 
-    public ListPatientsQuery toListQuery(UUID psychologistId) {
-        return new ListPatientsQuery(new PsychologistId(psychologistId));
+    public ListPatientsQuery toListQuery(UUID psychologistId, String search, Set<PatientStatus> statuses,
+                                         Set<ConsentStatus> consentStatuses, Instant createdFrom, Set<UUID> ids,
+                                         int page, int size) {
+        return new ListPatientsQuery(new PsychologistId(psychologistId), search, statuses, consentStatuses,
+                createdFrom, ids == null ? null : ids.stream().map(PatientId::new).collect(Collectors.toSet()),
+                new PageQuery(page, size));
     }
 
     public abstract PatientResponse toResponse(PatientResult result);

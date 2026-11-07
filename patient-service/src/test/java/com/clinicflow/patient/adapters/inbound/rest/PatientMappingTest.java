@@ -10,6 +10,7 @@ import com.clinicflow.patient.application.commands.UpdatePatientCommand;
 import com.clinicflow.patient.application.mapping.PatientApplicationMapper;
 import com.clinicflow.patient.application.queries.GetPatientQuery;
 import com.clinicflow.patient.application.queries.ListPatientsQuery;
+import com.clinicflow.patient.application.queries.PageQuery;
 import com.clinicflow.patient.application.results.PatientResult;
 import com.clinicflow.patient.domain.BirthDate;
 import com.clinicflow.patient.domain.ConsentStatus;
@@ -28,6 +29,7 @@ import org.mapstruct.factory.Mappers;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -105,10 +107,25 @@ class PatientMappingTest {
     @Test
     void listQueryTargetsTheAuthenticatedPsychologist() {
         // Act
-        ListPatientsQuery query = restMapper.toListQuery(PSYCHOLOGIST_ID);
+        ListPatientsQuery query = restMapper.toListQuery(PSYCHOLOGIST_ID, null, null, null, null, null, 0, 20);
 
         // Assert
         assertThat(query.psychologistId()).isEqualTo(new PsychologistId(PSYCHOLOGIST_ID));
+    }
+
+    @Test
+    void listQueryCarriesEveryFilterAndThePage() {
+        // Arrange
+        Instant createdFrom = Instant.parse("2026-11-01T00:00:00Z");
+
+        // Act
+        ListPatientsQuery query = restMapper.toListQuery(PSYCHOLOGIST_ID, " ana ", Set.of(PatientStatus.ACTIVE),
+                Set.of(ConsentStatus.PENDING), createdFrom, Set.of(PATIENT_ID), 2, 50);
+
+        // Assert
+        assertThat(query).isEqualTo(new ListPatientsQuery(new PsychologistId(PSYCHOLOGIST_ID), "ana",
+                Set.of(PatientStatus.ACTIVE), Set.of(ConsentStatus.PENDING), createdFrom,
+                Set.of(new PatientId(PATIENT_ID)), new PageQuery(2, 50)));
     }
 
     @Test

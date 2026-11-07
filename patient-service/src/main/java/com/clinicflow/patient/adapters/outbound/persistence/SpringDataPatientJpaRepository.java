@@ -1,10 +1,10 @@
 package com.clinicflow.patient.adapters.outbound.persistence;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
-import java.util.List;
 import java.util.UUID;
 
-interface SpringDataPatientJpaRepository extends JpaRepository<JpaPatientEntity, UUID> {
-    List<JpaPatientEntity> findByPsychologistId(UUID psychologistId);
+interface SpringDataPatientJpaRepository extends JpaRepository<JpaPatientEntity, UUID>,
+        JpaSpecificationExecutor<JpaPatientEntity> {
 }

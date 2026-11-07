@@ -11,6 +11,7 @@ vi.mock("@/lib/server/jwt", () => ({ verifyAccessToken: verifyAccessTokenMock })
 
 import { GET as listCases } from "@/app/api/clinical-cases/route";
 import { GET as listSessionRecords } from "@/app/api/clinical-cases/[id]/session-records/route";
+import { GET as listPatients } from "@/app/api/patients/route";
 
 const caseId = "6f1c1a3e-56d4-4f0e-9d37-4d1f3a2b9c10";
 const patientId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -55,6 +56,35 @@ describe("clinical list routes", () => {
     expect(fetchMock.mock.calls[0][0]).toBe(
       `http://localhost:8085/clinical-cases?patientId=${patientId}&status=INTAKE&status=ACTIVE&page=1&size=5`
     );
+  });
+
+  it("forwards the patient search, filters, lookup ids and paging parameters", async () => {
+    // Arrange
+    const request = new NextRequest(
+      `http://localhost/api/patients?q=ana&status=ACTIVE&consent=PENDING&consent=REVOKED` +
+      `&createdFrom=2026-11-01T00%3A00%3A00.000Z&id=${patientId}&page=1&size=5`
+    );
+
+    // Act
+    await listPatients(request);
+
+    // Assert
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      `http://localhost:8082/patients?q=ana&status=ACTIVE&consent=PENDING&consent=REVOKED` +
+      `&createdFrom=2026-11-01T00%3A00%3A00.000Z&id=${patientId}&page=1&size=5`
+    );
+  });
+
+  it("rejects a patient list request with a parameter the route does not document", async () => {
+    // Arrange
+    const request = new NextRequest("http://localhost/api/patients?q=ana&psychologistId=y");
+
+    // Act
+    const response = await listPatients(request);
+
+    // Assert
+    expect(response.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("forwards the paging parameters for a case's session records", async () => {
