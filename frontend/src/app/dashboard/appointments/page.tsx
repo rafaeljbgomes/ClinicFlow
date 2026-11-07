@@ -55,7 +55,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { apiFetch, isStaleVersion, swrFetcher } from "@/lib/api-client";
+import { apiFetch, isStaleVersion, referenceDataOptions, swrFetcher } from "@/lib/api-client";
 import { formatDateTime, formatEnum } from "@/lib/format";
 import { listPath } from "@/lib/list-path";
 import { PATIENT_COUNT_PATH, usePatientLookup } from "@/lib/patient-lookup";
@@ -108,7 +108,7 @@ export default function AppointmentsPage() {
   const visibleAppointments = appointments.data?.content ?? [];
   // Names for the sessions on this page only; the patient list itself is paged (ADR-029).
   const patients = usePatientLookup(visibleAppointments.map((appointment) => appointment.patientId));
-  const patientCount = useSWR<Page<Patient>>(PATIENT_COUNT_PATH, swrFetcher);
+  const patientCount = useSWR<Page<Patient>>(PATIENT_COUNT_PATH, swrFetcher, referenceDataOptions);
 
   async function schedule(values: ScheduleValues) {
     await apiFetch<Appointment>("/api/appointments", {

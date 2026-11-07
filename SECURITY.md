@@ -80,6 +80,9 @@ The following properties must hold for supported behavior:
   requests require the CSRF protection contract.
 - Backend errors and BFF responses do not expose stack traces, credentials,
   full tokens, or sensitive clinical payloads.
+- BFF API responses are sent with `Cache-Control: no-store`, and server-side
+  caches never hold one user's response for another. The browser's only copy is
+  SWR's in-memory cache, which a full page load clears.
 - Clinical notes and care-plan content are not published through RabbitMQ event
   payloads.
 - Each service owns its persistence boundary; cross-service access uses the

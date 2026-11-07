@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import useSWR from "swr";
-import { swrFetcher } from "@/lib/api-client";
+import { referenceDataOptions, swrFetcher } from "@/lib/api-client";
 import { listPath } from "@/lib/list-path";
 import type { Page, Patient } from "@/lib/types";
 
@@ -31,7 +31,8 @@ async function fetchPatients(paths: readonly string[]): Promise<Patient[]> {
 export function usePatientLookup(ids: readonly (string | null | undefined)[]) {
   const paths = patientLookupPaths(ids);
   const key = paths.length ? ["patient-lookup", ...paths] : null;
-  const lookup = useSWR<Patient[]>(key, ([, ...urls]: string[]) => fetchPatients(urls));
+  // Names change rarely, so moving between screens reuses a lookup for a minute (referenceDataOptions).
+  const lookup = useSWR<Patient[]>(key, ([, ...urls]: string[]) => fetchPatients(urls), referenceDataOptions);
   const byId = useMemo(
     () => new Map((lookup.data ?? []).map((patient) => [patient.id, patient])),
     [lookup.data]

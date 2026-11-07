@@ -26,7 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { swrFetcher } from "@/lib/api-client";
+import { referenceDataOptions, swrFetcher } from "@/lib/api-client";
 import { formatDateTime, formatEnum } from "@/lib/format";
 import { listPath } from "@/lib/list-path";
 import type { Notification, Page, UserView } from "@/lib/types";
@@ -35,7 +35,7 @@ const PAGE_SIZE = 20;
 
 export default function NotificationsPage() {
   const [selected, setSelected] = useState<Notification | null>(null);
-  const currentUser = useSWR<UserView>("/api/auth/me", swrFetcher);
+  const currentUser = useSWR<UserView>("/api/auth/me", swrFetcher, referenceDataOptions);
   const [pageNumber, setPageNumber] = useState(0);
   const notifications = useSWR<Page<Notification>>(
     listPath("/api/notifications", { page: pageNumber, size: PAGE_SIZE }),

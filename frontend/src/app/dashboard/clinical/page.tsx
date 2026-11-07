@@ -80,7 +80,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ApiClientError, apiFetch, isStaleVersion, swrFetcher } from "@/lib/api-client";
+import { ApiClientError, apiFetch, isStaleVersion, referenceDataOptions, swrFetcher } from "@/lib/api-client";
 import { formatDateTime, formatEnum } from "@/lib/format";
 import { listPath } from "@/lib/list-path";
 import { PATIENT_COUNT_PATH, usePatientLookup } from "@/lib/patient-lookup";
@@ -109,9 +109,9 @@ const SESSION_PAGE_SIZE = 20;
 export default function ClinicalPage() {
   // The switcher offers the most recently opened cases; older ones are reached through the case browser.
   const cases = useSWR<Page<ClinicalCase>>(listPath("/api/clinical-cases", { size: CASE_PAGE_SIZE }), swrFetcher);
-  const patientCount = useSWR<Page<Patient>>(PATIENT_COUNT_PATH, swrFetcher);
-  const profile = useSWR<PracticeProfile>("/api/practice-profile", swrFetcher);
-  const currentUser = useSWR<UserView>("/api/auth/me", swrFetcher);
+  const patientCount = useSWR<Page<Patient>>(PATIENT_COUNT_PATH, swrFetcher, referenceDataOptions);
+  const profile = useSWR<PracticeProfile>("/api/practice-profile", swrFetcher, referenceDataOptions);
+  const currentUser = useSWR<UserView>("/api/auth/me", swrFetcher, referenceDataOptions);
   const [createCaseOpen, setCreateCaseOpen] = useState(false);
   const [carePlanOpen, setCarePlanOpen] = useState(false);
   // The plan the open form was built from; null when the case has no plan yet.
