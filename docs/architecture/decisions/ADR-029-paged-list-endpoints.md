@@ -1,8 +1,8 @@
 # ADR-029: Paged list endpoints
 
-Status: implemented for appointments, notifications, clinical cases and session
-records; patients to follow. Date: 2026-10-23, extended to clinical-service on
-2026-10-28.
+Status: implemented for appointments, notifications, clinical cases, session
+records and patients. Date: 2026-10-23, extended to clinical-service on
+2026-10-28 and to patient-service on 2026-11-07.
 
 ## Context
 
@@ -58,12 +58,21 @@ the server.
   | `GET /appointments` | `from`, `to` (ISO-8601 instants, half-open `[from, to)`), `status` (repeatable) | `scheduledAt` then `id`, `order=ASC` (default) or `DESC` | new `(psychologist_id, scheduled_at, id)`, which replaces `(psychologist_id)` |
   | `GET /clinical-cases` | `patientId`, `status` (repeatable) | `openedAt` desc, `id` desc | new `(psychologist_id, opened_at DESC, id DESC)`, which replaces `(psychologist_id)` |
   | `GET /clinical-cases/{id}/session-records` | none | `sessionDate` desc, `id` desc | new `(clinical_case_id, session_date DESC, id DESC)`, which replaces `(clinical_case_id)` |
+  | `GET /patients` | `q`, `status` (repeatable), `consent` (repeatable), `createdFrom` (ISO-8601 instant, inclusive), `id` (repeatable, at most 100) | `fullName` ignoring case, then `id` | new `(psychologist_id, lower(full_name), id)`, which replaces `(psychologist_id)` |
 
   `from` must be before `to`. `order=DESC` serves views of past sessions,
   which read latest first. Clinical cases and session records read latest
   first, which is how the clinical workspace already sorted them in the
   browser. The session-record list still checks that the caller owns the case
   before it reads a page, so a foreign case id stays a `404`.
+- **Patient search and lookup.** `q` matches the full name, the preferred name
+  or the email, case-insensitively and anywhere in the value. LIKE wildcards
+  in it are matched literally, and it is at most 100 characters. It is not
+  index-backed; a practice has hundreds of patients, so a scan of one
+  psychologist's rows is fine, and a trigram index can follow if it ever is
+  not. `id` looks up specific patients, so the screens that show patient names
+  next to appointments or cases ask only for the patients on screen. Ids that
+  are not the caller's patients are simply absent, as with every other filter.
 - **Layers.** Each service has its own `PageQuery`, `PageResult` and
   `PageResponse`, in keeping with ADR-001's no-shared-library rule. Spring
   Data's `Pageable`, `Page` and `Specification` stay inside the persistence
@@ -88,7 +97,14 @@ the server.
   `status=INTAKE` pages. In the clinical workspace, the case switcher offers
   the 20 most recently opened cases and the total, the case browser filters
   by status on the server and pages through every case, and a case's session
-  records page with Previous/Next.
+  records page with Previous/Next. The patient registry searches, filters by
+  status and pages on the server. The appointment and case forms pick a
+  patient from a server-side search that offers 20 matches at a time. The
+  calendar, the clinical workspace and the dashboard look up names with `id`
+  for the rows on screen. The dashboard's patient metric counts with
+  `totalElements` (all patients, and `createdFrom` the start of the month),
+  and its consent follow-ups come from a `consent=PENDING&consent=REVOKED`
+  page.
 
 Alternatives considered:
 
@@ -109,9 +125,10 @@ Alternatives considered:
 ## Consequences
 
 - This is a breaking change to `GET /appointments`, `GET /notifications`,
-  `GET /clinical-cases` and `GET /clinical-cases/{id}/session-records` for
-  Bearer API clients. The BFF, the UI, the Playwright suite and the gateway
-  acceptance test are updated in the same change as each endpoint.
+  `GET /clinical-cases`, `GET /clinical-cases/{id}/session-records` and
+  `GET /patients` for Bearer API clients. The BFF, the UI, the Playwright
+  suite and the gateway acceptance test are updated in the same change as
+  each endpoint.
   `GET /clinical-cases` also accepts `status` more than once now, where it took
   a single value before.
 - `totalElements` costs a `count(*)` per request. That is cheap on the
@@ -120,17 +137,22 @@ Alternatives considered:
 - Rows inserted between two page requests can shift later pages by one. The
   calendar and the message screens refresh on their own, which is acceptable
   for them.
-- The calendar's patient picker and name lookups still read the full patient
-  list, so the pages remain usable until patients are paged.
+- The patient forms no longer preselect the first patient: the picker offers
+  a page of matches and the psychologist chooses one. A newly created patient
+  can sort onto a later registry page, so the registry searches for it after
+  creating it.
+- The unpaged patient list was also the largest response the authenticated
+  DAST scan compared: hundreds of scanner-created rows in one JSON line. Its
+  template-injection rule accepts an expected number anywhere between two of
+  its markers, so a digit run in an unrelated row could raise a false High
+  alert. One bounded page per response makes such a match far less likely.
 - Patient names live in patient-service, so the case browser's text search
   narrows only the page on screen; the status filter and paging are
-  server-side. A server-side search by patient waits for patient search.
+  server-side. The patient search could now find the matching patients
+  first, but the case browser does not use it yet.
 - A case the psychologist picks can leave both loaded pages, for example when
   its status changes away from the browser's filter. The workspace then reads
   that case on its own with `GET /clinical-cases/{id}` rather than losing the
   selection.
-- Not done yet:
-  - `GET /patients`, which the appointment and clinical screens use as a
-    lookup table and picker. It needs search and lookup-by-ids first.
-  - `GET /patients/{id}/clinical-history` stays unpaged on purpose: it is one
-    aggregate document rather than a list.
+- `GET /patients/{id}/clinical-history` stays unpaged on purpose: it is one
+  aggregate document rather than a list.
