@@ -1,4 +1,4 @@
-FROM jenkins/jenkins:2.568.2-jdk21@sha256:8547df3b0db2803d158ecc9499207a056bb30c23fddc18bb5b4a4dc14e77dd09
+FROM jenkins/jenkins:2.588-jdk21@sha256:4c03015d601fe7a761220979d2dd7bf465091e2d13de775eb1980627811b3aaa
 
 USER root
 RUN git config --system --add safe.directory /workspace/clinicflow \
