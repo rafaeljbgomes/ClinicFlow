@@ -18,7 +18,7 @@ Dependabot PRs are grouped so that each ecosystem produces few of them:
 security, minor and patch, and major updates each get their own group, and
 Docker updates produce one PR per image.
 
-A workflow queues minor and patch PRs for GitHub auto-merge with a merge commit.
+A workflow queues minor and patch PRs for GitHub auto-merge as a squash merge.
 The ruleset is unchanged and has no bypass actors, so the required checks still
 decide the merge. These stay manual:
 
@@ -51,3 +51,7 @@ policy from the base commit.
 - The token is one more credential to rotate. Without it, eligible PRs stay open
   and the workflow fails visibly.
 - The `maven` build image is bumped by hand.
+- Dependabot PRs are the one exception to merging with a merge commit. They are
+  generated, normally a single commit, and have no branch history worth keeping,
+  so a merge commit only adds a second entry on `main` for each update. The
+  squashed commit keeps Dependabot's title and version details.
