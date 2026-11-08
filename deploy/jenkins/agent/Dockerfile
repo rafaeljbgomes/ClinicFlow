@@ -1,4 +1,4 @@
-FROM jenkins/ssh-agent:8.9.0-jdk21@sha256:32cbd440e4d665a2cbe77b9f79f948156dbd606447f400940300e115b9d35cb6
+FROM jenkins/ssh-agent:9.3.3-jdk21@sha256:a62ab1b4b51fbd77a12ba6382d5f550d105a7ece1cad3b7be49e1df56766d364
 
 USER root
 
