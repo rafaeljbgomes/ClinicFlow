@@ -14,7 +14,7 @@ function isEligible({ updateType, dependencyNames }) {
   return ELIGIBLE_UPDATE_TYPES.has(updateType) && !MANUAL_REVIEW_DEPENDENCY.test(dependencyNames ?? '');
 }
 
-function main(env = process.env) {
+function main(env = process.env, run = execFileSync) {
   const { UPDATE_TYPE: updateType, DEPENDENCY_NAMES: dependencyNames, PR_URL: pullRequestUrl, GH_TOKEN: token } = env;
 
   if (!isEligible({ updateType, dependencyNames })) {
@@ -25,7 +25,7 @@ function main(env = process.env) {
     throw new Error('DEPENDABOT_AUTOMERGE_TOKEN must be set as a Dependabot secret.');
   }
 
-  execFileSync('gh', ['pr', 'merge', '--auto', '--merge', pullRequestUrl], { stdio: 'inherit' });
+  run('gh', ['pr', 'merge', '--auto', '--squash', pullRequestUrl], { stdio: 'inherit' });
 }
 
 if (require.main === module) {

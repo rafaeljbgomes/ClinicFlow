@@ -60,6 +60,18 @@ test('Keycloak patch updates need manual review', () => {
   assert.equal(eligible, false);
 });
 
+test('an eligible update is queued as a squash merge', () => {
+  // Arrange
+  const env = { UPDATE_TYPE: 'version-update:semver-patch', DEPENDENCY_NAMES: 'hono', PR_URL: 'https://example.test/pr/1', GH_TOKEN: 'test-token' };
+  const calls = [];
+
+  // Act
+  main(env, (command, args) => calls.push([command, ...args]));
+
+  // Assert
+  assert.deepEqual(calls, [['gh', 'pr', 'merge', '--auto', '--squash', 'https://example.test/pr/1']]);
+});
+
 test('an eligible update without a token fails closed', () => {
   // Arrange
   const env = { UPDATE_TYPE: 'version-update:semver-patch', DEPENDENCY_NAMES: 'hono', PR_URL: 'https://example.test/pr/1' };
