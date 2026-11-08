@@ -14,12 +14,18 @@ updates:
       day: monday
       timezone: Europe/Lisbon
     open-pull-requests-limit: 5
-    # Let new releases settle for a week before proposing them.
+    # Let new releases settle for a week before proposing them. Security updates skip the cooldown.
     cooldown:
       default-days: 7
     groups:
+      maven-security:
+        applies-to: security-updates
+        patterns: ["*"]
+        update-types: [minor, patch]
       maven-minor-patch:
         update-types: [minor, patch]
+      maven-major:
+        update-types: [major]
     commit-message:
       prefix: "build(deps)"
   - package-ecosystem: npm
@@ -29,12 +35,18 @@ updates:
       day: monday
       timezone: Europe/Lisbon
     open-pull-requests-limit: 5
-    # Let new releases settle for a week before proposing them.
+    # Let new releases settle for a week before proposing them. Security updates skip the cooldown.
     cooldown:
       default-days: 7
     groups:
+      npm-security:
+        applies-to: security-updates
+        patterns: ["*"]
+        update-types: [minor, patch]
       npm-minor-patch:
         update-types: [minor, patch]
+      npm-major:
+        update-types: [major]
     commit-message:
       prefix: "build(deps)"
   - package-ecosystem: docker
@@ -58,6 +70,16 @@ updates:
     # Let new releases settle for a week before proposing them.
     cooldown:
       default-days: 7
+    # One pull request per image, however many Dockerfiles use it.
+    groups:
+      docker-images:
+        group-by: dependency-name
+    ignore:
+      # Java 21 is the LTS baseline: moving off it is a deliberate decision, not a routine bump.
+      - dependency-name: eclipse-temurin
+        update-types: [version-update:semver-major]
+      # Dependabot proposes newer JDK tag suffixes as a non-major Maven change (3.9.16-...-21 to 3.9-...-26).
+      - dependency-name: maven
     commit-message:
       prefix: "build(deps)"
   - package-ecosystem: github-actions
@@ -69,10 +91,13 @@ updates:
       day: monday
       timezone: Europe/Lisbon
     open-pull-requests-limit: 5
-    # Let new releases settle for a week before proposing them.
+    # Let new releases settle for a week before proposing them. Security updates skip the cooldown.
     cooldown:
       default-days: 7
     groups:
+      github-actions-security:
+        applies-to: security-updates
+        patterns: ["*"]
       github-actions:
         patterns: ["*"]
     commit-message:
