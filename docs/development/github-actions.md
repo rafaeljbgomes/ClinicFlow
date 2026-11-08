@@ -67,7 +67,9 @@ and nightly. Run it locally before merging behaviour-heavy domain changes:
   Each download is verified against its SHA-256 before extraction and cached by
   manifest hash. Update a tool by changing its version and checksum together.
 - Third-party actions are pinned to full commit SHAs. Dependabot proposes
-  grouped updates weekly after a seven-day cooldown.
+  grouped updates weekly after a seven-day cooldown. Security updates skip the
+  cooldown. Minor and patch PRs merge automatically once the required checks
+  pass ([ADR-033](../architecture/decisions/ADR-033-dependabot-auto-merge.md)).
 - Workflows default to `contents: read`. Only the scan jobs add
   `security-events: write`, and SARIF is uploaded only from `main` and
   scheduled runs. Checkout never persists credentials.
@@ -158,7 +160,11 @@ maintainer:
    so PR analyses have a fresh baseline. From then on a missing token fails
    closed on same-repository PRs.
 3. **Code scanning and Dependabot.** Enable Dependabot alerts and security
-   updates. Code scanning accepts the Trivy SARIF uploads without CodeQL.
+   updates. Code scanning accepts the Trivy SARIF uploads without CodeQL. For
+   Dependabot auto-merge, turn on **Allow auto-merge** in the repository
+   settings and add a fine-grained token limited to this repository (Contents
+   and Pull requests: read and write) as the Dependabot secret
+   `DEPENDABOT_AUTOMERGE_TOKEN`.
 4. **Required checks.** After all seven checks pass on a commit, generate a
    reviewable ruleset proposal that binds the checks to the GitHub Actions app:
 
