@@ -70,4 +70,5 @@ through a separate, reviewed policy-only pull request
 
 Pull requests are merged with a merge commit so `main` keeps each branch's
 history. Clean up fix-up commits before review with
-`git rebase -i --autosquash origin/main`.
+`git rebase -i --autosquash origin/main`. Dependabot PRs are the exception and
+are squashed, including any you merge by hand.

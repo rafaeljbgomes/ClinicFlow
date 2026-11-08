@@ -73,6 +73,7 @@ not full acceptance; the seven `clinicflow/*` GitHub Actions checks are.
   `docs/`, `test/`, `ci/`). Commits follow Conventional Commits, with
   implementation and documentation in separate commits.
 - Do not push, merge or change repository settings unless the maintainer asks.
-  PRs are merged with merge commits, not squashed.
+  PRs are merged with merge commits, not squashed, except Dependabot PRs, which
+  are squashed (ADR-033).
 - Write multi-line PR bodies to a file and pass `--body-file`.
 - Commits and PRs carry no AI attribution or co-author trailers.
