@@ -3,7 +3,7 @@ WORKDIR /workspace
 COPY . .
 RUN mvn -q -pl patient-service -am package -DskipTests
 
-FROM eclipse-temurin:21.0.12.1_1-jre-alpine@sha256:b48e02e0ea88d7bfb305335df94923bdef394905f4147dccd52e873cf17b1088
+FROM eclipse-temurin:21.0.13_9-jre-alpine@sha256:ac05c3c42b7c2f1a52c9bd52f01041fa1958231b15ebeae7420429cbc5baf474
 # brotli-libs 1.2.1 fixes CVE-2026-111497 and libexpat 2.10.0 fixes CVE-2026-113351, CVE-2026-115506,
 # CVE-2026-117610 and CVE-2026-118370; drop each once the pinned base image ships it.
 RUN apk upgrade --no-cache brotli-libs libexpat \
