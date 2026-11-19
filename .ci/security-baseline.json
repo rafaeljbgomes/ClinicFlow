@@ -2,18 +2,6 @@
   "schemaVersion": 1,
   "entries": [
     {
-      "component": "frontend",
-      "target": "dependencies",
-      "id": "CVE-2026-93687",
-      "package": "braces",
-      "version": "3.0.3",
-      "owner": "rafaeljbgomes",
-      "reason": "No fixed release exists; reached only through development and build tooling, absent from the runtime image.",
-      "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/34",
-      "reviewedAt": "2026-10-20",
-      "expiresAt": "2026-11-19"
-    },
-    {
       "component": "platform",
       "target": "dockerfiles:jenkins/agent/Dockerfile",
       "id": "DS-0002",
@@ -22,8 +10,8 @@
       "owner": "rafaeljbgomes",
       "reason": "Privilege required by design for vendored monitoring/gateway charts or the Jenkins SSH agent; reviewed on each renewal.",
       "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/36",
-      "reviewedAt": "2026-10-20",
-      "expiresAt": "2026-11-19"
+      "reviewedAt": "2026-11-19",
+      "expiresAt": "2026-12-19"
     },
     {
       "component": "platform",
@@ -34,8 +22,8 @@
       "owner": "rafaeljbgomes",
       "reason": "Privilege required by design for vendored monitoring/gateway charts or the Jenkins SSH agent; reviewed on each renewal.",
       "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/36",
-      "reviewedAt": "2026-10-20",
-      "expiresAt": "2026-11-19"
+      "reviewedAt": "2026-11-19",
+      "expiresAt": "2026-12-19"
     },
     {
       "component": "platform",
@@ -46,8 +34,8 @@
       "owner": "rafaeljbgomes",
       "reason": "Privilege required by design for vendored monitoring/gateway charts or the Jenkins SSH agent; reviewed on each renewal.",
       "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/36",
-      "reviewedAt": "2026-10-20",
-      "expiresAt": "2026-11-19"
+      "reviewedAt": "2026-11-19",
+      "expiresAt": "2026-12-19"
     },
     {
       "component": "platform",
@@ -58,8 +46,8 @@
       "owner": "rafaeljbgomes",
       "reason": "Privilege required by design for vendored monitoring/gateway charts or the Jenkins SSH agent; reviewed on each renewal.",
       "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/36",
-      "reviewedAt": "2026-10-20",
-      "expiresAt": "2026-11-19"
+      "reviewedAt": "2026-11-19",
+      "expiresAt": "2026-12-19"
     },
     {
       "component": "platform",
@@ -70,8 +58,8 @@
       "owner": "rafaeljbgomes",
       "reason": "Privilege required by design for vendored monitoring/gateway charts or the Jenkins SSH agent; reviewed on each renewal.",
       "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/36",
-      "reviewedAt": "2026-10-20",
-      "expiresAt": "2026-11-19"
+      "reviewedAt": "2026-11-19",
+      "expiresAt": "2026-12-19"
     },
     {
       "component": "platform",
@@ -82,8 +70,8 @@
       "owner": "rafaeljbgomes",
       "reason": "Privilege required by design for vendored monitoring/gateway charts or the Jenkins SSH agent; reviewed on each renewal.",
       "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/36",
-      "reviewedAt": "2026-10-20",
-      "expiresAt": "2026-11-19"
+      "reviewedAt": "2026-11-19",
+      "expiresAt": "2026-12-19"
     },
     {
       "component": "platform",
@@ -94,8 +82,8 @@
       "owner": "rafaeljbgomes",
       "reason": "Privilege required by design for vendored monitoring/gateway charts or the Jenkins SSH agent; reviewed on each renewal.",
       "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/36",
-      "reviewedAt": "2026-10-20",
-      "expiresAt": "2026-11-19"
+      "reviewedAt": "2026-11-19",
+      "expiresAt": "2026-12-19"
     },
     {
       "component": "platform",
@@ -106,8 +94,8 @@
       "owner": "rafaeljbgomes",
       "reason": "Privilege required by design for vendored monitoring/gateway charts or the Jenkins SSH agent; reviewed on each renewal.",
       "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/36",
-      "reviewedAt": "2026-10-20",
-      "expiresAt": "2026-11-19"
+      "reviewedAt": "2026-11-19",
+      "expiresAt": "2026-12-19"
     },
     {
       "component": "platform",
@@ -118,8 +106,8 @@
       "owner": "rafaeljbgomes",
       "reason": "Privilege required by design for vendored monitoring/gateway charts or the Jenkins SSH agent; reviewed on each renewal.",
       "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/36",
-      "reviewedAt": "2026-10-20",
-      "expiresAt": "2026-11-19"
+      "reviewedAt": "2026-11-19",
+      "expiresAt": "2026-12-19"
     },
     {
       "component": "platform",
@@ -130,8 +118,8 @@
       "owner": "rafaeljbgomes",
       "reason": "Privilege required by design for vendored monitoring/gateway charts or the Jenkins SSH agent; reviewed on each renewal.",
       "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/36",
-      "reviewedAt": "2026-10-20",
-      "expiresAt": "2026-11-19"
+      "reviewedAt": "2026-11-19",
+      "expiresAt": "2026-12-19"
     },
     {
       "component": "platform",
@@ -140,10 +128,10 @@
       "package": "java-21-openjdk-headless",
       "version": "1:21.0.12.1.1-1.2.el9",
       "owner": "rafaeljbgomes",
-      "reason": "No fixed build exists: the rebuilt quay.io/keycloak/keycloak:26.8.1 digest a78d6b79 still ships this java-21-openjdk-headless and no Keycloak 26.8.2 is published; local synthetic-data identity provider only.",
+      "reason": "No fixed build in the pinned image: quay.io/keycloak/keycloak:26.8.1 digest a78d6b79 ships this java-21-openjdk-headless. Keycloak 26.8.2 (Dependabot PR #134) still scans with a High OpenJDK finding, so the bump is handled separately; local synthetic-data identity provider only.",
       "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/103",
-      "reviewedAt": "2026-10-24",
-      "expiresAt": "2026-11-19"
+      "reviewedAt": "2026-11-19",
+      "expiresAt": "2026-12-19"
     },
     {
       "component": "platform",
@@ -152,10 +140,10 @@
       "package": "java-21-openjdk-headless",
       "version": "1:21.0.12.1.1-1.2.el9",
       "owner": "rafaeljbgomes",
-      "reason": "No fixed build exists: the rebuilt quay.io/keycloak/keycloak:26.8.1 digest a78d6b79 still ships this java-21-openjdk-headless and no Keycloak 26.8.2 is published; local synthetic-data identity provider only.",
+      "reason": "No fixed build in the pinned image: quay.io/keycloak/keycloak:26.8.1 digest a78d6b79 ships this java-21-openjdk-headless. Keycloak 26.8.2 (Dependabot PR #134) still scans with a High OpenJDK finding, so the bump is handled separately; local synthetic-data identity provider only.",
       "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/103",
-      "reviewedAt": "2026-10-24",
-      "expiresAt": "2026-11-19"
+      "reviewedAt": "2026-11-19",
+      "expiresAt": "2026-12-19"
     },
     {
       "component": "platform",
@@ -164,10 +152,10 @@
       "package": "com.google.guava:guava",
       "version": "33.6.0-jre",
       "owner": "rafaeljbgomes",
-      "reason": "No fixed build exists: quay.io/keycloak/keycloak:26.8.1 digest a78d6b79 ships Guava 33.6.0-jre, upstream keycloak/keycloak#54110 is blocked-external and no Keycloak 26.8.2 is published; local synthetic-data identity provider only.",
+      "reason": "No fixed build exists: Keycloak 26.8.1 digest a78d6b79 and 26.8.2 (scanned on Dependabot PR #134) both ship Guava 33.6.0-jre, and upstream keycloak/keycloak#54110 is blocked-external; local synthetic-data identity provider only.",
       "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/111",
-      "reviewedAt": "2026-10-28",
-      "expiresAt": "2026-11-19"
+      "reviewedAt": "2026-11-19",
+      "expiresAt": "2026-12-19"
     },
     {
       "component": "platform",
@@ -191,6 +179,30 @@
       "reason": "No fixed build exists: Red Hat lists sqlite in RHEL 9 as affected with no fixed package, so no quay.io/keycloak/keycloak:26.8.1 rebuild can ship one; Keycloak uses PostgreSQL; local synthetic-data identity provider only.",
       "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/123",
       "reviewedAt": "2026-11-06",
+      "expiresAt": "2026-12-06"
+    },
+    {
+      "component": "platform",
+      "target": "keycloak",
+      "id": "CVE-2026-119374",
+      "package": "sqlite-libs",
+      "version": "3.34.1-11.el9_8",
+      "owner": "rafaeljbgomes",
+      "reason": "No fixed build exists: Red Hat lists sqlite in RHEL 9 as affected with no fixed package, so no quay.io/keycloak/keycloak:26.8.1 rebuild can ship one; Keycloak uses PostgreSQL; local synthetic-data identity provider only.",
+      "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/123",
+      "reviewedAt": "2026-11-19",
+      "expiresAt": "2026-12-06"
+    },
+    {
+      "component": "platform",
+      "target": "keycloak",
+      "id": "CVE-2026-119379",
+      "package": "sqlite-libs",
+      "version": "3.34.1-11.el9_8",
+      "owner": "rafaeljbgomes",
+      "reason": "No fixed build exists: Red Hat lists sqlite in RHEL 9 as affected with no fixed package, so no quay.io/keycloak/keycloak:26.8.1 rebuild can ship one; Keycloak uses PostgreSQL; local synthetic-data identity provider only.",
+      "issue": "https://github.com/rafaeljbgomes/ClinicFlow/issues/123",
+      "reviewedAt": "2026-11-19",
       "expiresAt": "2026-12-06"
     }
   ]
