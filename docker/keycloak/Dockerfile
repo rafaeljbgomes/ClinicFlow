@@ -2,7 +2,7 @@
 # skips the Quarkus re-augmentation that plain `start` runs on every boot. The relative paths are
 # Keycloak's defaults, persisted explicitly: the Kubernetes chart sets them at runtime, and
 # `--optimized` refuses to start when a runtime value differs from the persisted one.
-FROM quay.io/keycloak/keycloak:26.8.1@sha256:a78d6b79572168cb25886b80a8b5b8d4ed4390743e3eecb810538683e209dd6b AS builder
+FROM quay.io/keycloak/keycloak:26.8.2@sha256:3879c623248408de29a5303178b5816c77e8dfef3890c361f8c0bbeaa979ba3b AS builder
 
 ENV KC_DB=postgres \
     KC_HEALTH_ENABLED=true \
@@ -12,7 +12,7 @@ ENV KC_DB=postgres \
 
 RUN /opt/keycloak/bin/kc.sh build
 
-FROM quay.io/keycloak/keycloak:26.8.1@sha256:a78d6b79572168cb25886b80a8b5b8d4ed4390743e3eecb810538683e209dd6b
+FROM quay.io/keycloak/keycloak:26.8.2@sha256:3879c623248408de29a5303178b5816c77e8dfef3890c361f8c0bbeaa979ba3b
 
 # A runtime option since Keycloak 25, so it belongs on this stage: one replica needs no cluster,
 # while the default ispn cache would start JGroups with JDBC_PING discovery on every boot.
